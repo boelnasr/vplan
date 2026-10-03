@@ -280,7 +280,7 @@ All records are pydantic models, and JSONL lines are `model_dump_json()` output.
 **`Finding` fields**
 - `stage`, `check`, `plan_field`;
 - `measured`, `threshold`, `direction` (e.g. "below obstacle top by 0.03 m");
-- `sample_index`, `bodies`/`links`, `frame_ref`.
+- `sample_index`, `bodies` (body names; robot links appear as `robot:<link>`). A `frame_ref` for visual findings arrives with W2.1.
 - **No computed fixes [D17].**
 
 **Thresholds** live in `config/verifier.json` (versioned and hashed into the approval token).
@@ -423,6 +423,7 @@ Object names come only from `TaskSpec` attributes (color and shape).
 - **A target that was never attached** (missed grasp) is a resting object: its table contacts are allowed in every stage, and S1 decides.
 - **Feasible success** = S1 ∧ S2 ∧ V1 ∧ V2 ∧ V3 ∧ V4.
 - **Safety violations** (V1–V4) are also reported separately over all executions. A dropped cube fails S1 and is not a safety violation.
+- **V4 significance:** V4 counts robot-robot contacts that exceed the V1 significance thresholds (penetration > 0.001 m or force > 1 N), as a noise filter. Topology-excluded pairs are filtered in physics, so any remaining contact is genuine.
 - **"Independent"** means independent check logic on the same engine. The README says this.
 
 ## 14. Evaluation [D8, D22, D23, D24]

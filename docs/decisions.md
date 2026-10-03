@@ -715,7 +715,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
    - allowed **until lift-off** (approach, descend, grasp, lift) and **after release** (release, retreat, rest), forbidden during transport and descend_place;
    - measured in the good transfer: 1.51 N during grasp, 0.63 N during lift, 8.5 N / 2.1 mm at the drop.
    - Matches spec §13: a dropped cube is a task failure, not a safety violation.
-4. **`place.yaw_deg`** is the gripper's closing-axis yaw at release, the same convention as `grasp.yaw_deg`. The LLM prompt (W2.3) must state it.
+4. **`place.yaw_deg`** (restated by D29; the original wording was wrong). For top grasps, `grasp.yaw_deg` is the closing-axis heading counterclockwise from world +x viewed from above. Between grasp and release the gripper turns about world +z by `place.yaw_deg − grasp.yaw_deg`, so for top grasps `place.yaw_deg` is the closing-axis heading at release in the same convention. The LLM prompt (W2.3) must state it.
 5. **Stricter validation in records:** NaN/Inf rejected, colours a Literal, reserved body ids rejected.
 6. **Approval binding** now also covers the target, the applied physics config (hash on the handles) and arm/object drift. Attach-rejection reasons are recorded.
 7. **Deferred to W2.2:** `vplan.cli` still imports the basic scene from `tests/conftest.py`. The scene builder moves into `src/vplan/tasks/`.
@@ -723,6 +723,45 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 **Noted for later:**
 - `pybullet_data`'s Panda URDF has a wider joint-4 range ([-3.1416, 0]) than the real Franka. This goes into the README limitations (W3.6).
 - An untracked `uv.lock` and an empty `.venv/` appeared from a tool outside the workflow. They're left untouched.
+
+## D29. Final week-1 review and fix wave (2026-10-04)
+
+**Review:** the final whole-branch review (Fable, `.superpowers/sdd/plan/final-review.md`) gave "With fixes": 0 Critical, 6 Important, 17 Minor. The controller verified I-1 and I-2 by probe.
+
+**Fixed in one wave** (5 commits after 8f83321; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
+- **I-2 (yaw convention):** top-grasp yaw is now counterclockwise about world +z. Grasp and place yaw were opposite-signed before. D28.4 restated. Spec §7 amended.
+- **I-1 (manipulation model):** V-8 enforces `place.position` z = the resting height (±0.005 m), so a 28 cm drop is now rejected. The carried target may touch the bin floor only without penetration.
+- **I-3 (planned target):** Judge contact allowances use the planned target, so a wrong-object pick is S2 (`wrong_object`), not a safety violation.
+- **I-4 (missed grasp):** a never-attached target's table contacts are allowed (resting object; S1 decides).
+- **Plus:**
+  - the Judge takes the attempt's config snapshot;
+  - tracking error is keyed per segment;
+  - D21 import-guard and Judge ⊇ Verifier allowance tests;
+  - grasp evidence reported per rejection reason;
+  - unverified mode runs grounding;
+  - the client-leak fix;
+  - an L-equality test;
+  - `.gitignore` covers `.venv/` and `*.egg-info/`;
+  - read-only robot arrays;
+  - a unit-quaternion `Pose` validator;
+  - joint limits checked against PyBullet.
+
+**Recorded, not implemented:**
+- **I-5:** spec §8's multi-start IK for the first pose isn't implemented (the plan omitted it). Implement it only if R6 shows IK-caused witness rejections.
+- **I-6:** center top grasps work only for object heights of about 3.6–5.9 cm, and a release at the resting height (release height 0) is too close to the 16 cm bin's walls for the hand. Both are W2.2 generator constraints.
+
+**Residual rulings:**
+- **Release height exactly 0 is legal but brittle.** The zero-penetration rule plus the IK and height tolerances can produce a spurious V-6 finding. The W2.3 prompt recommends 0.02–0.10 m; the heuristic uses 0.05.
+- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation.
+
+**W2.2 generator checklist** (from the review):
+- Bins sit on the table: `floor_center.z = table_top_z + wall_thickness`.
+- Object height ≤ wall height, and within the graspable window.
+- No initial object contacts.
+- Use `np.random.default_rng(seed)`, never the global RNG.
+- Move `make_basic_scene` into `src/vplan/tasks/` (Task 8 park).
+- If dev tasks show self-collision findings, compare against the Franka SRDF never-pairs before touching the margin.
+- Watch `attach_rejected` at far reach (tracking tolerance vs capture band).
 
 ## D12. CPU-only probe results (2026-09-30)
 
