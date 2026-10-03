@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from tests.conftest import make_basic_scene
 from vplan.judge.judge import judge
 from vplan.records import ContactSummary, ExecutionRecord, Pose
@@ -8,12 +10,14 @@ DT = 1 / 240
 DWELL = int(round(0.5 / DT))
 
 
-def c(a, la, b, lb, stage, force=5.0, pen=0.002) -> ContactSummary:
+def c(a: str, la: str, b: str, lb: str, stage: str, force: float = 5.0, pen: float = 0.002) -> ContactSummary:
     return ContactSummary(body_a=a, link_a=la, body_b=b, link_b=lb, stage=stage, first_step=1, count=1,
                           max_normal_force_n=force, max_penetration_m=pen)
 
 
-def rec(cube=Pose(position=(0.45, 0.28, 0.02)), contacts=(), violation=0.0, sigmas=(0.5,) * 10, lin=None, ang=None):
+def rec(cube: Pose = Pose(position=(0.45, 0.28, 0.02)), contacts: tuple[ContactSummary, ...] = (),
+        violation: float = 0.0, sigmas: tuple[float, ...] = (0.5,) * 10, lin: tuple[float, ...] | None = None,
+        ang: tuple[float, ...] | None = None) -> ExecutionRecord:
     lin = lin if lin is not None else (0.0,) * DWELL
     ang = ang if ang is not None else (0.0,) * DWELL
     green = Pose(position=(0.55, 0.0, 0.02))
@@ -94,3 +98,20 @@ def test_target_table_contact_allowed_only_after_release() -> None:  # spec §9/
     for stage in ("transport", "descend_place"):
         cs = (c("cube_red", "base", "table", "base", stage, force=8.5, pen=0.0021),)
         assert not judge(rec(contacts=cs), S, "cube_red").predicates["V1"], stage
+
+
+def test_target_table_contact_allowed_until_lift_off() -> None:  # spec §9: residual support while the lift starts
+    for stage in ("approach", "descend", "grasp", "lift"):
+        cs = (c("cube_red", "base", "table", "base", stage, force=8.5, pen=0.0021),)
+        assert judge(rec(contacts=cs), S, "cube_red").predicates["V1"], stage
+
+
+def test_contact_below_both_tolerances_is_ignored_by_v1() -> None:
+    # 0.5 N < 1.0 N force tol and 0.5 mm < 1 mm penetration tol (config/judge.json): not significant, whatever the link.
+    cs = (c("robot", "panda_link3", "table", "base", "approach", force=0.5, pen=0.0005),)
+    assert judge(rec(contacts=cs), S, "cube_red").predicates["V1"]
+
+
+def test_unknown_outcome_is_rejected() -> None:
+    with pytest.raises(ValueError, match="aborted"):
+        judge(rec(), S, "cube_red", outcome="aborted")

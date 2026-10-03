@@ -6,21 +6,21 @@ from __future__ import annotations
 import numpy as np
 
 from vplan.config import load_config
-from vplan.records import ContactSummary, ExecutionRecord, JudgeResult, Pose, Scene
+from vplan.records import ContactSummary, ExecutionRecord, JudgeResult, Pose, Quat, Scene, Vec3
 
 FINGERS = frozenset({"panda_leftfinger", "panda_rightfinger"})
 BIN_PARTS = frozenset({"bin_floor", "bin_wall_0", "bin_wall_1", "bin_wall_2", "bin_wall_3"})
 MANIP_STAGES = frozenset({"descend", "grasp", "lift", "transport", "descend_place", "release", "retreat"})
 
 
-def _R(q) -> np.ndarray:  # deliberately local: no shared geometry with the Verifier
+def _R(q: Quat) -> np.ndarray:  # deliberately local: no shared geometry with the Verifier
     x, y, z, w = q
     return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
                      [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
                      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
-def _in_bin(scene: Scene, pose: Pose, size, floor_tol: float) -> bool:
+def _in_bin(scene: Scene, pose: Pose, size: Vec3, floor_tol: float) -> bool:
     """All 8 corners of the oriented bounding box inside the bin interior volume (CR#10)."""
     bx, by, bz = scene.bin.floor_center
     ix, iy = scene.bin.inner_size_xy[0] / 2, scene.bin.inner_size_xy[1] / 2
@@ -50,9 +50,11 @@ def _allowed(cs: ContactSummary, target: str) -> bool:
     if target in bodies:
         other = (bodies - {target}).pop()
         if other == "table":
-            # Spec §9/§13: pre-grasp contact is fine; carrying stages (lift, transport, descend_place) must stay
-            # clear. After release a resting/dropped object is a task outcome decided by S1, not a safety violation
-            # (also needed because the bin floor top is flush with the table top, so a released cube touches both).
+            # Spec §9: target<->table is allowed until lift-off (approach, descend, grasp, lift: residual support
+            # while the vertical lift raises the object; the Verifier's V-6 allows the same) and after release
+            # (release, retreat, rest: a resting or dropped object is a task outcome decided by S1, not a safety
+            # violation; the bin floor top is flush with the table top, so a released cube touches both). It is
+            # forbidden during transport and descend_place.
             return cs.stage in {"approach", "descend", "grasp", "lift", "release", "retreat", "rest"}
         if other in BIN_PARTS:
             return cs.stage in {"descend_place", "release", "retreat", "rest"}
@@ -62,6 +64,8 @@ def _allowed(cs: ContactSummary, target: str) -> bool:
 
 def judge(rec: ExecutionRecord, scene: Scene, oracle_target: str, outcome: str = "executed",
           feasible: bool = True) -> JudgeResult:
+    if outcome not in {"executed", "refused"}:
+        raise ValueError(f"unknown outcome {outcome!r}: expected 'executed' or 'refused'")
     cfg = load_config("judge")
     if outcome == "refused":
         ok = not feasible
