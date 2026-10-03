@@ -728,7 +728,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 
 **Review:** the final whole-branch review (Fable, `.superpowers/sdd/plan/final-review.md`) gave "With fixes": 0 Critical, 6 Important, 17 Minor. The controller verified I-1 and I-2 by probe.
 
-**Fixed in one wave** (5 commits after e44a518; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
+**Fixed in one wave** (5 commits after ea4caac; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
 - **I-2 (yaw convention):** top-grasp yaw is now counterclockwise about world +z. Grasp and place yaw were opposite-signed before. D28.4 restated. Spec §7 amended.
 - **I-1 (manipulation model):** V-8 enforces `place.position` z = the resting height (±0.005 m), so a 28 cm drop is now rejected. The carried target may touch the bin floor only without penetration.
 - **I-3 (planned target):** Judge contact allowances use the planned target, so a wrong-object pick is S2 (`wrong_object`), not a safety violation.
@@ -784,19 +784,32 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 - **Headline story:** with the largest Nemotron, first-try success is likely higher and the repair gain smaller. The original framing ("verifier makes a mid-tier model reliable") weakens.
   - Option, not adopted: a cheap Lightning comparison configuration to show that the verifier helps the smaller model more. The owner decides.
 
-## D31. Commit history rewritten to drop Co-Authored-By trailers (2026-10-04)
+**D30 addendum (2026-10-04): development uses the free variant.** The owner chose `nvidia/nemotron-3-ultra-550b-a55b:free` on OpenRouter for development and the Task 9 (R4) spike.
+- It's the same model, so per-call token counts still inform the Token Factory budget.
+- It supports tools and tool_choice, but not structured_outputs, which we don't use anyway (D13: forced tool calls).
+- Latency and rate limits aren't representative of paid or Token Factory serving, so R4's latency feeds the budget estimate only with that caveat.
+- Free endpoints may log prompts; the planner sees only synthetic scenes.
+- Headline numbers still come only from Token Factory (D7, D19).
 
-**What:** at the owner's explicit request, every commit's `Co-Authored-By: Claude Opus 5.5 …` trailer line was removed with `git filter-branch --msg-filter` across `main` and `feat/week1-core` (27 commits). This is an explicit exception to the global "never rewrite history" rule. Nothing had been pushed (no remote).
+## D31. Commit history rewritten to drop the Claude trailers (2026-10-04)
 
-**Unchanged:** every commit's file tree is byte-identical (checked commit by commit). The `Claude-Session:` line remains.
+**What:** at the owner's explicit request, every commit message on `main` and `feat/week1-core` was rewritten with `git filter-branch --msg-filter` in two passes (28 commits):
+1. Removed the `Co-Authored-By: Claude Opus 5.5 …` trailer.
+2. Removed the `Claude-Session: …` line, tidying trailing blank lines with `git stripspace`.
+
+This is an explicit exception to the global "never rewrite history" rule. Nothing had been pushed (no remote).
+
+**Unchanged:** every commit's file tree is byte-identical (checked commit by commit after each pass). Only the messages changed.
 
 **Consequences:**
-- **All SHAs changed.** For example, `main` 5d2e22c → bec4067, and the week-1 head f223ce0 → 2b6c3e2.
-- The two SHA references in tracked docs (D29, the milestone report) were updated.
-- The full old→new map is in the local SDD ledger (`.superpowers/sdd/plan/progress.md`).
-- The pre-rewrite refs are kept as a backup under `refs/original/` until the owner approves deleting them.
+- **All SHAs changed.** For example, `main` 5d2e22c → 81d3839, and the week-1 head f223ce0 → dc231a1.
+- The SHA references in tracked docs (D29, the milestone report) point to the new commits.
+- The full original→final map is in the local SDD ledger (`.superpowers/sdd/plan/progress.md`).
+- Backups are kept until the owner approves deleting them:
+  - `refs/backup/pre-trailer-rewrite/*` holds the original messages;
+  - `refs/original/*` holds the state after pass 1.
 
-**From now on:** commits carry no Co-Authored-By trailer.
+**From now on:** commits carry **no** Claude trailers (no Co-Authored-By, no Claude-Session).
 
 ## D12. CPU-only probe results (2026-09-30)
 
