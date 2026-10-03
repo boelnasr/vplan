@@ -533,7 +533,7 @@ Until the release, the hackathon code works around all four (§8) and pins 1.4.1
 ## 19. Verification items (each with a scheduled test in `docs/plan.md`)
 
 These are facts the design depends on that haven't been confirmed yet:
-1. A forced named `tool_choice` works on Token Factory's `Nemotron-3_5-Lightning` [D13].
+1. A forced named `tool_choice` works on Token Factory's `Nemotron-3-Ultra-550b-a55b` (no "function calling" catalog tag; D13 fallback otherwise) [D13, D30].
 2. Cosmos3-Edge serves on the RTX 5070 Ti (vLLM on sm_120, fits in 16 GB) and meets the pilot bar [D20].
 3. The Linux Jobs container runs the evaluation and returns results via Object Storage [D12].
 4. Constructive generation produces enough feasible variety for 300 stratified `test` tasks [D23.10].
