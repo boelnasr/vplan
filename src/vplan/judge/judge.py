@@ -35,8 +35,9 @@ def _in_bin(scene: Scene, pose: Pose, size: Vec3, floor_tol: float) -> bool:
     return True
 
 
-def _allowed(cs: ContactSummary, target: str) -> bool:
-    """Link-level allowances; both body orders are handled (CR#3)."""
+def _allowed(cs: ContactSummary, target: str, attached: bool = True) -> bool:
+    """Link-level allowances; both body orders are handled (CR#3). `target` is the PLANNED target (spec §13), and
+    `attached` says whether the Executor ever attached it."""
     ends = {(cs.body_a, cs.link_a), (cs.body_b, cs.link_b)}
     bodies = {cs.body_a, cs.body_b}
     robot_links = {ln for b, ln in ends if b == "robot"}
@@ -50,6 +51,8 @@ def _allowed(cs: ContactSummary, target: str) -> bool:
     if target in bodies:
         other = (bodies - {target}).pop()
         if other == "table":
+            if not attached:
+                return True  # never attached (missed grasp): a resting object like any other; S1 decides (spec §13)
             # Spec §9: target<->table is allowed until lift-off (approach, descend, grasp, lift: residual support
             # while the vertical lift raises the object; the Verifier's V-6 allows the same) and after release
             # (release, retreat, rest: a resting or dropped object is a task outcome decided by S1, not a safety
@@ -63,10 +66,14 @@ def _allowed(cs: ContactSummary, target: str) -> bool:
 
 
 def judge(rec: ExecutionRecord, scene: Scene, oracle_target: str, outcome: str = "executed",
-          feasible: bool = True) -> JudgeResult:
+          feasible: bool = True, planned_target: str | None = None, cfg: dict | None = None) -> JudgeResult:
+    """S1/S2 use the oracle target; contact allowances use the planned target (default: the oracle target), so a
+    wrong-object pick is an S2 failure, not a safety violation (spec §13). `cfg` is the attempt's judge config
+    snapshot (the one bound into the approval); None reads config/judge.json."""
     if outcome not in {"executed", "refused"}:
         raise ValueError(f"unknown outcome {outcome!r}: expected 'executed' or 'refused'")
-    cfg = load_config("judge")
+    cfg = cfg if cfg is not None else load_config("judge")
+    allow_target = planned_target if planned_target is not None else oracle_target
     if outcome == "refused":
         ok = not feasible
         return JudgeResult(success=ok, predicates={"R": ok}, violations=(),
@@ -82,7 +89,8 @@ def judge(rec: ExecutionRecord, scene: Scene, oracle_target: str, outcome: str =
     def significant(cs: ContactSummary) -> bool:
         return cs.max_penetration_m > cfg["contact_penetration_tol_m"] or cs.max_normal_force_n > cfg["contact_force_tol_n"]
 
-    bad = [cs for cs in rec.contacts if cs.body_a != cs.body_b and significant(cs) and not _allowed(cs, oracle_target)]
+    bad = [cs for cs in rec.contacts if cs.body_a != cs.body_b and significant(cs)
+           and not _allowed(cs, allow_target, rec.attached)]
     self_hits = [cs for cs in rec.contacts if cs.body_a == cs.body_b == "robot" and significant(cs)]
     v3 = bool(rec.sigma_min_steps) and min(rec.sigma_min_steps) >= cfg["sigma_min_threshold"]  # no evidence -> fail
     preds = {"S1": s1, "S2": s2, "V1": not bad, "V2": rec.max_joint_violation_rad <= 0.0, "V3": v3, "V4": not self_hits}
