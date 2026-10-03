@@ -3,7 +3,8 @@ import pytest
 
 from tests.conftest import make_basic_scene, with_object_pose
 from vplan.config import load_config
-from vplan.geometry import pose_to_T
+from vplan.geometry import REASON_APPROACH, REASON_NOT_BETWEEN, REASON_OFF_AXIS, REASON_TOO_WIDE, pose_to_T
+from vplan.motion.poses import approach_rotation, key_poses
 from vplan.motion.trajectory import build_trajectory, densify, time_scale
 from vplan.records import CandidateTrajectory, Finding, Grasp, PickPlacePlan, Place, Scene, Segment
 from vplan.robot import HOME_Q, PANDA_VEL_LIMITS, load_panda
@@ -198,3 +199,69 @@ def test_velocity_finding_reports_the_scaled_limit() -> None:
     f = vchecks.joint_limits(seg, m, CFG)
     assert f is not None and "velocity" in f.direction
     assert f.threshold == pytest.approx(m.vel_limits[0] * CFG["velocity_limit_fraction"])
+
+
+def _release_finding(pl: PickPlacePlan, s: Scene) -> Finding | None:
+    kps = key_poses(pl, s, load_panda().fk(HOME_Q))
+    obj = next(o for o in s.objects if o.id == pl.target_id)
+    attach = np.linalg.inv(kps[2].T) @ pose_to_T(obj.pose.position, obj.pose.orientation)
+    return vchecks.release(pl, s, kps[-2].T, attach, CFG)
+
+
+def _drop_plan(z: float, release_height: float) -> PickPlacePlan:
+    return PickPlacePlan(target_id="cube_red", grasp=Grasp(approach="top", yaw_deg=0.0, pregrasp_offset_m=0.10),
+                         transport_via=((0.45, 0.05, 0.25),),
+                         place=Place(position=(0.45, 0.28, z), yaw_deg=0.0, release_height_m=release_height))
+
+
+def test_place_above_resting_height_is_a_release_finding(client) -> None:  # final review I-1 probe: was 0 findings
+    f = [x for x in run(_drop_plan(0.30, 0.0), make_basic_scene(), client) if x.check == "release"]
+    assert f and f[0].plan_field == "place.position" and f[0].threshold == 0.005
+    assert f[0].measured == pytest.approx(0.28) and "0.020" in f[0].direction  # names the resting height
+
+
+def test_place_below_the_floor_is_a_release_finding() -> None:
+    f = _release_finding(_drop_plan(-0.02, 0.0), make_basic_scene())
+    assert f is not None and f.check == "release" and f.plan_field == "place.position"
+    assert f.measured == pytest.approx(0.04)
+
+
+def test_resting_height_place_has_no_release_finding() -> None:
+    s = make_basic_scene()  # 4 cm cubes on a floor at z = 0: resting center z = 0.02
+    assert _release_finding(_drop_plan(0.02, 0.05), s) is None
+    assert _release_finding(_drop_plan(0.024, 0.0), s) is None  # within the 5 mm tolerance
+
+
+def test_carried_object_may_touch_but_not_penetrate_the_bin_floor() -> None:
+    assert vchecks._carried_allowed("descend_place", "bin_floor", 0.0)
+    assert vchecks._carried_allowed("descend_place", "bin_floor", 0.004)
+    assert not vchecks._carried_allowed("descend_place", "bin_floor", -0.001)
+    assert vchecks._carried_allowed("lift", "table", -0.001)  # residual support until lift-off (spec §9)
+
+
+def _tcp_at(pos, R=None) -> np.ndarray:
+    T = np.eye(4)
+    T[:3, :3] = approach_rotation("top", 0.0) if R is None else R  # closing axis = world +x, TCP x = world +y
+    T[:3, 3] = pos
+    return T
+
+
+def test_grasp_finding_reports_the_evidence_for_its_reason() -> None:  # final review M-1
+    s, pl = make_basic_scene(), plan()  # cube_red at (0.50, -0.15, 0.02), 4 cm
+    max_half = CFG["gripper_max_opening_m"] / 2 - CFG["grasp_width_margin_m"]
+    f = vchecks.grasp_preconditions(pl, s, _tcp_at((0.50, -0.13, 0.02)), CFG)  # 2 cm off the finger plane
+    assert f.direction == REASON_OFF_AXIS
+    assert f.measured == pytest.approx(0.02) and f.threshold == CFG["grasp_band_m"]
+    f = vchecks.grasp_preconditions(pl, s, _tcp_at((0.53, -0.15, 0.02)), CFG)  # 3 cm along the closing axis
+    assert f.direction == REASON_NOT_BETWEEN
+    assert f.measured == pytest.approx(0.03) and f.threshold == pytest.approx(max_half - 0.02)
+    a = np.deg2rad(30.0)
+    tilt = np.array([[np.cos(a), 0, np.sin(a)], [0, 1, 0], [-np.sin(a), 0, np.cos(a)]])  # 30 deg about world y
+    f = vchecks.grasp_preconditions(pl, s, _tcp_at((0.50, -0.15, 0.02), tilt @ approach_rotation("top", 0.0)), CFG)
+    assert f.direction == REASON_APPROACH
+    assert f.measured == pytest.approx(30.0) and f.threshold == CFG["approach_tol_deg"]
+    d = s.model_dump()
+    d["objects"][0]["size"] = (0.09, 0.04, 0.04)  # 9 cm along the closing axis
+    f = vchecks.grasp_preconditions(pl, Scene.model_validate(d), _tcp_at((0.50, -0.15, 0.02)), CFG)
+    assert f.direction == REASON_TOO_WIDE
+    assert f.measured == pytest.approx(0.045) and f.threshold == pytest.approx(max_half)

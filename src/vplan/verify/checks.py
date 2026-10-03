@@ -4,13 +4,14 @@ from __future__ import annotations
 import numpy as np
 import pybullet as p
 
-from vplan.geometry import (REASON_NOT_BETWEEN, REASON_TOO_WIDE, T_to_pose, capture_check, pose_to_T,
-                            rot_angle)
+from vplan.geometry import (REASON_APPROACH, REASON_NOT_BETWEEN, REASON_OFF_AXIS, REASON_TOO_WIDE, T_to_pose,
+                            capture_check, pose_to_T, rot_angle)
 from vplan.records import Finding, PickPlacePlan, Scene, Segment
 from vplan.robot import PandaModel
 from vplan.sim.scene import SceneHandles, set_arm
 
 FINGERS = frozenset({"panda_leftfinger", "panda_rightfinger"})
+RESTING_HEIGHT_TOL_M = 0.005  # spec §7/§9 V-8: place.position z must be the resting center height, +-5 mm
 
 
 def grounding(plan: PickPlacePlan, scene: Scene, cfg: dict) -> list[Finding]:
@@ -96,8 +97,10 @@ def _robot_allowed(stage: str, link: str, other: str, target: str) -> bool:
     return link in FINGERS and other == target and stage in ("descend", "retreat")
 
 
-def _carried_allowed(stage: str, other: str) -> bool:
-    return (other == "table" and stage == "lift") or (other == "bin_floor" and stage == "descend_place")
+def _carried_allowed(stage: str, other: str, dist: float) -> bool:
+    """dist = closest distance (negative = penetration). Proximity to the bin floor is allowed while placing, but
+    penetration is not: pressing the object into the floor is outside the manipulation model (spec §9)."""
+    return (other == "table" and stage == "lift") or (other == "bin_floor" and stage == "descend_place" and dist >= 0.0)
 
 
 def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.ndarray | None, m: PandaModel,
@@ -131,7 +134,7 @@ def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.nda
                     return hit(k, c[8], target, f"robot:{link}", f"carried '{target}' too close to robot link {link}")
             for name, bid in scene_bodies.items():
                 for c in p.getClosestPoints(tb, bid, margin, physicsClientId=h.client):
-                    if not _carried_allowed(seg.label, name):
+                    if not _carried_allowed(seg.label, name, c[8]):
                         return hit(k, c[8], target, name, f"carried '{target}' too close to '{name}'")
         for c in p.getClosestPoints(h.robot, h.robot, self_margin, physicsClientId=h.client):
             a, b = sorted((c[3], c[4]))
@@ -148,12 +151,20 @@ def grasp_preconditions(plan: PickPlacePlan, scene: Scene, T_grasp: np.ndarray, 
     if ok:
         return None
     field = "grasp.yaw_deg" if why in (REASON_TOO_WIDE, REASON_NOT_BETWEEN) else "grasp"
+    # report the evidence for the rejection reason (the repair prompt carries measured vs threshold, spec §9)
+    max_half = cfg["gripper_max_opening_m"] / 2 - cfg["grasp_width_margin_m"]
+    evidence = {REASON_OFF_AXIS: (max(abs(vals["off_x_m"]), abs(vals["off_approach_m"])), cfg["grasp_band_m"]),
+                REASON_TOO_WIDE: (vals["half_width_m"], max_half),
+                REASON_NOT_BETWEEN: (abs(vals["off_closing_m"]), max_half - vals["half_width_m"]),
+                REASON_APPROACH: (vals["approach_err_deg"], cfg["approach_tol_deg"])}
+    measured, threshold = evidence[why]
     return Finding(stage="descend", check="grasp_preconditions", plan_field=field,
-                   measured=vals["off_closing_m"], threshold=cfg["grasp_band_m"], direction=why)
+                   measured=float(measured), threshold=float(threshold), direction=why)
 
 
 def release(plan: PickPlacePlan, scene: Scene, T_release: np.ndarray, attach: np.ndarray, cfg: dict) -> Finding | None:
-    """Release height within the manipulation model, and the carried object's footprint inside the bin interior."""
+    """Release height within the manipulation model, place.position at the resting height (so the drop is exactly
+    release_height_m), and the carried object's footprint inside the bin interior."""
     if plan.place.release_height_m > cfg["release_height_max_m"]:
         return Finding(stage="descend_place", check="release", plan_field="place.release_height_m",
                        measured=plan.place.release_height_m, threshold=cfg["release_height_max_m"],
@@ -161,6 +172,13 @@ def release(plan: PickPlacePlan, scene: Scene, T_release: np.ndarray, attach: np
     obj = next((o for o in scene.objects if o.id == plan.target_id), None)
     if obj is None:
         return None
+    rest_z = scene.bin.floor_center[2] + obj.size[2] / 2
+    z_err = abs(plan.place.position[2] - rest_z)
+    if z_err > RESTING_HEIGHT_TOL_M:
+        return Finding(stage="descend_place", check="release", plan_field="place.position", measured=float(z_err),
+                       threshold=RESTING_HEIGHT_TOL_M,
+                       direction=f"place.position z must be the object's resting height {rest_z:.3f} m "
+                                 f"(bin floor z + half the object height); release_height_m sets the drop")
     T_obj = T_release @ attach
     half = np.asarray(obj.size) / 2
     corners = [T_obj[:3, :3] @ (half * np.array(sg)) + T_obj[:3, 3]
