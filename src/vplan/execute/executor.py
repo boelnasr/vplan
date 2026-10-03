@@ -146,7 +146,7 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
         return capture_check(pose_to_T(ls[4], ls[5]), pose_to_T(pos, orn), size, vcfg)
 
     _set_fingers(h, FINGER_OPEN_M, phys["finger_force_n"])
-    for seg in traj.segments:
+    for i, seg in enumerate(traj.segments):
         if seg.label == "lift" and constraint is None:
             ok, vals, why = actual_capture()
             if ok:
@@ -178,7 +178,7 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
             if np.max(np.abs(_arm_q(h) - Q[-1])) < phys["tracking_tol_rad"]:
                 break
             physics_step(seg.label)
-        tracking[seg.label] = float(np.max(np.abs(_arm_q(h) - Q[-1])))
+        tracking[f"{i}:{seg.label}"] = float(np.max(np.abs(_arm_q(h) - Q[-1])))  # index: transports repeat labels
     lin_hist: dict[str, list[float]] = {o.id: [] for o in scene.objects}
     ang_hist: dict[str, list[float]] = {o.id: [] for o in scene.objects}
     for _ in range(int(round(jcfg["rest_dwell_s"] / dt))):

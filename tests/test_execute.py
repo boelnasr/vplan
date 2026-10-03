@@ -68,6 +68,8 @@ def test_good_transfer_attaches_and_lands_in_bin(client) -> None:
     h = init_physics(s, client, traj.q_start, cfgs["physics"])
     rec = execute(h, traj, s, "cube_red", cfgs, approval_token(traj, s, "cube_red", cfgs))
     assert rec.attached and len(rec.sigma_min_steps) == rec.n_physics_steps
+    # one entry per segment, keyed by index and label (two transport segments must not overwrite each other)
+    assert list(rec.tracking_error_rad) == [f"{i}:{sg.label}" for i, sg in enumerate(traj.segments)]
     x, y, z = rec.final_poses["cube_red"].position
     assert abs(x - 0.45) < 0.05 and abs(y - 0.28) < 0.05 and z < 0.05
 
