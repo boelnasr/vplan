@@ -262,6 +262,7 @@ All records are pydantic models, and JSONL lines are `model_dump_json()` output.
 - Fingers ↔ target during `descend` and `grasp`.
 - Carried target ↔ bin interior during `descend_place` and `release`.
 - Target ↔ table before the grasp.
+- Target ↔ table after release (`release`, `retreat`, `rest`), Judge only. Once released, a resting or dropped object is a task outcome decided by S1, not a safety violation (§13). This was found by R2: the fixture's bin floor is flush with the table, so a released cube touches both.
 - Robot base ↔ table, always.
 
 **Jacobian contract [D23.5]**
