@@ -1,5 +1,7 @@
 """Plan -> key TCP poses. TCP z axis = approach direction (motion toward the object); TCP y axis = finger closing
-axis; yaw rotates the closing axis about the approach axis from world +x (top) or world +z (side) (spec §7)."""
+axis. Yaw (spec §7): for `top`, the closing-axis heading counterclockwise from world +x viewed from above (rotation
+about world +z, the same sense as place yaw); for side approaches, rotation of the closing axis about the approach
+axis from world +z."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,8 +32,11 @@ def _rodrigues(axis: np.ndarray, angle: float) -> np.ndarray:
 
 def approach_rotation(approach: str, yaw_deg: float) -> np.ndarray:
     z = np.array(APPROACH_DIRS[approach], dtype=float)
-    y_ref = np.array([1.0, 0.0, 0.0]) if approach == "top" else np.array([0.0, 0.0, 1.0])
-    y = _rodrigues(z, np.deg2rad(yaw_deg)) @ y_ref
+    if approach == "top":
+        # about world +z, not the approach axis (-z): rotating about -z made top yaw clockwise and mirrored place yaw
+        y = _rodrigues(np.array([0.0, 0.0, 1.0]), np.deg2rad(yaw_deg)) @ np.array([1.0, 0.0, 0.0])
+    else:
+        y = _rodrigues(z, np.deg2rad(yaw_deg)) @ np.array([0.0, 0.0, 1.0])
     return np.column_stack([np.cross(y, z), y, z])
 
 

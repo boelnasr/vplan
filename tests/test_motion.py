@@ -1,7 +1,10 @@
 import numpy as np
 
+from tests.conftest import with_object_pose
+from vplan.geometry import quat_to_R
 from vplan.motion.poses import approach_rotation, key_poses
 from vplan.motion.trajectory import build_trajectory, densify, time_scale
+from vplan.planners.heuristic import heuristic_geometry
 from vplan.records import Grasp, PickPlacePlan, Place
 from vplan.robot import HOME_Q, PANDA_VEL_LIMITS, load_panda
 
@@ -55,3 +58,33 @@ def test_time_scale_respects_velocity_limits_for_sequential_joints() -> None:  #
     t = np.array(time_scale(dense, PANDA_VEL_LIMITS))
     v = np.abs(np.diff(np.array(dense), axis=0)) / np.diff(t)[:, None]
     assert np.all(v <= PANDA_VEL_LIMITS * 1.0001)
+
+
+def _yaw_plan(grasp_yaw: float, place_yaw: float) -> PickPlacePlan:
+    return PickPlacePlan(target_id="cube_red", grasp=Grasp(approach="top", yaw_deg=grasp_yaw, pregrasp_offset_m=0.10),
+                         transport_via=((0.45, 0.05, 0.25),),
+                         place=Place(position=(0.45, 0.28, 0.02), yaw_deg=place_yaw, release_height_m=0.05))
+
+
+def test_top_yaw_is_counterclockwise_about_world_z() -> None:  # spec §7 (corrected after the final week-1 review)
+    R = approach_rotation("top", 90.0)
+    assert np.allclose(R[:, 1], [0, 1, 0], atol=1e-12)
+    assert np.allclose(R.T @ R, np.eye(3), atol=1e-12) and np.isclose(np.linalg.det(R), 1.0)
+    assert np.allclose(np.cross(R[:, 0], R[:, 1]), R[:, 2], atol=1e-12)  # right-handed
+
+
+def test_release_closing_axis_follows_place_yaw(basic_scene) -> None:
+    T0 = load_panda().fk(HOME_Q)
+    rel = {k.name: k.T for k in key_poses(_yaw_plan(0.0, 45.0), basic_scene, T0)}["release"]
+    assert np.allclose(rel[:3, 1], [np.sqrt(0.5), np.sqrt(0.5), 0.0], atol=1e-12)
+    kp = {k.name: k.T for k in key_poses(_yaw_plan(30.0, 30.0), basic_scene, T0)}
+    assert np.allclose(kp["release"][:3, 1], kp["grasp"][:3, 1], atol=1e-12)
+
+
+def test_heuristic_yaw_aligns_closing_axis_with_a_cube_face(basic_scene) -> None:
+    a = np.deg2rad(20.0)
+    q = (0.0, 0.0, float(np.sin(a / 2)), float(np.cos(a / 2)))  # cube rotated +20 deg about world z
+    s = with_object_pose(basic_scene, "cube_red", (0.50, -0.15, 0.02), q)
+    pl = heuristic_geometry(s, "cube_red")
+    closing = approach_rotation(pl.grasp.approach, pl.grasp.yaw_deg)[:, 1]
+    assert abs(abs(float(closing @ quat_to_R(q)[:, 0])) - 1.0) < 1e-6
