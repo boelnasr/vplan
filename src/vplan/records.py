@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]
 IDENTITY_QUAT: Quat = (0.0, 0.0, 0.0, 1.0)
+# Must equal the COLORS keys in vplan.sim.scene (an unknown colour would otherwise crash build_scene with a KeyError).
+Color = Literal["red", "green", "blue", "yellow", "purple", "orange"]
+# Body names build_scene registers itself; scene ids must not overwrite them in SceneHandles.bodies / names.
+RESERVED_BODY_IDS = frozenset({"table", "bin_floor", "bin_wall_0", "bin_wall_1", "bin_wall_2", "bin_wall_3", "robot"})
 
 
 def _finite(xs) -> bool:
@@ -17,7 +21,8 @@ def _finite(xs) -> bool:
 
 
 class Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    # allow_inf_nan=False: NaN/Inf would pass float fields and scene_hash would serialise NaN as null.
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
 # ---- scene -----------------------------------------------------------------------------------
@@ -29,7 +34,7 @@ class Pose(Frozen):
 class SceneObject(Frozen):
     id: str
     shape: Literal["cube", "cylinder"]
-    color: str
+    color: Color
     size: Vec3  # full bounding-box extents in the object frame, m
     pose: Pose  # pose of the object's center
     mass_kg: float = 0.1
@@ -63,6 +68,9 @@ class Scene(Frozen):
         ids = [o.id for o in self.objects] + [o.id for o in self.obstacles]
         if len(ids) != len(set(ids)):
             raise ValueError("object and obstacle ids must be unique")
+        for i in ids:
+            if i in RESERVED_BODY_IDS:
+                raise ValueError(f"id {i!r} is reserved for a built-in scene body")
         return self
 
 

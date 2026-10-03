@@ -99,3 +99,34 @@ def test_segment_validators() -> None:
     bad["ik_idx"] = [0]
     with pytest.raises(ValidationError):
         Segment.model_validate(bad)  # IK index must point past q[0] and end at the last sample
+
+
+def test_scene_rejects_unknown_color() -> None:
+    for bad in ("white", "Red"):
+        d = make_basic_scene().model_dump()
+        d["objects"][0]["color"] = bad
+        with pytest.raises(ValidationError):
+            Scene.model_validate(d)
+
+
+@pytest.mark.parametrize("reserved", ["table", "bin_floor", "bin_wall_0", "bin_wall_3", "robot"])
+def test_scene_rejects_reserved_body_ids(reserved: str) -> None:
+    d = make_basic_scene().model_dump()
+    d["objects"][0]["id"] = reserved
+    with pytest.raises(ValidationError, match=reserved):
+        Scene.model_validate(d)
+    d = make_basic_scene(with_obstacle=True).model_dump()
+    d["obstacles"][0]["id"] = reserved
+    with pytest.raises(ValidationError, match=reserved):
+        Scene.model_validate(d)
+
+
+def test_records_reject_nan_and_inf() -> None:
+    with pytest.raises(ValidationError):
+        Pose(position=(math.nan, 0.0, 0.0))
+    with pytest.raises(ValidationError):
+        Pose(position=(0.0, math.inf, 0.0))
+    d = make_basic_scene().model_dump()
+    d["table_top_z"] = math.nan
+    with pytest.raises(ValidationError):
+        Scene.model_validate(d)

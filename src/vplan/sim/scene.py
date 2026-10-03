@@ -30,15 +30,20 @@ class SceneHandles:
     self_excluded: set[tuple[int, int]] = field(default_factory=set)
 
 
-def _box(client: int, half, pos, orn=(0, 0, 0, 1), mass: float = 0.0, rgba=(0.6, 0.6, 0.6, 1)) -> int:
+def _box(client: int, half: tuple[float, float, float], pos: tuple[float, float, float],
+         orn: tuple[float, float, float, float] = (0, 0, 0, 1), mass: float = 0.0,
+         rgba: tuple[float, float, float, float] = (0.6, 0.6, 0.6, 1)) -> int:
     col = p.createCollisionShape(p.GEOM_BOX, halfExtents=half, physicsClientId=client)
     vis = p.createVisualShape(p.GEOM_BOX, halfExtents=half, rgbaColor=rgba, physicsClientId=client)
     return p.createMultiBody(mass, col, vis, basePosition=pos, baseOrientation=orn, physicsClientId=client)
 
 
 def self_collision_exclusions(robot: int, client: int) -> set[tuple[int, int]]:
-    """Exclude pairs inside a rigid group (links joined by fixed joints) or between groups joined by a joint.
-    Index-distance rules are wrong: panda_link7 and panda_hand are rigidly joined through panda_link8 (CR#1)."""
+    """Exclude pairs inside a rigid group (links joined by fixed joints), between groups joined by a joint, and
+    between sibling groups (movable joints sharing the same parent group).
+    Index-distance rules are wrong: panda_link7 and panda_hand are rigidly joined through panda_link8 (CR#1).
+    Siblings: the two prismatic fingers hang off the hand and touch at the closed/open ends; Franka's SRDF disables
+    that pair, and in physics a finger-finger contact would surface as a false Judge V4 self-collision."""
     n = p.getNumJoints(robot, physicsClientId=client)
     info = [p.getJointInfo(robot, i, physicsClientId=client) for i in range(n)]
     parent = {i: info[i][16] for i in range(n)}
@@ -46,17 +51,24 @@ def self_collision_exclusions(robot: int, client: int) -> set[tuple[int, int]]:
     for i in range(n):  # URDF order: parents precede children
         group[i] = group[parent[i]] if info[i][2] == p.JOINT_FIXED else i
     joined = {frozenset((group[i], group[parent[i]])) for i in range(n) if info[i][2] != p.JOINT_FIXED}
+    by_parent: dict[int, list[int]] = {}
+    for i in range(n):
+        if info[i][2] != p.JOINT_FIXED:
+            by_parent.setdefault(group[parent[i]], []).append(i)  # i is its own group id (non-fixed joint)
+    siblings = {frozenset((a, b)) for kids in by_parent.values() for a in kids for b in kids if a < b}
     links = [-1, *range(n)]
     out = set()
     for a in links:
         for b in links:
-            if a < b and (group[a] == group[b] or frozenset((group[a], group[b])) in joined):
+            pair = frozenset((group[a], group[b]))
+            if a < b and (group[a] == group[b] or pair in joined or pair in siblings):
                 out.add((a, b))
     return out
 
 
 def build_scene(scene: Scene, client: int, q: np.ndarray = HOME_Q) -> SceneHandles:
-    """Create table, robot (fixed base), objects, obstacles and bin walls. No simulation steps are taken."""
+    """Create table, robot (fixed base), objects, obstacles and bin walls. No simulation steps are taken.
+    q: initial 7 arm joint angles, rad."""
     z0 = scene.table_top_z
     table = _box(client, (0.7, 0.8, 0.025), (0.45, 0.0, z0 - 0.025), rgba=(0.8, 0.75, 0.65, 1))
     robot = p.loadURDF(PANDA_URDF, basePosition=(0, 0, 0), useFixedBase=True, flags=p.URDF_USE_SELF_COLLISION,
@@ -104,6 +116,9 @@ def build_scene(scene: Scene, client: int, q: np.ndarray = HOME_Q) -> SceneHandl
 
 
 def set_arm(h: SceneHandles, q: np.ndarray) -> None:
-    """Kinematic reset of the 7 arm joints (preview client only; the Executor never calls this mid-run)."""
+    """Kinematic reset of the 7 arm joints (preview client only; the Executor never calls this mid-run).
+    q: joint angles, rad, one per arm joint (length 7); raises ValueError otherwise."""
+    if len(q) != len(h.arm_joints):
+        raise ValueError(f"q must have {len(h.arm_joints)} joint values, got {len(q)}")
     for j, qi in zip(h.arm_joints, q):
         p.resetJointState(h.robot, j, float(qi), physicsClientId=h.client)
