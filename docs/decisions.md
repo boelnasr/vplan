@@ -763,6 +763,27 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 - If dev tasks show self-collision findings, compare against the Franka SRDF never-pairs before touching the margin.
 - Watch `attach_rejected` at far reach (tracking tolerance vs capture band).
 
+## D30. Planner model: Nemotron 3 Ultra (2026-10-04)
+
+**Decision (owner's choice):** the planner model is **Nemotron 3 Ultra 550B-A55B**, replacing Nemotron 3.5 Lightning (D7).
+- Development: OpenRouter `nvidia/nemotron-3-ultra-550b-a55b`.
+- Final runs: Token Factory `nvidia/Nemotron-3-Ultra-550b-a55b`.
+- `.env.example` and spec §7 are updated.
+
+**Checked 2026-10-04:**
+- OpenRouter: $0.50 in / $2.20 out per 1M tokens; supports tools, tool_choice, structured_outputs and reasoning. A `:free` variant exists (tools, tool_choice).
+- Token Factory catalog: the Ultra entry has **no tags** (Lightning is tagged "function calling"). Earlier research priced it at about $1.00 / $3.00 per 1M.
+
+**Consequences:**
+- **Budget:** about 8–13× the per-token cost of Lightning.
+  - One full `test` pass (about 3,600 planner calls) on Token Factory is roughly $20 before reasoning tokens.
+  - Ultra is a reasoning model, so thinking output can multiply the output cost.
+  - The hackathon credits ($25 + $25) cover about 1–2 final passes.
+  - Task 9 (R4) must record tokens per call, including reasoning, so the budget can be set from measurements. Whether reasoning can be turned off on each provider is an open item.
+- **Forced tool calls on Token Factory are unverified for Ultra.** The D13 fallback chain applies, and the W2.6 smoke test decides.
+- **Headline story:** with the largest Nemotron, first-try success is likely higher and the repair gain smaller. The original framing ("verifier makes a mid-tier model reliable") weakens.
+  - Option, not adopted: a cheap Lightning comparison configuration to show that the verifier helps the smaller model more. The owner decides.
+
 ## D12. CPU-only probe results (2026-09-30)
 
 - **Setup:** a fresh `uv` venv (not a container, because Docker is not installed in WSL).
