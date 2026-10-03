@@ -1,7 +1,7 @@
 import numpy as np
 
 from vplan.config import load_config
-from vplan.geometry import R_to_quat, capture_check, pose_to_T, quat_to_R, rot_angle, slerp_R
+from vplan.geometry import (REASON_APPROACH, REASON_NOT_BETWEEN, REASON_OFF_AXIS, REASON_TOO_WIDE, R_to_quat, capture_check, pose_to_T, quat_to_R, rot_angle, slerp_R)
 from vplan.motion.poses import approach_rotation
 
 CFG = load_config("verifier")
@@ -45,13 +45,18 @@ def test_capture_accepts_centered_cube() -> None:
 
 
 def test_capture_rejects_displacement_along_closing_axis() -> None:  # CR#5: the old infinite-line test passed this
-    ok, vals, _ = capture_check(_tcp_top((0.5, 0, 0.02)), pose_to_T((0.53, 0, 0.02), (0, 0, 0, 1)), (0.04,) * 3, CFG)
-    assert not ok and abs(vals["off_closing_m"] - 0.03) < 1e-9
+    ok, vals, why = capture_check(_tcp_top((0.5, 0, 0.02)), pose_to_T((0.53, 0, 0.02), (0, 0, 0, 1)), (0.04,) * 3, CFG)
+    assert not ok and abs(vals["off_closing_m"] - 0.03) < 1e-9 and why == REASON_NOT_BETWEEN
 
 
 def test_capture_rejects_off_axis_and_too_wide_and_tilted() -> None:
     T = _tcp_top((0.5, 0, 0.02))
-    assert not capture_check(T, pose_to_T((0.5, 0.02, 0.02), (0, 0, 0, 1)), (0.04,) * 3, CFG)[0]  # off band
-    assert not capture_check(T, pose_to_T((0.5, 0, 0.02), (0, 0, 0, 1)), (0.09, 0.04, 0.04), CFG)[0]  # too wide
     q_tilt = R_to_quat(Rx(np.deg2rad(30)))
-    assert not capture_check(T, pose_to_T((0.5, 0, 0.02), q_tilt), (0.04,) * 3, CFG)[0]  # approach 30 deg off a face
+    cases = [
+        (pose_to_T((0.5, 0.02, 0.02), (0, 0, 0, 1)), (0.04,) * 3, REASON_OFF_AXIS),  # off band
+        (pose_to_T((0.5, 0, 0.02), (0, 0, 0, 1)), (0.09, 0.04, 0.04), REASON_TOO_WIDE),  # too wide
+        (pose_to_T((0.5, 0, 0.02), q_tilt), (0.04,) * 3, REASON_APPROACH),  # approach 30 deg off a face
+    ]
+    for T_obj, size, reason in cases:
+        ok, _, why = capture_check(T, T_obj, size, CFG)
+        assert not ok and why == reason

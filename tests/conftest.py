@@ -15,7 +15,9 @@ def make_basic_scene(with_obstacle: bool = False) -> Scene:
                     pose=Pose(position=(0.55, 0.00, 0.02))),
     )
     obstacles = (
-        (Obstacle(id="wall_1", half_extents=(0.01, 0.10, 0.10), pose=Pose(position=(0.48, 0.08, 0.10))),)
+        # thin wall between cube and bin, clear of the arm's descend path (the earlier 0.48 m wall sat within 1 cm of
+        # panda_link5 while descending, so any plan was rejected for the wrong reason)
+        (Obstacle(id="wall_1", half_extents=(0.15, 0.01, 0.075), pose=Pose(position=(0.50, 0.06, 0.075))),)
         if with_obstacle else ()
     )
     return Scene(table_top_z=0.0, objects=objects, obstacles=obstacles,

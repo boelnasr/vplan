@@ -1,14 +1,15 @@
 import numpy as np
+import pytest
 
-from tests.conftest import make_basic_scene
+from tests.conftest import make_basic_scene, with_object_pose
 from vplan.config import load_config
 from vplan.geometry import pose_to_T
 from vplan.motion.trajectory import build_trajectory, densify, time_scale
-from vplan.records import CandidateTrajectory, Grasp, PickPlacePlan, Place, Scene, Segment
+from vplan.records import CandidateTrajectory, Finding, Grasp, PickPlacePlan, Place, Scene, Segment
 from vplan.robot import HOME_Q, PANDA_VEL_LIMITS, load_panda
 from vplan.sim.scene import build_scene
 from vplan.verify import checks as vchecks
-from vplan.verify.verifier import verify
+from vplan.verify.verifier import _order_findings, verify
 
 CFG = load_config("verifier")
 
@@ -47,7 +48,11 @@ def test_unknown_target_and_place_outside_bin_are_grounding(client) -> None:
 def test_transport_through_wall_is_collision(client) -> None:
     f = run(plan(via=((0.48, 0.08, 0.10),)), make_basic_scene(with_obstacle=True), client)
     hit = [x for x in f if x.check == "collision"]
-    assert hit and "wall_1" in hit[0].bodies
+    assert hit and "wall_1" in hit[0].bodies and hit[0].stage == "transport"
+
+
+def test_wall_avoiding_plan_passes_obstacle_scene(client) -> None:
+    assert run(plan(), make_basic_scene(with_obstacle=True), client) == []
 
 
 def test_thin_plate_across_path_is_collision(client) -> None:
@@ -70,9 +75,8 @@ def test_bad_middle_ik_sample_with_good_endpoints_is_caught(client) -> None:  # 
     s = make_basic_scene()
     pl = plan()
     d = build_trajectory(pl, s, HOME_Q, cfg=CFG).model_dump()
-    d["segments"] = [dict(sg) for sg in d["segments"]]  # model_dump() gives tuples: make the sample list mutable
     seg = d["segments"][3]
-    seg["q"] = [tuple(qq) for qq in seg["q"]]
+    seg["q"] = list(seg["q"])  # model_dump() gives a tuple of samples: make it mutable
     mid = seg["ik_idx"][len(seg["ik_idx"]) // 2]
     seg["q"][mid] = tuple(x + (0.05 if j == 0 else 0.0) for j, x in enumerate(seg["q"][mid]))
     f = verify(pl, CandidateTrajectory.model_validate(d), s, client, CFG)
@@ -132,3 +136,65 @@ def test_carried_object_hitting_forearm_is_caught(client) -> None:  # CR#9
     attach[2, 3] = -0.25  # (0.35 m, the brief's value, clears the whole arm at HOME: calibrated per the brief's note)
     f = vchecks.collision(seg, h, plan(), attach, m, CFG)
     assert f is not None and f.bodies[0] == "cube_red" and f.bodies[1].startswith("robot:")
+
+
+def test_unreachable_target_gives_ik_finding_and_no_spurious_release(client) -> None:
+    # the release footprint must use the planned grasp pose, not FK of a failed IK endpoint
+    s = with_object_pose(make_basic_scene(), "cube_red", (1.2, 0.0, 0.02))
+    f = run(plan(), s, client)
+    assert "ik_accuracy" in checks_of(f) and "release" not in checks_of(f)
+
+
+def test_segment_count_mismatch_raises(client) -> None:
+    s = make_basic_scene()
+    traj = build_trajectory(plan(), s, HOME_Q, cfg=CFG)  # 1 via
+    two_via = plan(via=((0.45, 0.05, 0.25), (0.45, 0.15, 0.25)))
+    with pytest.raises(ValueError):
+        verify(two_via, traj, s, client, CFG)
+
+
+def _f(stage: str, check: str, idx: int | None = None) -> Finding:
+    return Finding(stage=stage, check=check, plan_field="x", measured=None, threshold=None, sample_index=idx,
+                   direction="d")
+
+
+def test_order_findings_follows_the_trajectory() -> None:
+    labels = ["approach", "descend", "lift", "transport", "transport", "descend_place", "retreat"]
+    release = _f("descend_place", "release")
+    late = _f("transport", "collision", 9)
+    early = _f("approach", "collision", 4)
+    same_stage = _f("transport", "singularity", 2)
+    grounding = _f("plan", "grounding")
+    out = _order_findings([release, late, early, same_stage, grounding], labels)
+    assert out == [grounding, early, same_stage, late, release]
+
+
+def test_order_findings_is_stable_and_treats_none_as_zero() -> None:
+    labels = ["approach", "descend"]
+    a, b, c = _f("descend", "grasp_preconditions"), _f("descend", "collision", 3), _f("descend", "joint_limits", 0)
+    assert _order_findings([b, a, c], labels) == [a, c, b]  # a (None -> 0) and c (0) keep their input order
+
+
+def test_ik_accuracy_reports_the_failing_quantity() -> None:
+    seg = one_sample_segment(HOME_Q)
+    T = np.array(seg.ik_targets[0]).reshape(4, 4)
+    c, s_ = np.cos(np.deg2rad(5.0)), np.sin(np.deg2rad(5.0))
+    T[:3, :3] = T[:3, :3] @ np.array([[c, -s_, 0], [s_, c, 0], [0, 0, 1]])  # rotation-only error, position exact
+    rot_only = Segment.model_validate({**seg.model_dump(), "ik_targets": (tuple(float(x) for x in T.reshape(-1)),)})
+    f = vchecks.ik_accuracy(rot_only, load_panda(), CFG)
+    assert f is not None and abs(f.measured - 5.0) < 1e-6 and f.threshold == CFG["ik_rot_tol_deg"]
+    T[0, 3] += 0.05  # now position fails as well: report the position residual
+    both = Segment.model_validate({**seg.model_dump(), "ik_targets": (tuple(float(x) for x in T.reshape(-1)),)})
+    f = vchecks.ik_accuracy(both, load_panda(), CFG)
+    assert f is not None and abs(f.measured - 0.05) < 1e-6 and f.threshold == CFG["ik_pos_tol_m"]
+
+
+def test_velocity_finding_reports_the_scaled_limit() -> None:
+    q0, q1 = HOME_Q.copy(), HOME_Q.copy()
+    q1[0] += 0.5
+    t = (0.0, 0.01)  # 50 rad/s on joint 1
+    seg = one_sample_segment(HOME_Q).model_copy(update={"q": (tuple(q0), tuple(q1)), "t": t})
+    m = load_panda()
+    f = vchecks.joint_limits(seg, m, CFG)
+    assert f is not None and "velocity" in f.direction
+    assert f.threshold == pytest.approx(m.vel_limits[0] * CFG["velocity_limit_fraction"])

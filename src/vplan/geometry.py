@@ -63,6 +63,13 @@ def slerp_R(R0: np.ndarray, R1: np.ndarray, s: float) -> np.ndarray:
     return quat_to_R(q / np.linalg.norm(q))
 
 
+# Why capture_check rejected a grasp; callers compare by equality instead of matching message text.
+REASON_OFF_AXIS = "object center is outside the capture volume (off the finger plane or depth)"
+REASON_TOO_WIDE = "object is wider than the gripper opening along the closing axis"
+REASON_NOT_BETWEEN = "object is not between the fingers along the closing axis"
+REASON_APPROACH = "approach axis is not perpendicular to an object face"
+
+
 def capture_check(T_tcp: np.ndarray, T_obj: np.ndarray, obj_size, cfg: dict) -> tuple[bool, dict[str, float], str]:
     """Is the object inside the finite gripper capture volume? Measured in the TCP frame (CR#5)."""
     R = T_tcp[:3, :3]
@@ -76,11 +83,11 @@ def capture_check(T_tcp: np.ndarray, T_obj: np.ndarray, obj_size, cfg: dict) -> 
     vals = {"off_x_m": float(o[0]), "off_closing_m": float(o[1]), "off_approach_m": float(o[2]),
             "half_width_m": half_w, "approach_err_deg": approach_err}
     if abs(o[0]) > cfg["grasp_band_m"] or abs(o[2]) > cfg["grasp_band_m"]:
-        return False, vals, "object center is outside the capture volume (off the finger plane or depth)"
+        return False, vals, REASON_OFF_AXIS
     if half_w > max_half:
-        return False, vals, "object is wider than the gripper opening along the closing axis"
+        return False, vals, REASON_TOO_WIDE
     if abs(o[1]) > max_half - half_w:
-        return False, vals, "object is not between the fingers along the closing axis"
+        return False, vals, REASON_NOT_BETWEEN
     if approach_err > cfg["approach_tol_deg"]:
-        return False, vals, "approach axis is not perpendicular to an object face"
+        return False, vals, REASON_APPROACH
     return True, vals, ""

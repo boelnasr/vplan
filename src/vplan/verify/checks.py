@@ -4,7 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pybullet as p
 
-from vplan.geometry import T_to_pose, capture_check, pose_to_T, rot_angle
+from vplan.geometry import (REASON_NOT_BETWEEN, REASON_TOO_WIDE, T_to_pose, capture_check, pose_to_T,
+                            rot_angle)
 from vplan.records import Finding, PickPlacePlan, Scene, Segment
 from vplan.robot import PandaModel
 from vplan.sim.scene import SceneHandles, set_arm
@@ -38,8 +39,11 @@ def ik_accuracy(seg: Segment, m: PandaModel, cfg: dict) -> Finding | None:
         pos_err = float(np.linalg.norm(T[:3, 3] - target[:3, 3]))
         rot_err = float(np.degrees(rot_angle(T[:3, :3], target[:3, :3])))
         if pos_err > cfg["ik_pos_tol_m"] or rot_err > cfg["ik_rot_tol_deg"]:
-            return Finding(stage=seg.label, check="ik_accuracy", plan_field=seg.source_field, measured=pos_err,
-                           threshold=cfg["ik_pos_tol_m"], sample_index=idx,
+            # report the quantity that failed (rotation only when position is within tolerance)
+            rot_fail = pos_err <= cfg["ik_pos_tol_m"]
+            return Finding(stage=seg.label, check="ik_accuracy", plan_field=seg.source_field,
+                           measured=rot_err if rot_fail else pos_err,
+                           threshold=cfg["ik_rot_tol_deg"] if rot_fail else cfg["ik_pos_tol_m"], sample_index=idx,
                            direction=f"pose not reachable: residual {pos_err * 1000:.1f} mm / {rot_err:.1f} deg")
     return None
 
@@ -66,11 +70,12 @@ def joint_limits(seg: Segment, m: PandaModel, cfg: dict) -> Finding | None:
                        threshold=float(margin), sample_index=int(k),
                        direction=f"panda_joint{j + 1} within {np.degrees(margin):.0f} deg of its limit")
     vel = np.abs(np.diff(Q, axis=0)) / np.diff(np.array(seg.t))[:, None]
-    ratio = vel / (m.vel_limits * cfg["velocity_limit_fraction"])
+    limit = m.vel_limits * cfg["velocity_limit_fraction"]
+    ratio = vel / limit
     k, j = np.unravel_index(int(np.argmax(ratio)), ratio.shape)
     if ratio[k, j] > 1.0:
         return Finding(stage=seg.label, check="joint_limits", plan_field=seg.source_field, measured=float(vel[k, j]),
-                       threshold=float(m.vel_limits[j]), sample_index=int(k),
+                       threshold=float(limit[j]), sample_index=int(k),
                        direction=f"panda_joint{j + 1} exceeds its velocity limit after timing")
     return None
 
@@ -142,7 +147,7 @@ def grasp_preconditions(plan: PickPlacePlan, scene: Scene, T_grasp: np.ndarray, 
     ok, vals, why = capture_check(T_grasp, pose_to_T(obj.pose.position, obj.pose.orientation), obj.size, cfg)
     if ok:
         return None
-    field = "grasp.yaw_deg" if "wider" in why or "between" in why else "grasp"
+    field = "grasp.yaw_deg" if why in (REASON_TOO_WIDE, REASON_NOT_BETWEEN) else "grasp"
     return Finding(stage="descend", check="grasp_preconditions", plan_field=field,
                    measured=vals["off_closing_m"], threshold=cfg["grasp_band_m"], direction=why)
 
