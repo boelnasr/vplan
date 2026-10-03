@@ -1,7 +1,8 @@
 import numpy as np
 import pybullet as p
+import pytest
 
-from vplan.robot import ARM_JOINTS, HOME_Q, PANDA_URDF, TCP_LINK, load_panda
+from vplan.robot import ARM_JOINTS, HOME_Q, PANDA_URDF, PANDA_VEL_LIMITS, TCP_LINK, load_panda
 
 
 def _pb(cid: int) -> tuple[int, int, list[int]]:
@@ -61,3 +62,18 @@ def test_ik_round_trip_is_deterministic() -> None:
     q2, ok2 = m.ik(T, HOME_Q)
     assert ok1 and ok2 and np.allclose(q1, q2)
     assert np.linalg.norm(m.fk(q1)[:3, 3] - T[:3, 3]) < 1e-3
+
+
+def test_shared_arrays_are_read_only() -> None:  # a long-lived process must not corrupt them in place
+    m = load_panda()
+    for arr in (HOME_Q, PANDA_VEL_LIMITS, m.lower, m.upper, m.vel_limits):
+        with pytest.raises(ValueError):
+            arr[0] = 0.123
+
+
+def test_joint_limits_match_pybullet(client: int) -> None:  # V-3 (ManipulaPy limits) vs Judge V2 (PyBullet limits)
+    m = load_panda()
+    rid, _, arm = _pb(client)
+    info = [p.getJointInfo(rid, j, physicsClientId=client) for j in arm]
+    np.testing.assert_allclose(m.lower, [i[8] for i in info], rtol=0, atol=1e-12)
+    np.testing.assert_allclose(m.upper, [i[9] for i in info], rtol=0, atol=1e-12)

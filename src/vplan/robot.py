@@ -16,6 +16,9 @@ ARM_JOINTS = tuple(f"panda_joint{i}" for i in range(1, 8))
 TCP_LINK = "panda_grasptarget"
 HOME_Q = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785])  # rad, standard "ready" pose
 PANDA_VEL_LIMITS = np.array([2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61])  # rad/s, Franka datasheet
+# Shared by every trajectory and approval in a long-lived process: an in-place write would corrupt all later ones.
+HOME_Q.setflags(write=False)
+PANDA_VEL_LIMITS.setflags(write=False)
 
 
 def _skew(v: np.ndarray) -> np.ndarray:
@@ -61,4 +64,6 @@ def load_panda() -> PandaModel:
                               joint_limits=limits)
     lower = np.array([lo for lo, _ in limits], dtype=float)
     upper = np.array([hi for _, hi in limits], dtype=float)
+    lower.setflags(write=False)  # load_panda is cached: the model is shared process-wide
+    upper.setflags(write=False)
     return PandaModel(manip, lower, upper)

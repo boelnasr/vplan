@@ -5,11 +5,12 @@ import hashlib
 import math
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]
 IDENTITY_QUAT: Quat = (0.0, 0.0, 0.0, 1.0)
+UNIT_QUAT_TOL = 1e-5  # |norm - 1|; PyBullet's float32-normalised quaternions are well inside this
 # Must equal the COLORS keys in vplan.sim.scene (an unknown colour would otherwise crash build_scene with a KeyError).
 Color = Literal["red", "green", "blue", "yellow", "purple", "orange"]
 # Body names build_scene registers itself; scene ids must not overwrite them in SceneHandles.bodies / names.
@@ -29,6 +30,15 @@ class Frozen(BaseModel):
 class Pose(Frozen):
     position: Vec3
     orientation: Quat = IDENTITY_QUAT
+
+    @field_validator("orientation")
+    @classmethod
+    def _unit(cls, q: Quat) -> Quat:
+        # quat_to_R / the Judge's _R do not normalise: a non-unit q would silently give a non-rotation
+        n = math.sqrt(sum(float(v) * float(v) for v in q))
+        if abs(n - 1.0) > UNIT_QUAT_TOL:
+            raise ValueError(f"orientation must be a unit quaternion (xyzw); norm is {n:.6g}")
+        return q
 
 
 class SceneObject(Frozen):

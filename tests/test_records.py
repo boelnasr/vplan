@@ -1,5 +1,6 @@
 import math
 
+import pybullet as p
 import pytest
 from pydantic import ValidationError
 
@@ -130,3 +131,23 @@ def test_records_reject_nan_and_inf() -> None:
     d["table_top_z"] = math.nan
     with pytest.raises(ValidationError):
         Scene.model_validate(d)
+
+
+def test_pose_orientation_must_be_a_unit_quaternion() -> None:  # non-unit q would make _R a non-rotation
+    for bad in ((0.0, 0.0, 0.0, 2.0), (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0 + 2e-5)):
+        with pytest.raises(ValidationError, match="unit"):
+            Pose(position=(0.0, 0.0, 0.0), orientation=bad)
+    Pose(position=(0.0, 0.0, 0.0), orientation=(0.0, 0.0, 0.0, 1.0 + 5e-6))  # within 1e-5
+    cid = p.connect(p.DIRECT)
+    try:
+        q = p.getQuaternionFromEuler((0.3, -1.1, 2.7), physicsClientId=cid)
+        body = p.createMultiBody(baseMass=1.0, baseCollisionShapeIndex=p.createCollisionShape(
+            p.GEOM_BOX, halfExtents=(0.02, 0.02, 0.02), physicsClientId=cid), basePosition=(0, 0, 1),
+            baseOrientation=q, physicsClientId=cid)
+        p.setGravity(0, 0, -9.81, physicsClientId=cid)
+        for _ in range(50):
+            p.stepSimulation(physicsClientId=cid)
+        Pose(position=(0.0, 0.0, 0.0), orientation=tuple(q))
+        Pose(position=(0.0, 0.0, 0.0), orientation=tuple(p.getBasePositionAndOrientation(body, physicsClientId=cid)[1]))
+    finally:
+        p.disconnect(cid)
