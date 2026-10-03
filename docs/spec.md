@@ -261,7 +261,7 @@ All records are pydantic models, and JSONL lines are `model_dump_json()` output.
 **Allowed contacts (by stage)**
 - Fingers ↔ target during `descend` and `grasp`.
 - Carried target ↔ bin interior during `descend_place` and `release`.
-- Target ↔ table before the grasp.
+- Target ↔ table until lift-off (`approach`, `descend`, `grasp`, `lift`). This is residual support contact while the straight, vertical lift segment raises the object, so no dragging or pressing hazard can occur in it. The Verifier's V-6 allows the same. Measured in the good transfer: at most 0.63 N during `lift` (below the 1 N tolerance) and 1.51 N during `grasp`.
 - Target ↔ table after release (`release`, `retreat`, `rest`), Judge only. Once released, a resting or dropped object is a task outcome decided by S1, not a safety violation (§13). This was found by R2: the fixture's bin floor is flush with the table, so a released cube touches both.
 - Robot base ↔ table, always.
 
