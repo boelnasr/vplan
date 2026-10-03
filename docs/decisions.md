@@ -728,7 +728,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 
 **Review:** the final whole-branch review (Fable, `.superpowers/sdd/plan/final-review.md`) gave "With fixes": 0 Critical, 6 Important, 17 Minor. The controller verified I-1 and I-2 by probe.
 
-**Fixed in one wave** (5 commits after 8f83321; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
+**Fixed in one wave** (5 commits after e44a518; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
 - **I-2 (yaw convention):** top-grasp yaw is now counterclockwise about world +z. Grasp and place yaw were opposite-signed before. D28.4 restated. Spec §7 amended.
 - **I-1 (manipulation model):** V-8 enforces `place.position` z = the resting height (±0.005 m), so a 28 cm drop is now rejected. The carried target may touch the bin floor only without penetration.
 - **I-3 (planned target):** Judge contact allowances use the planned target, so a wrong-object pick is S2 (`wrong_object`), not a safety violation.
@@ -783,6 +783,20 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 - **Forced tool calls on Token Factory are unverified for Ultra.** The D13 fallback chain applies, and the W2.6 smoke test decides.
 - **Headline story:** with the largest Nemotron, first-try success is likely higher and the repair gain smaller. The original framing ("verifier makes a mid-tier model reliable") weakens.
   - Option, not adopted: a cheap Lightning comparison configuration to show that the verifier helps the smaller model more. The owner decides.
+
+## D31. Commit history rewritten to drop Co-Authored-By trailers (2026-10-04)
+
+**What:** at the owner's explicit request, every commit's `Co-Authored-By: Claude Opus 5.5 …` trailer line was removed with `git filter-branch --msg-filter` across `main` and `feat/week1-core` (27 commits). This is an explicit exception to the global "never rewrite history" rule. Nothing had been pushed (no remote).
+
+**Unchanged:** every commit's file tree is byte-identical (checked commit by commit). The `Claude-Session:` line remains.
+
+**Consequences:**
+- **All SHAs changed.** For example, `main` 5d2e22c → bec4067, and the week-1 head f223ce0 → 2b6c3e2.
+- The two SHA references in tracked docs (D29, the milestone report) were updated.
+- The full old→new map is in the local SDD ledger (`.superpowers/sdd/plan/progress.md`).
+- The pre-rewrite refs are kept as a backup under `refs/original/` until the owner approves deleting them.
+
+**From now on:** commits carry no Co-Authored-By trailer.
 
 ## D12. CPU-only probe results (2026-09-30)
 
