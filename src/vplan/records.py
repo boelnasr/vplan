@@ -207,6 +207,7 @@ class ExecEvent(Frozen):
     values: dict[str, float]  # capture-volume measurements at the decision
     rel_pos: Vec3 | None = None  # object pose in the hand COM frame (attach only)
     rel_orn: Quat | None = None
+    reason: str = ""  # capture_check rejection reason (attach_rejected only)
 
 
 class ExecutionRecord(Frozen):

@@ -22,7 +22,13 @@ class StaleApproval(RuntimeError):
     """Trajectory, scene, target, config or the live world state differs from what was verified."""
 
 
+def _require_target(scene: Scene, target_id: str) -> None:
+    if all(o.id != target_id for o in scene.objects):
+        raise ValueError(f"target_id '{target_id}' is not an object in the scene")
+
+
 def approval_token(traj: CandidateTrajectory, scene: Scene, target_id: str, cfgs: dict[str, dict]) -> str:
+    _require_target(scene, target_id)
     payload = {"traj": traj.model_dump_json(), "scene": scene_hash(scene), "target": target_id,
                "configs": {k: config_hash(v) for k, v in sorted(cfgs.items())}}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -35,6 +41,7 @@ def init_physics(scene: Scene, client: int, q_start, phys: dict) -> SceneHandles
     p.setPhysicsEngineParameter(numSolverIterations=phys["solver_iterations"], erp=phys["erp"],
                                 contactERP=phys["contact_erp"], frictionERP=phys["friction_erp"], physicsClientId=client)
     h = build_scene(scene, client, np.asarray(q_start, dtype=float))
+    h.physics_hash = config_hash(phys)
     dyn = dict(lateralFriction=phys["lateral_friction"], spinningFriction=phys["spinning_friction"],
                rollingFriction=phys["rolling_friction"], restitution=phys["restitution"])
     for bid in set(h.bodies.values()):
@@ -61,8 +68,11 @@ def _arm_q(h: SceneHandles) -> np.ndarray:
     return np.array([p.getJointState(h.robot, j, physicsClientId=h.client)[0] for j in h.arm_joints])
 
 
-def _check_start_state(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, phys: dict) -> None:
+def _check_start_state(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, cfgs: dict[str, dict]) -> None:
     """Compare the LIVE world with the approved snapshot; nothing is reset first (CR#4)."""
+    phys = cfgs["physics"]
+    if h.physics_hash != config_hash(phys):
+        raise StaleApproval("world was initialised with a different physics config than the approved one")
     if np.max(np.abs(_arm_q(h) - np.array(traj.q_start))) > phys["start_state_tol_rad"]:
         raise StaleApproval("arm start state differs from the verified start state")
     for o in scene.objects:
@@ -81,9 +91,10 @@ def _set_fingers(h: SceneHandles, width_each: float, force: float) -> None:
 def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id: str, cfgs: dict[str, dict],
             token: str, realtime: bool = False) -> ExecutionRecord:
     phys, vcfg, jcfg = cfgs["physics"], cfgs["verifier"], cfgs["judge"]
+    _require_target(scene, target_id)
     if token != approval_token(traj, scene, target_id, cfgs):
         raise StaleApproval("approval token mismatch (trajectory, scene, target or config changed)")
-    _check_start_state(h, traj, scene, phys)
+    _check_start_state(h, traj, scene, cfgs)
     client, dt = h.client, phys["time_step_s"]
     info = [p.getJointInfo(h.robot, j, physicsClientId=client) for j in h.arm_joints]
     lo, hi, forces = np.array([i[8] for i in info]), np.array([i[9] for i in info]), [i[10] for i in info]
@@ -140,21 +151,21 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
             ok, vals, why = actual_capture()
             if ok:
                 _set_fingers(h, max(vals["half_width_m"] - phys["finger_squeeze_m"], 0.0), phys["finger_force_n"])
-                for _ in range(int(phys["grasp_close_s"] / dt)):
+                for _ in range(int(round(phys["grasp_close_s"] / dt))):
                     physics_step("grasp")
                 ok, vals, why = actual_capture()  # re-check after closing: fingers may have pushed the object (CR#5)
             if ok:
                 constraint, rel_pos, rel_orn = attach_object(h, target_body, phys["attach_max_force_n"])
                 events.append(ExecEvent(step=step, kind="attach", values=vals, rel_pos=rel_pos, rel_orn=rel_orn))
             else:
-                events.append(ExecEvent(step=step, kind="attach_rejected", values=vals))
+                events.append(ExecEvent(step=step, kind="attach_rejected", values=vals, reason=why))
                 _set_fingers(h, FINGER_OPEN_M, phys["finger_force_n"])
         if seg.label == "retreat" and constraint is not None:
             p.removeConstraint(constraint, physicsClientId=client)
             constraint = None
             events.append(ExecEvent(step=step, kind="release", values={}))
             _set_fingers(h, FINGER_OPEN_M, phys["finger_force_n"])
-            for _ in range(int(phys["release_settle_s"] / dt)):
+            for _ in range(int(round(phys["release_settle_s"] / dt))):
                 physics_step("release")
         Q, T = np.array(seg.q), np.array(seg.t)
         for t in np.arange(0.0, T[-1] + dt, dt):
@@ -163,7 +174,7 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
                                         forces=forces, positionGains=[phys["position_gain"]] * 7,
                                         velocityGains=[phys["velocity_gain"]] * 7, physicsClientId=client)
             physics_step(seg.label)
-        for _ in range(int(phys["segment_settle_s"] / dt)):
+        for _ in range(int(round(phys["segment_settle_s"] / dt))):
             if np.max(np.abs(_arm_q(h) - Q[-1])) < phys["tracking_tol_rad"]:
                 break
             physics_step(seg.label)

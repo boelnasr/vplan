@@ -28,6 +28,7 @@ class SceneHandles:
     bodies: dict[str, int] = field(default_factory=dict)
     names: dict[int, str] = field(default_factory=dict)
     self_excluded: set[tuple[int, int]] = field(default_factory=set)
+    physics_hash: str = ""  # config_hash of the physics config the world was initialised with (set by init_physics)
 
 
 def _box(client: int, half: tuple[float, float, float], pos: tuple[float, float, float],
