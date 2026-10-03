@@ -681,6 +681,49 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 - I review between batches.
 - Subagents must never weaken a test or check to make it pass. Plan defects are reported back as BLOCKED with a diagnosis.
 
+## D28. Week-1 risk results and implementation rulings (2026-10-03)
+
+**Status:** Tasks 0–8 of `docs/plan.md` are implemented on `feat/week1-core`, task-reviewed, and the suite is 88 passing with no warnings. Task 9 (R4) is waiting for an OpenRouter key.
+
+**R1 closed** (kinematics and self-collision):
+- ManipulaPy (7-DOF slice) and PyBullet agree:
+  - FK position and orientation ≤ 1e-6;
+  - the D23.5 Jacobian matches finite differences, and the Verifier and Judge Jacobians agree to ≤ 1e-6 over 20 configurations.
+- Topology exclusions (fixed-joint rigid groups, plus sibling groups such as the finger pair):
+  - HOME has no unexcluded self-proximity at 0.01 m;
+  - genuine self-collisions are caught;
+  - physics reports no contact for excluded pairs.
+
+**R2 closed** (repeatable transfers):
+- The attachment-assisted transfer is deterministic in fresh clients: 10/10 Judge success, final-position spread [0, 0, 0] m (re-run independently by the controller).
+- Execution runs about 16× faster than real time with σ computed at every 240 Hz physics step.
+
+**R3 closed** (collision checking):
+- The good plan and a wall-avoiding plan pass.
+- Rejected as intended:
+  - the wall at the `transport` stage;
+  - a 5 mm plate;
+  - carried object↔wrist;
+  - self-collision, IK (every sample), branch flips hidden by densification;
+  - joint and velocity limits;
+  - the release footprint.
+
+**Rulings that changed the plan or spec:**
+1. **Obstacle fixture:** `wall_1` was relocated to a thin wall at y = 0.06 between cube and bin. The original wall made the obstacle scene unsolvable (forearm within 0.0099 m while descending). Probe-validated.
+2. **Heuristic release height:** raised from 0.03 to 0.05 m. At 0.03 m the hand came within 1 cm of the bin wall.
+3. **Judge target↔table contact** (spec §9 updated):
+   - allowed **until lift-off** (approach, descend, grasp, lift) and **after release** (release, retreat, rest), forbidden during transport and descend_place;
+   - measured in the good transfer: 1.51 N during grasp, 0.63 N during lift, 8.5 N / 2.1 mm at the drop.
+   - Matches spec §13: a dropped cube is a task failure, not a safety violation.
+4. **`place.yaw_deg`** is the gripper's closing-axis yaw at release, the same convention as `grasp.yaw_deg`. The LLM prompt (W2.3) must state it.
+5. **Stricter validation in records:** NaN/Inf rejected, colours a Literal, reserved body ids rejected.
+6. **Approval binding** now also covers the target, the applied physics config (hash on the handles) and arm/object drift. Attach-rejection reasons are recorded.
+7. **Deferred to W2.2:** `vplan.cli` still imports the basic scene from `tests/conftest.py`. The scene builder moves into `src/vplan/tasks/`.
+
+**Noted for later:**
+- `pybullet_data`'s Panda URDF has a wider joint-4 range ([-3.1416, 0]) than the real Franka. This goes into the README limitations (W3.6).
+- An untracked `uv.lock` and an empty `.venv/` appeared from a tool outside the workflow. They're left untouched.
+
 ## D12. CPU-only probe results (2026-09-30)
 
 - **Setup:** a fresh `uv` venv (not a container, because Docker is not installed in WSL).
