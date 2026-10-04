@@ -404,3 +404,5 @@ class PairedResult(Frozen):
     unique_missing_usage_calls: int = Field(ge=0)
     unique_latency_s: float = Field(ge=0)
     config_hashes: dict[str, str]
+    # Execution order of the two arms after the shared initial call; default matches pre-alternation data.
+    arm_order: tuple[Literal["repair", "resample"], Literal["repair", "resample"]] = ("repair", "resample")

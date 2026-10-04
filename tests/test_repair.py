@@ -203,3 +203,45 @@ def test_malformed_provider_envelopes_keep_paired_budget_usage_and_completion_ev
     assert sum(e["event"] == "request_completed" for e in events) == 3
     assert sum(e["event"] == "round_completed" for e in events) == 3
     assert json.loads(result.model_dump_json())["unique_call_count"] == 3
+
+
+def test_repeat_detection_wraps_yaw_at_180():  # 179.7 and -179.8 are the same gripper heading
+    from vplan.repair import _geometry
+    from vplan.tasks.scenes import make_basic_scene
+    base = heuristic_geometry(make_basic_scene(), "cube_red")
+    a = base.model_copy(update={"grasp": base.grasp.model_copy(update={"yaw_deg": 179.7}),
+                                "place": base.place.model_copy(update={"yaw_deg": -179.8})})
+    b = base.model_copy(update={"grasp": base.grasp.model_copy(update={"yaw_deg": -179.8}),
+                                "place": base.place.model_copy(update={"yaw_deg": 179.7})})
+    assert _geometry(a) == _geometry(b)
+
+
+def test_arm_order_runs_resample_first_without_changing_accounting():
+    from vplan.repair import evaluate_pair
+    task = generated()
+    initial = task.oracle.reference_plan.model_copy(update={"rationale": "initial answer"})
+    fixed = initial.model_copy(update={"transport_via": ((.5, .1, .4),)})
+    client = FakeClient([response(initial), response(fixed), response(fixed)])
+    events = []
+    result = evaluate_pair(task, planner(client), evaluator=lambda p: blocked() if p == initial else executed(),
+                           arm_order=("resample", "repair"), event_sink=events.append)
+    assert [e["arm"] for e in events if e["event"] == "request_started"] == ["initial", "resample", "repair"]
+    assert result.arm_order == ("resample", "repair")
+    assert result.initial.call_id.endswith(":1") and result.resample.rounds[1].call_id.endswith(":2")
+    assert result.repair.rounds[1].call_id.endswith(":3")
+    assert result.repair.call_count == result.resample.call_count == 2 and result.unique_call_count == 3
+    assert client.requests[1]["messages"] == client.requests[0]["messages"]  # resampling stays blind
+    assert json.loads(client.requests[2]["messages"][1]["content"])["feedback"]["findings"]
+    with pytest.raises(ValueError):
+        evaluate_pair(task, planner(FakeClient([])), arm_order=("repair", "repair"))
+
+
+def test_default_arm_order_is_recorded_and_old_results_still_validate():
+    from vplan.repair import evaluate_pair
+    task = generated()
+    result = evaluate_pair(task, planner(FakeClient([response(task.oracle.reference_plan)])),
+                           evaluator=lambda p: executed())
+    assert result.arm_order == ("repair", "resample")
+    old = result.model_dump(mode="json")
+    del old["arm_order"]
+    assert records.PairedResult.model_validate(old).arm_order == ("repair", "resample")

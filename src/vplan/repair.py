@@ -9,17 +9,22 @@ from vplan.records import (ArmResult, EvaluationResult, GeneratedTask, PairedRes
                            PlannerFeedback, Refusal, RoundRecord)
 
 
+def _wrap_deg(yaw: float) -> int:
+    """Round to 1 degree and wrap to [-180, 180) so 179.7 and -179.8 count as the same heading."""
+    return (round(yaw) + 180) % 360 - 180
+
+
 def _geometry(plan):
     if plan is None:
         return None
     data = plan.model_dump(mode="json")
     data.pop("rationale", None)
     if isinstance(plan, PickPlacePlan):
-        data["grasp"]["yaw_deg"] = round(plan.grasp.yaw_deg)
+        data["grasp"]["yaw_deg"] = _wrap_deg(plan.grasp.yaw_deg)
         data["grasp"]["pregrasp_offset_m"] = round(plan.grasp.pregrasp_offset_m, 3)
         data["transport_via"] = [[round(v, 3) for v in xyz] for xyz in plan.transport_via]
         data["place"]["position"] = [round(v, 3) for v in plan.place.position]
-        data["place"]["yaw_deg"] = round(plan.place.yaw_deg)
+        data["place"]["yaw_deg"] = _wrap_deg(plan.place.yaw_deg)
         data["place"]["release_height_m"] = round(plan.place.release_height_m, 3)
     return data  # Numeric equality identifies rounded -0.0 and +0.0 as the same geometry.
 
@@ -42,7 +47,8 @@ def _usage(rounds):
 def evaluate_pair(task: GeneratedTask, planner, *,
                   evaluator: Callable[[PickPlacePlan], EvaluationResult] | None = None,
                   config_snapshot: dict[str, dict] | None = None,
-                  event_sink: Callable[[dict], None] | None = None) -> PairedResult:
+                  event_sink: Callable[[dict], None] | None = None,
+                  arm_order: tuple[str, str] = ("repair", "resample")) -> PairedResult:
     """Run at most seven unique requests (four logical calls per arm).
 
     The initial proposal and its evaluation are shared. Subsequent resampling requests
@@ -50,8 +56,13 @@ def evaluate_pair(task: GeneratedTask, planner, *,
     before/after each request and after each evaluation; sink exceptions propagate.
     The optional evaluator is a one-plan offline seam; production closes over private
     oracle truth only at the Judge boundary and uses one copied config snapshot.
+    arm_order lets callers alternate which arm runs first, so a mid-task outage or
+    rate cap does not systematically land on the same arm.
     """
     from vplan.execute.executor import StaleApproval
+
+    if sorted(arm_order) != ["repair", "resample"]:
+        raise ValueError("arm_order must contain 'repair' and 'resample' once each")
 
     cfgs = deepcopy(read_config_snapshot() if config_snapshot is None else config_snapshot)
     hashes = {key: config_hash(value) for key, value in cfgs.items()}
@@ -154,12 +165,13 @@ def evaluate_pair(task: GeneratedTask, planner, *,
         return ArmResult(arm=name, outcome=terminal, rounds=tuple(rounds), call_count=len(rounds),
                          total_tokens=total, known_total_tokens=known, missing_usage_calls=missing, latency_s=latency)
 
-    repair = run_arm("repair")
-    resample = run_arm("resample")
+    arms = {name: run_arm(name) for name in arm_order}
+    repair, resample = arms["repair"], arms["resample"]
     unique = (initial,) + repair.rounds[1:] + resample.rounds[1:]
     total, known, missing, latency = _usage(unique)
     result = PairedResult(task_id=task.metadata.task_id, initial=initial, repair=repair, resample=resample,
                           unique_call_count=len(unique), unique_total_tokens=total, unique_known_total_tokens=known,
-                          unique_missing_usage_calls=missing, unique_latency_s=latency, config_hashes=hashes)
+                          unique_missing_usage_calls=missing, unique_latency_s=latency, config_hashes=hashes,
+                          arm_order=arm_order)
     emit({"event": "pair_completed", "result": result.model_dump(mode="json")})
     return result
