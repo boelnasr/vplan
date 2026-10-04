@@ -4,7 +4,7 @@ A language model proposes a pick-and-place plan for a Franka Panda arm. Determin
 
 Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron 3 Ultra**. Final runs use **Nebius Token Factory** and **Nebius Serverless Jobs**.
 
-> **Status: week 1 of 4.** The full plan → verify → execute → judge loop works with a rule-based planner. The Nemotron planner, repair loop, task generator, batch evaluation, Cosmos visual gate and Gradio UI are planned next (see [`docs/plan.md`](docs/plan.md)).
+> **Status: week 1 of 4.** The full plan → verify → execute → judge loop works with a rule-based planner. The Nemotron planner adapter, the repair-versus-resampling loop and the 20-task development feedback pilot (below) are implemented and tested offline; the pilot has not yet been run against a live model. The full task generator, batch evaluation, Cosmos visual gate and Gradio UI are planned next (see [`docs/plan.md`](docs/plan.md)).
 
 ## How it works
 
@@ -52,6 +52,26 @@ python -m pytest -q                           # test suite (~100 s)
 
 `demo-once` prints the outcome, any verifier findings and the Judge result. It exits `0` when the Judge reports success.
 
+## Feedback pilot
+
+A 20-task, feasible-only development experiment comparing the first attempt, verifier-feedback repair and equal-budget resampling ([`docs/pilot-plan.md`](docs/pilot-plan.md), D32, D33). It is diagnostic, not a held-out result.
+
+```powershell
+# 1. Freeze the cohort: local simulation only, no model calls (a few minutes). Refuses a non-empty directory.
+python -m vplan pilot prepare --output runs/pilot-dev --n 20 --seed 0 --max-candidates 100
+
+# 2. Smoke test on 2 tasks, then the full run. Credentials come only from the file passed with --env-file.
+python -m vplan pilot run --input runs/pilot-dev --env-file .env --limit 2
+python -m vplan pilot run --input runs/pilot-dev --env-file .env
+
+# 3. Rebuild summary.json/report.md for a run that was killed before it could write them.
+python -m vplan pilot report --run runs/pilot-dev/runs/<run_id>
+```
+
+- `prepare` writes `tasks.jsonl` (planner-visible), `oracle.jsonl` (private targets and reference plans), `exclusions.jsonl` and, last, `manifest.json` with file, config and source hashes.
+- `run` refuses before any request if the manifest is missing, a task/oracle file or config changed, or any `src/vplan/**/*.py` / `config/*.json` file changed (`--allow-source-drift` records the drift instead). Without `--allow-paid` it only calls `https://openrouter.ai` models named `nvidia/...:free`; `--model` overrides `LLM_MODEL`. Every call in both arms uses `--temperature` (default 0.7), and the arm that runs first alternates per task. Pass relative or Windows paths, not `/mnt/...`.
+- Each run gets a new `runs/<run_id>/` with `run.json`, `events.jsonl` and `results.jsonl` (flushed per event / per task), then `summary.json` and `report.md`. A run that did not finish is titled `INCOMPLETE: k/n tasks`, a `--limit` run `LIMITED: first k of n tasks`, and any provider service failure adds `DEGRADED: n service failures`. A 401/402/403/404, or three consecutive failed requests, stops the run as incomplete. `pilot report` exits 1 for an incomplete run.
+
 ## Repository layout
 
 | Path | Contents |
@@ -64,6 +84,7 @@ python -m pytest -q                           # test suite (~100 s)
 | `src/vplan/judge/` | Independent scoring and PyBullet Jacobian |
 | `src/vplan/planners/` | Planners (week 1: heuristic baseline) |
 | `src/vplan/pipeline.py` | One attempt end to end |
+| `src/vplan/evaluate/` | Feedback pilot preparation, runs and report |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
 | `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), reviews |
 

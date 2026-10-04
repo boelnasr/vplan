@@ -43,11 +43,13 @@ Files: `src/vplan/planners/nemotron.py`, `src/vplan/repair.py`, records addition
 
 Files: `src/vplan/evaluate/{__init__,pilot}.py`, `src/vplan/cli.py`, `tests/test_pilot.py`, README/status/spec/decision documentation.
 
-- [ ] Add `pilot prepare --output DIR --n 20 --seed 0` and `pilot run --input DIR` commands (exact parser structure may use nested subcommands). Preparation makes no model calls and writes public tasks, separate private witnesses, exclusion log and manifest with hashes/provenance. Existing directories must not be silently overwritten.
-- [ ] Live run validates the prepared manifest/task hashes, uses only the configured free OpenRouter development endpoint/model, writes incremental per-task evidence, and refuses reruns that would overwrite evidence. No cloud or paid calls.
-- [ ] Report first-attempt/repair/resampling successes over all tasks, paired wins/losses, repair opportunities, outcome/check counts, logical per-arm cost plus actual unique requests, token/latency totals and missing-usage counts. Label it a development pilot, never a held-out headline result. Incomplete runs must be conspicuous and cannot look complete.
-- [ ] Test artifact integrity, denominator preservation, shared-call accounting, no credential persistence, CLI offline preparation and clear error paths; use fake providers in tests.
-- [ ] Update docs with exact commands, implemented scope, remaining work and recorded validation. Run the full offline suite, independently review the diff and address important findings.
+- [x] Add `pilot prepare --output DIR --n 20 --seed 0` and `pilot run --input DIR` commands (exact parser structure may use nested subcommands). Preparation makes no model calls and writes public tasks, separate private witnesses, exclusion log and manifest with hashes/provenance. Existing directories must not be silently overwritten.
+- [x] Live run validates the prepared manifest/task hashes, uses only the configured free OpenRouter development endpoint/model, writes incremental per-task evidence, and refuses reruns that would overwrite evidence. No cloud or paid calls.
+- [x] Report first-attempt/repair/resampling successes over all tasks, paired wins/losses, repair opportunities, outcome/check counts, logical per-arm cost plus actual unique requests, token/latency totals and missing-usage counts. Label it a development pilot, never a held-out headline result. Incomplete runs must be conspicuous and cannot look complete.
+- [x] Test artifact integrity, denominator preservation, shared-call accounting, no credential persistence, CLI offline preparation and clear error paths; use fake providers in tests.
+- [x] Update docs with exact commands, implemented scope, remaining work and recorded validation. Run the full offline suite, independently review the diff and address important findings.
+
+Recorded validation (2026-10-04): `tests/test_pilot.py` (34 offline tests, including the review fixes for degraded runs, arm alternation and guards) and the full offline suite pass; a real `pilot prepare --n 3` (local simulation, no model calls) wrote all four artifacts, and a second prepare into the same directory and a non-free `pilot run` were both refused with exit 2. No live `pilot run` has been made yet. Remaining: the live 20-task development run and its report.
 
 ## Review focus
 
