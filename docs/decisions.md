@@ -681,6 +681,136 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 - I review between batches.
 - Subagents must never weaken a test or check to make it pass. Plan defects are reported back as BLOCKED with a diagnosis.
 
+## D28. Week-1 risk results and implementation rulings (2026-10-03)
+
+**Status:** Tasks 0–8 of `docs/plan.md` are implemented on `feat/week1-core`, task-reviewed, and the suite is 88 passing with no warnings. Task 9 (R4) is waiting for an OpenRouter key.
+
+**R1 closed** (kinematics and self-collision):
+- ManipulaPy (7-DOF slice) and PyBullet agree:
+  - FK position and orientation ≤ 1e-6;
+  - the D23.5 Jacobian matches finite differences, and the Verifier and Judge Jacobians agree to ≤ 1e-6 over 20 configurations.
+- Topology exclusions (fixed-joint rigid groups, plus sibling groups such as the finger pair):
+  - HOME has no unexcluded self-proximity at 0.01 m;
+  - genuine self-collisions are caught;
+  - physics reports no contact for excluded pairs.
+
+**R2 closed** (repeatable transfers):
+- The attachment-assisted transfer is deterministic in fresh clients: 10/10 Judge success, final-position spread [0, 0, 0] m (re-run independently by the controller).
+- Execution runs about 16× faster than real time with σ computed at every 240 Hz physics step.
+
+**R3 closed** (collision checking):
+- The good plan and a wall-avoiding plan pass.
+- Rejected as intended:
+  - the wall at the `transport` stage;
+  - a 5 mm plate;
+  - carried object↔wrist;
+  - self-collision, IK (every sample), branch flips hidden by densification;
+  - joint and velocity limits;
+  - the release footprint.
+
+**Rulings that changed the plan or spec:**
+1. **Obstacle fixture:** `wall_1` was relocated to a thin wall at y = 0.06 between cube and bin. The original wall made the obstacle scene unsolvable (forearm within 0.0099 m while descending). Probe-validated.
+2. **Heuristic release height:** raised from 0.03 to 0.05 m. At 0.03 m the hand came within 1 cm of the bin wall.
+3. **Judge target↔table contact** (spec §9 updated):
+   - allowed **until lift-off** (approach, descend, grasp, lift) and **after release** (release, retreat, rest), forbidden during transport and descend_place;
+   - measured in the good transfer: 1.51 N during grasp, 0.63 N during lift, 8.5 N / 2.1 mm at the drop.
+   - Matches spec §13: a dropped cube is a task failure, not a safety violation.
+4. **`place.yaw_deg`** (restated by D29; the original wording was wrong). For top grasps, `grasp.yaw_deg` is the closing-axis heading counterclockwise from world +x viewed from above. Between grasp and release the gripper turns about world +z by `place.yaw_deg − grasp.yaw_deg`, so for top grasps `place.yaw_deg` is the closing-axis heading at release in the same convention. The LLM prompt (W2.3) must state it.
+5. **Stricter validation in records:** NaN/Inf rejected, colours a Literal, reserved body ids rejected.
+6. **Approval binding** now also covers the target, the applied physics config (hash on the handles) and arm/object drift. Attach-rejection reasons are recorded.
+7. **Deferred to W2.2:** `vplan.cli` still imports the basic scene from `tests/conftest.py`. The scene builder moves into `src/vplan/tasks/`.
+
+**Noted for later:**
+- `pybullet_data`'s Panda URDF has a wider joint-4 range ([-3.1416, 0]) than the real Franka. This goes into the README limitations (W3.6).
+- An untracked `uv.lock` and an empty `.venv/` appeared from a tool outside the workflow. They're left untouched.
+
+## D29. Final week-1 review and fix wave (2026-10-04)
+
+**Review:** the final whole-branch review (Fable, `.superpowers/sdd/plan/final-review.md`) gave "With fixes": 0 Critical, 6 Important, 17 Minor. The controller verified I-1 and I-2 by probe.
+
+**Fixed in one wave** (5 commits after ea4caac; suite 108 passing with no warnings; R2 10/10 with spread 0; demo-once succeeds):
+- **I-2 (yaw convention):** top-grasp yaw is now counterclockwise about world +z. Grasp and place yaw were opposite-signed before. D28.4 restated. Spec §7 amended.
+- **I-1 (manipulation model):** V-8 enforces `place.position` z = the resting height (±0.005 m), so a 28 cm drop is now rejected. The carried target may touch the bin floor only without penetration.
+- **I-3 (planned target):** Judge contact allowances use the planned target, so a wrong-object pick is S2 (`wrong_object`), not a safety violation.
+- **I-4 (missed grasp):** a never-attached target's table contacts are allowed (resting object; S1 decides).
+- **Plus:**
+  - the Judge takes the attempt's config snapshot;
+  - tracking error is keyed per segment;
+  - D21 import-guard and Judge ⊇ Verifier allowance tests;
+  - grasp evidence reported per rejection reason;
+  - unverified mode runs grounding;
+  - the client-leak fix;
+  - an L-equality test;
+  - `.gitignore` covers `.venv/` and `*.egg-info/`;
+  - read-only robot arrays;
+  - a unit-quaternion `Pose` validator;
+  - joint limits checked against PyBullet.
+
+**Recorded, not implemented:**
+- **I-5:** spec §8's multi-start IK for the first pose isn't implemented (the plan omitted it). Implement it only if R6 shows IK-caused witness rejections.
+- **I-6:** center top grasps work only for object heights of about 3.6–5.9 cm, and a release at the resting height (release height 0) is too close to the 16 cm bin's walls for the hand. Both are W2.2 generator constraints.
+
+**Residual rulings:**
+- **Release height exactly 0 is legal but brittle.** The zero-penetration rule plus the IK and height tolerances can produce a spurious V-6 finding. The W2.3 prompt recommends 0.02–0.10 m; the heuristic uses 0.05.
+- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation.
+
+**W2.2 generator checklist** (from the review):
+- Bins sit on the table: `floor_center.z = table_top_z + wall_thickness`.
+- Object height ≤ wall height, and within the graspable window.
+- No initial object contacts.
+- Use `np.random.default_rng(seed)`, never the global RNG.
+- Move `make_basic_scene` into `src/vplan/tasks/` (Task 8 park).
+- If dev tasks show self-collision findings, compare against the Franka SRDF never-pairs before touching the margin.
+- Watch `attach_rejected` at far reach (tracking tolerance vs capture band).
+
+## D30. Planner model: Nemotron 3 Ultra (2026-10-04)
+
+**Decision (owner's choice):** the planner model is **Nemotron 3 Ultra 550B-A55B**, replacing Nemotron 3.5 Lightning (D7).
+- Development: OpenRouter `nvidia/nemotron-3-ultra-550b-a55b`.
+- Final runs: Token Factory `nvidia/Nemotron-3-Ultra-550b-a55b`.
+- `.env.example` and spec §7 are updated.
+
+**Checked 2026-10-04:**
+- OpenRouter: $0.50 in / $2.20 out per 1M tokens; supports tools, tool_choice, structured_outputs and reasoning. A `:free` variant exists (tools, tool_choice).
+- Token Factory catalog: the Ultra entry has **no tags** (Lightning is tagged "function calling"). Earlier research priced it at about $1.00 / $3.00 per 1M.
+
+**Consequences:**
+- **Budget:** about 8–13× the per-token cost of Lightning.
+  - One full `test` pass (about 3,600 planner calls) on Token Factory is roughly $20 before reasoning tokens.
+  - Ultra is a reasoning model, so thinking output can multiply the output cost.
+  - The hackathon credits ($25 + $25) cover about 1–2 final passes.
+  - Task 9 (R4) must record tokens per call, including reasoning, so the budget can be set from measurements. Whether reasoning can be turned off on each provider is an open item.
+- **Forced tool calls on Token Factory are unverified for Ultra.** The D13 fallback chain applies, and the W2.6 smoke test decides.
+- **Headline story:** with the largest Nemotron, first-try success is likely higher and the repair gain smaller. The original framing ("verifier makes a mid-tier model reliable") weakens.
+  - Option, not adopted: a cheap Lightning comparison configuration to show that the verifier helps the smaller model more. The owner decides.
+
+**D30 addendum (2026-10-04): development uses the free variant.** The owner chose `nvidia/nemotron-3-ultra-550b-a55b:free` on OpenRouter for development and the Task 9 (R4) spike.
+- It's the same model, so per-call token counts still inform the Token Factory budget.
+- It supports tools and tool_choice, but not structured_outputs, which we don't use anyway (D13: forced tool calls).
+- Latency and rate limits aren't representative of paid or Token Factory serving, so R4's latency feeds the budget estimate only with that caveat.
+- Free endpoints may log prompts; the planner sees only synthetic scenes.
+- Headline numbers still come only from Token Factory (D7, D19).
+
+## D31. Commit history rewritten to drop the Claude trailers (2026-10-04)
+
+**What:** at the owner's explicit request, every commit message on `main` and `feat/week1-core` was rewritten with `git filter-branch --msg-filter` in two passes (28 commits):
+1. Removed the `Co-Authored-By: Claude Opus 5.5 …` trailer.
+2. Removed the `Claude-Session: …` line, tidying trailing blank lines with `git stripspace`.
+
+This is an explicit exception to the global "never rewrite history" rule. Nothing had been pushed (no remote).
+
+**Unchanged:** every commit's file tree is byte-identical (checked commit by commit after each pass). Only the messages changed.
+
+**Consequences:**
+- **All SHAs changed.** For example, `main` 5d2e22c → 81d3839, and the week-1 head f223ce0 → dc231a1.
+- The SHA references in tracked docs (D29, the milestone report) point to the new commits.
+- The full original→final map is in the local SDD ledger (`.superpowers/sdd/plan/progress.md`).
+- Backups are kept until the owner approves deleting them:
+  - `refs/backup/pre-trailer-rewrite/*` holds the original messages;
+  - `refs/original/*` holds the state after pass 1.
+
+**From now on:** commits carry **no** Claude trailers (no Co-Authored-By, no Claude-Session).
+
 ## D12. CPU-only probe results (2026-09-30)
 
 - **Setup:** a fresh `uv` venv (not a container, because Docker is not installed in WSL).

@@ -1,0 +1,250 @@
+"""All shared records. World frame = robot base frame (base fixed at the origin), z up, meters; quaternions xyzw."""
+from __future__ import annotations
+
+import hashlib
+import math
+from typing import Annotated, Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+
+Vec3 = tuple[float, float, float]
+Quat = tuple[float, float, float, float]
+IDENTITY_QUAT: Quat = (0.0, 0.0, 0.0, 1.0)
+UNIT_QUAT_TOL = 1e-5  # |norm - 1|; PyBullet's float32-normalised quaternions are well inside this
+# Must equal the COLORS keys in vplan.sim.scene (an unknown colour would otherwise crash build_scene with a KeyError).
+Color = Literal["red", "green", "blue", "yellow", "purple", "orange"]
+# Body names build_scene registers itself; scene ids must not overwrite them in SceneHandles.bodies / names.
+RESERVED_BODY_IDS = frozenset({"table", "bin_floor", "bin_wall_0", "bin_wall_1", "bin_wall_2", "bin_wall_3", "robot"})
+
+
+def _finite(xs) -> bool:
+    return all(math.isfinite(float(x)) for x in xs)
+
+
+class Frozen(BaseModel):
+    # allow_inf_nan=False: NaN/Inf would pass float fields and scene_hash would serialise NaN as null.
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+
+# ---- scene -----------------------------------------------------------------------------------
+class Pose(Frozen):
+    position: Vec3
+    orientation: Quat = IDENTITY_QUAT
+
+    @field_validator("orientation")
+    @classmethod
+    def _unit(cls, q: Quat) -> Quat:
+        # quat_to_R / the Judge's _R do not normalise: a non-unit q would silently give a non-rotation
+        n = math.sqrt(sum(float(v) * float(v) for v in q))
+        if abs(n - 1.0) > UNIT_QUAT_TOL:
+            raise ValueError(f"orientation must be a unit quaternion (xyzw); norm is {n:.6g}")
+        return q
+
+
+class SceneObject(Frozen):
+    id: str
+    shape: Literal["cube", "cylinder"]
+    color: Color
+    size: Vec3  # full bounding-box extents in the object frame, m
+    pose: Pose  # pose of the object's center
+    mass_kg: float = 0.1
+
+
+class Obstacle(Frozen):
+    id: str
+    half_extents: Vec3
+    pose: Pose
+
+
+class Bin(Frozen):
+    floor_center: Vec3  # top surface of the bin floor, m
+    inner_size_xy: tuple[float, float]
+    wall_height: float
+    wall_thickness: float = 0.01
+
+
+class Scene(Frozen):
+    table_top_z: float
+    robot_base: Pose = Pose(position=(0.0, 0.0, 0.0))
+    objects: tuple[SceneObject, ...]
+    obstacles: tuple[Obstacle, ...] = ()
+    bin: Bin
+
+    @model_validator(mode="after")
+    def _check(self) -> "Scene":
+        # robot.py kinematics are base-frame; we define world = base frame instead of transforming (CR#16)
+        if self.robot_base != Pose(position=(0.0, 0.0, 0.0)):
+            raise ValueError("robot_base must be the identity pose (world frame = robot base frame)")
+        ids = [o.id for o in self.objects] + [o.id for o in self.obstacles]
+        if len(ids) != len(set(ids)):
+            raise ValueError("object and obstacle ids must be unique")
+        for i in ids:
+            if i in RESERVED_BODY_IDS:
+                raise ValueError(f"id {i!r} is reserved for a built-in scene body")
+        return self
+
+
+def scene_hash(scene: Scene) -> str:
+    """Snapshot version: sha256 of the canonical JSON of the scene."""
+    return hashlib.sha256(scene.model_dump_json().encode("utf-8")).hexdigest()
+
+
+# ---- plans (spec §7) -------------------------------------------------------------------------
+Approach = Literal["top", "side_+x", "side_-x", "side_+y", "side_-y"]
+
+
+class Grasp(Frozen):
+    approach: Approach
+    yaw_deg: float = Field(ge=-180.0, le=180.0)
+    pregrasp_offset_m: float = Field(ge=0.03, le=0.25)
+
+
+class Place(Frozen):
+    position: Vec3  # desired resting center of the object = TCP target at release minus release height
+    yaw_deg: float = Field(ge=-180.0, le=180.0)
+    release_height_m: float = Field(ge=0.0, le=0.15)
+
+
+class PickPlacePlan(Frozen):
+    kind: Literal["pick_place"] = "pick_place"
+    target_id: str
+    grasp: Grasp
+    transport_via: tuple[Vec3, ...] = Field(default=(), max_length=3)
+    place: Place
+    rationale: str = ""
+
+
+class Refusal(Frozen):
+    kind: Literal["refusal"] = "refusal"
+    reason: Literal["target_unreachable", "destination_unreachable", "target_enclosed",
+                    "no_matching_object", "other"]
+    explanation: str
+
+
+Plan = Annotated[Union[PickPlacePlan, Refusal], Field(discriminator="kind")]
+PLAN_ADAPTER: TypeAdapter[Plan] = TypeAdapter(Plan)
+
+
+class SubmitPlanArgs(Frozen):
+    """Tool-call arguments. OpenAI-style tool parameters need an object root, so the union is wrapped (CR#17)."""
+    plan: Plan
+
+
+# ---- verification ----------------------------------------------------------------------------
+CheckName = Literal["grounding", "ik_accuracy", "joint_limits", "singularity", "continuity",
+                    "collision", "grasp_preconditions", "release", "visual"]
+
+
+class Finding(Frozen):
+    stage: str  # segment label, or "plan" for whole-plan checks
+    check: CheckName
+    plan_field: str
+    measured: float | None
+    threshold: float | None
+    direction: str  # human-readable violated direction; no computed fixes (D17)
+    sample_index: int | None = None
+    bodies: tuple[str, ...] = ()
+
+
+SegmentLabel = Literal["approach", "descend", "lift", "transport", "descend_place", "retreat"]
+
+
+class Segment(Frozen):
+    label: SegmentLabel
+    source_field: str
+    carrying: bool
+    q: tuple[tuple[float, ...], ...]  # densified joint samples, rad, 7 each; q[0] = previous segment's end
+    t: tuple[float, ...]  # sample times, s; t[0] = 0, strictly increasing
+    ik_idx: tuple[int, ...]  # indices into q of the IK solutions (pre-densification samples)
+    ik_targets: tuple[tuple[float, ...], ...]  # Cartesian TCP target per IK sample, 4x4 row-major
+
+    @model_validator(mode="after")
+    def _structure(self) -> "Segment":
+        if len(self.q) < 2 or len(self.q) != len(self.t):
+            raise ValueError("a segment needs >= 2 samples and one time per sample")
+        if any(len(qq) != 7 or not _finite(qq) for qq in self.q):
+            raise ValueError("every sample needs 7 finite joint values")
+        if self.t[0] != 0.0 or not _finite(self.t) or any(b <= a for a, b in zip(self.t, self.t[1:])):
+            raise ValueError("times must start at 0 and increase strictly")
+        if not self.ik_idx or len(self.ik_idx) != len(self.ik_targets):
+            raise ValueError("one Cartesian target per IK sample")
+        if (list(self.ik_idx) != sorted(set(self.ik_idx)) or self.ik_idx[0] < 1
+                or self.ik_idx[-1] != len(self.q) - 1):
+            raise ValueError("ik_idx must increase, start after q[0], and end at the last sample")
+        if any(len(T) != 16 or not _finite(T) for T in self.ik_targets):
+            raise ValueError("ik_targets must be finite 4x4 row-major matrices")
+        return self
+
+
+class CandidateTrajectory(Frozen):
+    q_start: tuple[float, ...]
+    segments: tuple[Segment, ...]
+
+    @model_validator(mode="after")
+    def _structure(self) -> "CandidateTrajectory":
+        if len(self.q_start) != 7 or not _finite(self.q_start):
+            raise ValueError("q_start needs 7 finite values")
+        labels = [s.label for s in self.segments]
+        n_transport = len(labels) - 5
+        expected = ["approach", "descend", "lift"] + ["transport"] * n_transport + ["descend_place", "retreat"]
+        if not 1 <= n_transport <= 4 or labels != expected:
+            raise ValueError(f"segment order must be approach, descend, lift, transport x1-4, descend_place, retreat; got {labels}")
+        prev = self.q_start
+        for s in self.segments:
+            if s.q[0] != prev:
+                raise ValueError("segment boundaries must be continuous")
+            prev = s.q[-1]
+        return self
+
+
+# ---- execution and judging ---------------------------------------------------------------------
+class ContactSummary(Frozen):
+    """Contacts aggregated per (bodies, links, stage): per-step rows would be megabytes per attempt."""
+    body_a: str
+    link_a: str  # robot link name, or "base" for single-body objects
+    body_b: str
+    link_b: str
+    stage: str
+    first_step: int
+    count: int
+    max_normal_force_n: float
+    max_penetration_m: float  # positive = penetration depth
+
+
+class ExecEvent(Frozen):
+    step: int
+    kind: Literal["attach", "attach_rejected", "release"]
+    values: dict[str, float]  # capture-volume measurements at the decision
+    rel_pos: Vec3 | None = None  # object pose in the hand COM frame (attach only)
+    rel_orn: Quat | None = None
+    reason: str = ""  # capture_check rejection reason (attach_rejected only)
+
+
+class ExecutionRecord(Frozen):
+    scene_hash: str
+    approval: str
+    dt_s: float
+    n_physics_steps: int
+    events: tuple[ExecEvent, ...]
+    min_joint_margin_rad: tuple[float, ...]  # per joint over all physics steps
+    max_joint_violation_rad: float  # max amount any joint exceeded its URDF limit (0 if never)
+    sigma_min_steps: tuple[float, ...]  # Judge-side sigma_min(J_s) at every physics step
+    contacts: tuple[ContactSummary, ...]
+    tracking_error_rad: dict[str, float]
+    final_poses: dict[str, Pose]
+    rest_lin_hist: dict[str, tuple[float, ...]]  # |v| per physics step over the final dwell, per object
+    rest_ang_hist: dict[str, tuple[float, ...]]  # |w| per physics step over the final dwell, per object
+    q_replay: tuple[tuple[float, ...], ...]  # 60 Hz arm joints
+    finger_replay: tuple[tuple[float, float], ...]  # 60 Hz finger joints
+    object_replay: dict[str, tuple[Pose, ...]]  # 60 Hz object poses: replay is playback, not re-simulation
+
+    @property
+    def attached(self) -> bool:
+        return any(e.kind == "attach" for e in self.events)
+
+
+class JudgeResult(Frozen):
+    success: bool
+    predicates: dict[str, bool]  # S1, S2, V1..V4 (or R for refusals)
+    violations: tuple[str, ...]
+    details: dict[str, str]
