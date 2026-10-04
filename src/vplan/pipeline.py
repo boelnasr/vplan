@@ -32,8 +32,9 @@ def _connect() -> int:
 
 
 def run_attempt(plan: PickPlacePlan, scene: Scene, oracle_target: str, feasible: bool = True, verify_gate: bool = True,
-                preview_client: int | None = None, physics_client: int | None = None, seed: int = 0) -> AttemptResult:
-    """verify_gate=False is the evaluation-only, simulation-only ablation (config 1); the demo never uses it."""
+                preview_client: int | None = None, physics_client: int | None = None, seed: int = 0, realtime: bool = False) -> AttemptResult:
+    """verify_gate=False is the evaluation-only, simulation-only ablation (config 1); the demo never uses it.
+    realtime=True paces execution at wall-clock speed so a GUI physics_client can be watched."""
     cfgs = config_snapshot()  # one snapshot for verification, approval and execution (CR#4)
     own: list[int] = []  # only clients this call opened, so a failed second connect cannot leak the first
     try:
@@ -53,7 +54,8 @@ def run_attempt(plan: PickPlacePlan, scene: Scene, oracle_target: str, feasible:
         if findings:
             return AttemptResult(plan=plan, findings=findings, outcome="blocked")
         h = init_physics(scene, physics_client, traj.q_start, cfgs["physics"])
-        rec = execute(h, traj, scene, plan.target_id, cfgs, approval_token(traj, scene, plan.target_id, cfgs))
+        rec = execute(h, traj, scene, plan.target_id, cfgs, approval_token(traj, scene, plan.target_id, cfgs),
+                      realtime=realtime)
         return AttemptResult(plan=plan, outcome="executed", record=rec,
                              judge=judge(rec, scene, oracle_target, "executed", feasible,
                                          planned_target=plan.target_id, cfg=cfgs["judge"]))

@@ -101,3 +101,17 @@ def test_failed_connect_raises_and_disconnects_only_opened_clients(monkeypatch) 
     with pytest.raises(RuntimeError):
         run_attempt(heuristic_geometry(s, "cube_red"), s, "cube_red")
     assert closed == opened and not p.isConnected(opened[0])
+
+
+def test_realtime_flag_reaches_the_executor(monkeypatch) -> None:  # demo-once --gui paces execution at wall-clock speed
+    seen = {}
+    real_execute = pipeline.execute
+
+    def spy(*args, **kwargs):
+        seen["realtime"] = kwargs.get("realtime")
+        return real_execute(*args, **{**kwargs, "realtime": False})  # keep the test fast
+
+    monkeypatch.setattr(pipeline, "execute", spy)
+    s = make_basic_scene()
+    run_attempt(heuristic_geometry(s, "cube_red"), s, "cube_red", realtime=True)
+    assert seen["realtime"] is True
