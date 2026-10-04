@@ -538,3 +538,8 @@ These are facts the design depends on that haven't been confirmed yet:
 3. The Linux Jobs container runs the evaluation and returns results via Object Storage [D12].
 4. Constructive generation produces enough feasible variety for 300 stratified `test` tasks [D23.10].
 5. Position control plus attachment gives repeatable transfers [Codex review, risk 2].
+
+
+### Development feedback pilot [D32]
+
+Before the full evaluation, run the approved 20-task feasible development pilot in `docs/pilot-plan.md`. Freeze witness-validated tasks before model calls. Compare the shared first attempt with up to three further feedback-driven revisions or independent samples. Count every provider request against the four-request per-arm limit, including protocol fallbacks. Keep every task/outcome in the denominator and report actual unique calls separately from each arm's logical call count. This pilot diagnoses whether feedback adds value; it does not replace the held-out evaluation or establish its headline claim.

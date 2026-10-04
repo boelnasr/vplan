@@ -752,7 +752,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 
 **Residual rulings:**
 - **Release height exactly 0 is legal but brittle.** The zero-penetration rule plus the IK and height tolerances can produce a spurious V-6 finding. The W2.3 prompt recommends 0.02–0.10 m; the heuristic uses 0.05.
-- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation.
+- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation. **Fixed 2026-10-04** (ahead of W2.5): `pipeline.run_attempt` filters to `plan_field == "target_id"`, covered by two tests in `tests/test_pipeline.py`.
 
 **W2.2 generator checklist** (from the review):
 - Bins sit on the table: `floor_center.z = table_top_z + wall_thickness`.
@@ -970,3 +970,17 @@ Consequences:
 ## Tooling notes (not project decisions)
 
 - gstack: auto-upgrade is enabled. Continuous checkpoint mode is enabled, which conflicts with the global "never commit unless asked" rule. Decide which one wins when the repo is `git init`-ed.
+
+
+## D32. Development feedback pilot (2026-10-04)
+
+**Approval:** the owner accepted the proposed 20-task experiment and asked to implement it. Implementation details and progress live in `docs/pilot-plan.md`.
+
+- Build a frozen cohort of 20 feasible development tasks across clear, distractor and obstacle scenes before any model calls. Every accepted task has a successful reference execution; rejected candidate seeds and reasons are retained. Held-out test tasks remain untouched.
+- Compare first-attempt success, verifier-feedback repair, and equal-budget resampling. Repair and resampling share the initial proposal and evaluation, followed by at most three further requests per arm. Stop after execution (even if the Judge fails), refusal or infrastructure failure as required by the existing attempt semantics.
+- Every provider request, including protocol fallbacks and malformed retries, consumes budget. SDK retries are disabled for this pilot so measured request counts match the experiment. Report logical per-arm use and actual unique requests separately.
+- Reference plans, labels and oracle targets remain private. Repair sees structured verifier findings; resampling sees no previous answers or findings.
+- Report every task in the denominator, with paired wins/losses, failure categories, calls, tokens and latency. A 20-task result is diagnostic, not a held-out headline claim or proof that feedback helps.
+- This implements an early slice of W2.2/W2.3/W2.5 and W3 reporting. Impossible-task generation, Cosmos, cloud supervision, deployment, UI and replay remain scheduled work.
+
+Official adapter references checked during implementation: [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/tool-calling), [OpenAI Python SDK retries and timeouts](https://github.com/openai/openai-python#retries).
