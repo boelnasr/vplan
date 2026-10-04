@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -248,3 +248,159 @@ class JudgeResult(Frozen):
     predicates: dict[str, bool]  # S1, S2, V1..V4 (or R for refusals)
     violations: tuple[str, ...]
     details: dict[str, str]
+
+
+# ---- feasible development pilot tasks (oracle records never go to planners) -------------------
+TaskStratum = Literal["clear", "distractor", "obstacle"]
+
+
+class RobotFacts(Frozen):
+    base_pose: Pose
+    reach_bound_m: float = Field(gt=0)
+    gripper_opening_m: float = Field(gt=0)
+    table_height_m: float
+
+
+class TaskSpec(Frozen):
+    instruction: str
+    scene: Scene
+    robot_facts: RobotFacts
+
+
+class TaskMetadata(Frozen):
+    task_id: str
+    seed: int = Field(ge=0)
+    stratum: TaskStratum
+    split: Literal["dev"] = "dev"
+
+
+class TaskCandidate(Frozen):
+    """Private generation envelope; only .task may cross the planner boundary."""
+    metadata: TaskMetadata
+    task: TaskSpec
+    target_id: str
+
+
+class WitnessEvaluation(Frozen):
+    plan: PickPlacePlan
+    outcome: str
+    findings: tuple[Finding, ...] = ()
+    result: JudgeResult | None = None
+
+
+class TaskOracle(Frozen):
+    target_id: str
+    feasibility: Literal["feasible"] = "feasible"
+    reference_plan: PickPlacePlan
+    reference_result: JudgeResult
+
+    @model_validator(mode="after")
+    def _successful_reference(self) -> "TaskOracle":
+        if self.reference_plan.target_id != self.target_id or not self.reference_result.success:
+            raise ValueError("a feasible oracle requires a successful reference for its target")
+        return self
+
+
+class GeneratedTask(Frozen):
+    metadata: TaskMetadata
+    task: TaskSpec
+    oracle: TaskOracle
+
+
+class CandidateExclusion(Frozen):
+    metadata: TaskMetadata
+    reason: str
+    witness: WitnessEvaluation | None = None
+
+
+class PreparedCohort(Frozen):
+    seed: int = Field(ge=0)
+    requested: int = Field(gt=0)
+    max_candidates: int = Field(gt=0)
+    attempted: int = Field(ge=0)
+    config_hashes: dict[str, str]
+    tasks: tuple[GeneratedTask, ...]
+    exclusions: tuple[CandidateExclusion, ...]
+
+    @model_validator(mode="after")
+    def _accounted(self) -> "PreparedCohort":
+        if self.attempted != len(self.tasks) + len(self.exclusions):
+            raise ValueError("every candidate must be accepted or excluded")
+        if self.attempted > self.max_candidates or len(self.tasks) > self.requested:
+            raise ValueError("cohort exceeds its generation bounds")
+        return self
+
+
+# ---- bounded paired feedback experiment ------------------------------------------------------
+PlannerProtocol = Literal["forced", "required", "content"]
+AttemptOutcome = Literal["executed", "refused", "budget_exhausted", "malformed_final",
+                         "service_failure", "stale_approval", "sim_error"]
+
+
+class PlannerFeedback(Frozen):
+    previous_plan: Plan | None = None
+    findings: tuple[Finding, ...] = Field(default=(), max_length=5)
+    schema_errors: tuple[dict[str, Any], ...] = ()
+    summaries: tuple[str, ...] = ()
+
+
+class PlannerCall(Frozen):
+    outcome: Literal["proposed", "malformed", "protocol_error", "service_failure"]
+    plan: Plan | None = None
+    provider: str
+    model: str
+    response_model: str | None = None
+    protocol: PlannerProtocol
+    next_protocol: PlannerProtocol
+    temperature: float
+    latency_s: float = Field(ge=0)
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    raw_request: dict[str, Any]
+    raw_response: dict[str, Any] | None = None
+    errors: tuple[dict[str, Any], ...] = ()
+    error_type: str | None = None
+    status_code: int | None = None
+
+
+class EvaluationResult(Frozen):
+    """Serializable attempt result; Judge/oracle evidence never becomes planner feedback."""
+    outcome: Literal["blocked", "executed", "refused", "stale_approval", "sim_error"]
+    findings: tuple[Finding, ...] = ()
+    judge: JudgeResult | None = None
+    record: ExecutionRecord | None = None
+    error_type: str | None = None
+
+
+class RoundRecord(Frozen):
+    call_id: str
+    round_index: int = Field(ge=0, le=3)
+    call: PlannerCall
+    evaluation: EvaluationResult | None = None
+    repeat_plan: bool = False
+    observable_failures: tuple[str, ...] = ()
+
+
+class ArmResult(Frozen):
+    arm: Literal["repair", "resample"]
+    outcome: AttemptOutcome
+    rounds: tuple[RoundRecord, ...] = Field(min_length=1, max_length=4)
+    call_count: int = Field(ge=1, le=4)
+    total_tokens: int | None
+    known_total_tokens: int = Field(ge=0)
+    missing_usage_calls: int = Field(ge=0)
+    latency_s: float = Field(ge=0)
+
+
+class PairedResult(Frozen):
+    task_id: str
+    initial: RoundRecord
+    repair: ArmResult
+    resample: ArmResult
+    unique_call_count: int = Field(ge=1, le=7)
+    unique_total_tokens: int | None
+    unique_known_total_tokens: int = Field(ge=0)
+    unique_missing_usage_calls: int = Field(ge=0)
+    unique_latency_s: float = Field(ge=0)
+    config_hashes: dict[str, str]

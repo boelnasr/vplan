@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--gui", action="store_true", help="watch execution in the PyBullet GUI at real-time speed")
     args = parser.parse_args(argv)
     if args.cmd == "demo-once":
-        from tests.conftest import make_basic_scene  # requires PYTHONPATH to include the repo root ('src;.')
+        from vplan.tasks.scenes import make_basic_scene
         scene = make_basic_scene(with_obstacle=args.obstacle)
         gui = None
         if args.gui:
