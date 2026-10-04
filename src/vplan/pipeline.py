@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 
 import pybullet as p
 
-from vplan.config import config_snapshot
+from vplan.config import config_snapshot as read_config_snapshot
 from vplan.execute.executor import approval_token, execute, init_physics
 from vplan.judge.judge import judge
 from vplan.motion.trajectory import build_trajectory
@@ -32,10 +33,11 @@ def _connect() -> int:
 
 
 def run_attempt(plan: PickPlacePlan, scene: Scene, oracle_target: str, feasible: bool = True, verify_gate: bool = True,
-                preview_client: int | None = None, physics_client: int | None = None, seed: int = 0, realtime: bool = False) -> AttemptResult:
+                preview_client: int | None = None, physics_client: int | None = None, seed: int = 0, realtime: bool = False,
+                config_snapshot: dict[str, dict] | None = None) -> AttemptResult:
     """verify_gate=False is the evaluation-only, simulation-only ablation (config 1); the demo never uses it.
     realtime=True paces execution at wall-clock speed so a GUI physics_client can be watched."""
-    cfgs = config_snapshot()  # one snapshot for verification, approval and execution (CR#4)
+    cfgs = deepcopy(read_config_snapshot() if config_snapshot is None else config_snapshot)
     own: list[int] = []  # only clients this call opened, so a failed second connect cannot leak the first
     try:
         if preview_client is None:
@@ -44,11 +46,11 @@ def run_attempt(plan: PickPlacePlan, scene: Scene, oracle_target: str, feasible:
         if physics_client is None:
             physics_client = _connect()
             own.append(physics_client)
-        if not verify_gate:
-            # V-1 grounding still runs: a hallucinated target_id is an LLM error, not a simulation error (M-11)
-            findings = checks.grounding(plan, scene, cfgs["verifier"])
-            if findings:
-                return AttemptResult(plan=plan, findings=findings, outcome="blocked")
+        # an unknown target_id blocks in both modes before motion, which cannot be built without the object (M-11).
+        # Other grounding findings (e.g. out-of-bin place) come from verify(), so unverified mode executes them (D29).
+        findings = [f for f in checks.grounding(plan, scene, cfgs["verifier"]) if f.plan_field == "target_id"]
+        if findings:
+            return AttemptResult(plan=plan, findings=findings, outcome="blocked")
         traj = build_trajectory(plan, scene, HOME_Q, seed=seed, cfg=cfgs["verifier"])
         findings = verify(plan, traj, scene, preview_client, cfgs["verifier"]) if verify_gate else []
         if findings:
