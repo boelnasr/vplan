@@ -887,6 +887,33 @@ This is an explicit exception to the global "never rewrite history" rule. Nothin
 - OpenRouter's `structured_outputs` is **not used**, so that development behavior matches Token Factory.
 - **Unverified:** a live forced tool call on Token Factory's Lightning endpoint. This is the first test once an API key exists. Fallback models then need the same test, since Super and Ultra aren't tagged for function calling.
 
+**R4 result (plan Task 9, 2026-10-04): PASS on OpenRouter**
+
+Setup:
+- Script: `scripts/spikes/r4_toolcall.py`, mode `forced` (named `tool_choice`), temperature 0.2.
+- Model: `nvidia/nemotron-3-ultra-550b-a55b:free`.
+- 20 calls. Even calls asked for "the red cube"; odd calls asked for an absent "purple cube".
+
+| Measure | Result | Bar |
+|---|---|---|
+| Valid tool calls | 20/20 | ≥ 16/20 |
+| Requests rejected | 0 | 0 |
+| Empty outputs | 0 | 0 |
+| Content-JSON fallback used | 0 | — |
+| Correct output kind | `PickPlacePlan` for every red-cube call, `Refusal` for every purple-cube call (10/10 each) | — |
+
+Latency and tokens:
+- Median latency is 34 s overall. Plans took 20–90 s; refusals took 3–40 s.
+- Every call used 1,356 prompt tokens.
+- A plan used about 1.1–1.8k completion tokens, mostly reasoning. A refusal used about 0.1–0.2k.
+- The 20 calls used 27,120 tokens in and 15,271 out.
+
+Consequences:
+- Development keeps the forced tool call as the primary path. The `"required"` and content-JSON fallbacks stay in W2.3 but are unexercised.
+- The spike checks the schema only. Whether the plans are physically valid is for the verifier, measured in W2.3/W2.5.
+- **Budget:** about 35 s per first-try plan on `:free`. Repair rounds add a similar amount, so plan for parallel calls in batch evaluation.
+- **Still unverified:** forced tool calls for Ultra on **Nebius Token Factory** (the catalog has no function-calling tag). The W2.6 smoke test decides that.
+
 ---
 
 ## Verified facts behind these decisions
