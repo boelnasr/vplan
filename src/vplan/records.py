@@ -269,7 +269,8 @@ class JudgeResult(Frozen):
 
 
 # ---- feasible development pilot tasks (oracle records never go to planners) -------------------
-TaskStratum = Literal["clear", "distractor", "obstacle"]
+# The first three are the pilot generator's; the dense_* strata come from the hard (W2.2) generator.
+TaskStratum = Literal["clear", "distractor", "obstacle", "dense_distractors", "dense_obstacles", "dense_both"]
 
 
 class RobotFacts(Frozen):

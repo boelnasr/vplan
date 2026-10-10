@@ -1,6 +1,7 @@
 """Seeded feasible-only development candidates, selected by independent reference success.
 
-This intentionally covers the feedback pilot, not the full held-out task generator.
+This intentionally covers the feedback pilot, not the full held-out task generator. The hard cohort reuses the
+W2.2 feasible drafts (tasks.generate) with dense clutter under the same acceptance loop.
 """
 from __future__ import annotations
 
@@ -13,10 +14,17 @@ from vplan.config import config_hash, config_snapshot
 from vplan.records import (Bin, CandidateExclusion, GeneratedTask, Obstacle, Pose, PreparedCohort,
                            RobotFacts, Scene, SceneObject, TaskCandidate, TaskMetadata, TaskOracle,
                            TaskSpec, TaskStratum, WitnessEvaluation)
+from vplan.tasks.generate import GenerationRejected, draft_task, witness_rejection
 from vplan.tasks.reach import reach_bound_m
 from vplan.tasks.referents import resolve_referent
 
 STRATA: tuple[TaskStratum, ...] = ("clear", "distractor", "obstacle")
+HARD_STRATA: tuple[TaskStratum, ...] = ("dense_distractors", "dense_obstacles", "dense_both")
+# (distractors, obstacles) for draft_task: the W2.2 maximum of 3 on one or both axes.
+HARD_COUNTS: dict[str, tuple[int, int]] = {"dense_distractors": (3, 1), "dense_obstacles": (1, 3),
+                                           "dense_both": (3, 3)}
+# Task-id hash prefixes; distinct so the two generators can never produce the same id.
+PILOT_NAMESPACE, HARD_NAMESPACE = "feedback-pilot-v1", "feedback-pilot-hard-v1"
 COLORS = ("red", "green", "blue", "yellow", "purple", "orange")
 
 
@@ -31,8 +39,8 @@ def resolve_instruction(instruction: str, scene: Scene) -> str:
     return matches[0]
 
 
-def _metadata(seed: int, stratum: TaskStratum) -> TaskMetadata:
-    digest = hashlib.sha256(f"feedback-pilot-v1:{seed}:{stratum}".encode()).hexdigest()[:16]
+def _metadata(seed: int, stratum: TaskStratum, namespace: str = PILOT_NAMESPACE) -> TaskMetadata:
+    digest = hashlib.sha256(f"{namespace}:{seed}:{stratum}".encode()).hexdigest()[:16]
     return TaskMetadata(task_id=f"dev_{digest}", seed=seed, stratum=stratum)
 
 
@@ -106,6 +114,31 @@ def prepare_cohort(n: int = 20, seed: int = 0, max_candidates: int = 200, *,
     disappear through rejection. progress receives (attempted, accepted, requested).
     The evaluator seam supports offline tests; production defaults to real simulation.
     """
+    return _prepare(n, seed, max_candidates, STRATA, PILOT_NAMESPACE,
+                    lambda metadata: generate_candidate(metadata.seed, metadata.stratum), witness_evaluator, progress)
+
+
+def _hard_candidate(metadata: TaskMetadata) -> TaskCandidate:
+    distractors, obstacles = HARD_COUNTS[metadata.stratum]
+    draft = draft_task(metadata.seed, "feasible", distractors=distractors, obstacles=obstacles)
+    return TaskCandidate(metadata=metadata, task=draft.task, target_id=draft.target_id)
+
+
+def prepare_hard_cohort(n: int = 20, seed: int = 0, max_candidates: int = 200, *,
+                        witness_evaluator: Callable[[TaskCandidate], WitnessEvaluation] | None = None,
+                        progress: Callable[[int, int, int], None] | None = None) -> PreparedCohort:
+    """prepare_cohort over W2.2 feasible drafts with dense clutter (D35: the pilot cohort was too easy).
+
+    Templates are whatever draft_task picks; a draft dead end is excluded with its GenerationRejected reason.
+    """
+    return _prepare(n, seed, max_candidates, HARD_STRATA, HARD_NAMESPACE, _hard_candidate, witness_evaluator,
+                    progress)
+
+
+def _prepare(n: int, seed: int, max_candidates: int, strata: tuple[TaskStratum, ...], namespace: str,
+             make_candidate: Callable[[TaskMetadata], TaskCandidate],
+             witness_evaluator: Callable[[TaskCandidate], WitnessEvaluation] | None,
+             progress: Callable[[int, int, int], None] | None) -> PreparedCohort:
     for name, value, minimum in (("n", n, 1), ("seed", seed, 0), ("max_candidates", max_candidates, 1)):
         if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
             raise ValueError(f"{name} must be an integer >= {minimum}")
@@ -115,10 +148,12 @@ def prepare_cohort(n: int = 20, seed: int = 0, max_candidates: int = 200, *,
     hashes = {key: config_hash(value) for key, value in captured_config.items()}
     accepted, exclusions = [], []
     for offset in range(max_candidates):
-        stratum = STRATA[len(accepted) % len(STRATA)]
-        metadata = _metadata(seed + offset, stratum)
+        stratum = strata[len(accepted) % len(strata)]
+        metadata = _metadata(seed + offset, stratum, namespace)
         try:
-            candidate = generate_candidate(metadata.seed, stratum)
+            candidate = make_candidate(metadata)
+        except GenerationRejected as exc:
+            exclusions.append(CandidateExclusion(metadata=metadata, reason=exc.reason))
         except Exception as exc:
             exclusions.append(CandidateExclusion(metadata=metadata,
                                reason=f"generation_error: {type(exc).__name__}: {exc}"))
@@ -129,15 +164,7 @@ def prepare_cohort(n: int = 20, seed: int = 0, max_candidates: int = 200, *,
                 exclusions.append(CandidateExclusion(metadata=metadata,
                                    reason=f"simulation_error: {type(exc).__name__}: {exc}"))
             else:
-                reason = None
-                if witness.outcome != "executed" or witness.findings:
-                    reason = "witness_blocked"
-                elif witness.result is None:
-                    reason = "missing_judge_result"
-                elif not witness.result.success:
-                    reason = "judge_failure"
-                elif witness.plan.target_id != candidate.target_id:
-                    reason = "witness_target_mismatch"
+                reason = witness_rejection(witness, candidate.target_id)
                 if reason:
                     exclusions.append(CandidateExclusion(metadata=metadata, reason=reason, witness=witness))
                 else:
