@@ -94,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     pp.add_argument("--n", type=int, default=20)
     pp.add_argument("--seed", type=int, default=0)
     pp.add_argument("--max-candidates", type=int, default=100)
+    pp.add_argument("--generator", choices=("pilot", "hard"), default="pilot",
+                    help="pilot: the original clear/distractor/obstacle cohort; hard: dense W2.2 feasible tasks")
     pr = psub.add_parser("run", help="run the paired repair/resampling experiment on a prepared cohort")
     pr.add_argument("--input", required=True)
     pr.add_argument("--env-file", required=True, help="KEY=VALUE file with LLM_BASE_URL, LLM_API_KEY, LLM_MODEL")
@@ -121,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                     pilot.check_path_arg(getattr(args, name))
             if args.pilot_cmd == "prepare":
                 pilot.prepare(args.output, n=args.n, seed=args.seed, max_candidates=args.max_candidates,
+                              generator=args.generator,
                               progress=lambda attempted, accepted, n: print(
                                   f"{accepted}/{n} accepted; {attempted} attempted", flush=True))
                 print(f"prepared {args.output}")

@@ -26,7 +26,7 @@ from vplan.config import CONFIG_DIR, config_hash, config_snapshot
 from vplan.planners.nemotron import NemotronPlanner
 from vplan.records import GeneratedTask, PairedResult, RoundRecord, TaskMetadata, TaskOracle, TaskSpec
 from vplan.repair import _terminal, evaluate_pair
-from vplan.tasks import CohortPreparationError, prepare_cohort
+from vplan.tasks import HARD_STRATA, STRATA, CohortPreparationError, prepare_cohort, prepare_hard_cohort
 
 ROOT = CONFIG_DIR.parent
 SCHEMA_VERSION = 1
@@ -34,6 +34,8 @@ HEADER = "Development pilot (feasible tasks only) — not a held-out result"
 ARMS = ("repair", "resample")
 COHORT_FILES = ("tasks.jsonl", "oracle.jsonl", "exclusions.jsonl")
 MANIFEST_KEYS = ("schema_version", "n", "files", "config_hashes", "source_hashes")
+# Cohort generator -> its strata. Manifests from before the "generator" field are pilot cohorts.
+GENERATORS = {"pilot": STRATA, "hard": HARD_STRATA}
 # Auth, billing and wrong-path errors will not recover by retrying the next task.
 FATAL_STATUS = frozenset({401, 402, 403, 404})
 # Consecutive failed requests across tasks usually mean a quota or rate cap, not a planning outcome.
@@ -111,14 +113,18 @@ def _git() -> dict | None:
     return {"head": head, "dirty": bool(status.strip())}
 
 
-def prepare(output: Path, *, n: int = 20, seed: int = 0, max_candidates: int = 100, progress=None) -> dict:
+def prepare(output: Path, *, n: int = 20, seed: int = 0, max_candidates: int = 100, progress=None,
+            generator: str = "pilot") -> dict:
     """Freeze a witness-validated cohort (no model calls) into separate public/private files."""
+    if generator not in GENERATORS:
+        raise PilotError(f"unknown generator {generator!r}; expected one of {', '.join(GENERATORS)}")
     output = Path(output)
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise PilotError(f"output directory {output} is not empty; refusing to overwrite")
     hashes = source_hashes()
     try:
-        cohort = prepare_cohort(n=n, seed=seed, max_candidates=max_candidates, progress=progress)
+        build = prepare_hard_cohort if generator == "hard" else prepare_cohort
+        cohort = build(n=n, seed=seed, max_candidates=max_candidates, progress=progress)
     except CohortPreparationError as exc:
         # Keep the rejection log for diagnosis; without a manifest the directory can never be run.
         output.mkdir(parents=True, exist_ok=True)
@@ -137,7 +143,7 @@ def prepare(output: Path, *, n: int = 20, seed: int = 0, max_candidates: int = 1
     _write_jsonl(output / "exclusions.jsonl", (e.model_dump_json() for e in cohort.exclusions))
     manifest = {
         "schema_version": SCHEMA_VERSION, "created_utc": _utc_now(), "scope": HEADER,
-        "n": n, "seed": seed, "max_candidates": max_candidates, "attempted": cohort.attempted,
+        "generator": generator, "n": n, "seed": seed, "max_candidates": max_candidates, "attempted": cohort.attempted,
         "excluded": len(cohort.exclusions),
         "strata": dict(Counter(t.metadata.stratum for t in cohort.tasks)),
         "config_hashes": cohort.config_hashes,
@@ -155,6 +161,7 @@ class Prepared(NamedTuple):
     config: dict[str, dict]
     source_digest: str
     drift: list[str]
+    generator: str
 
 
 def load_prepared(input_dir: Path, *, allow_source_drift: bool = False) -> Prepared:
@@ -172,6 +179,9 @@ def load_prepared(input_dir: Path, *, allow_source_drift: bool = False) -> Prepa
         raise PilotError(f"manifest.json lacks required keys: {', '.join(missing)}")
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise PilotError(f"unsupported manifest.json schema_version {manifest.get('schema_version')!r}")
+    generator = manifest.get("generator", "pilot")
+    if generator not in GENERATORS:
+        raise PilotError(f"manifest.json names unknown generator {generator!r}")
     for name in COHORT_FILES:
         path = input_dir / name
         if not path.is_file() or _sha256(path) != manifest["files"].get(name):
@@ -193,7 +203,10 @@ def load_prepared(input_dir: Path, *, allow_source_drift: bool = False) -> Prepa
     tasks = [GeneratedTask(metadata=TaskMetadata(task_id=pub["task_id"], seed=pub["seed"], stratum=pub["stratum"]),
                            task=TaskSpec.model_validate(pub["task"]), oracle=TaskOracle.model_validate(priv["oracle"]))
              for pub, priv in zip(public, private)]
-    return Prepared(tasks, manifest, _sha256(manifest_path), cfgs, source_digest(current), drift)
+    foreign = sorted({t.metadata.stratum for t in tasks} - set(GENERATORS[generator]))
+    if foreign:
+        raise PilotError(f"tasks.jsonl has stratum {', '.join(foreign)}, which the {generator} generator never makes")
+    return Prepared(tasks, manifest, _sha256(manifest_path), cfgs, source_digest(current), drift, generator)
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -263,6 +276,7 @@ def run_pilot(input_dir: Path, planner, *, base_url_host: str, limit: int | None
     meta = {"schema_version": SCHEMA_VERSION, "run_id": run_id, "status": "running", "started_utc": _utc_now(),
             "model": planner.model, "provider": planner.provider, "base_url_host": base_url_host,
             "temperature": planner.temperature, "manifest_sha256": prepared.manifest_sha256,
+            "generator": prepared.generator,
             "config_hashes": {k: config_hash(v) for k, v in cfgs.items()},
             "n_prepared": len(tasks), "n_tasks": len(selected), "limit": limit, "source_drift": prepared.drift,
             "source_digest": prepared.source_digest, "git": _git(), "python": platform.python_version(),
