@@ -5,7 +5,6 @@ This intentionally covers the feedback pilot, not the full held-out task generat
 from __future__ import annotations
 
 import hashlib
-import re
 from collections.abc import Callable
 
 import numpy as np
@@ -14,16 +13,19 @@ from vplan.config import config_hash, config_snapshot
 from vplan.records import (Bin, CandidateExclusion, GeneratedTask, Obstacle, Pose, PreparedCohort,
                            RobotFacts, Scene, SceneObject, TaskCandidate, TaskMetadata, TaskOracle,
                            TaskSpec, TaskStratum, WitnessEvaluation)
+from vplan.tasks.reach import reach_bound_m
+from vplan.tasks.referents import resolve_referent
 
 STRATA: tuple[TaskStratum, ...] = ("clear", "distractor", "obstacle")
 COLORS = ("red", "green", "blue", "yellow", "purple", "orange")
 
 
 def resolve_instruction(instruction: str, scene: Scene) -> str:
-    """Resolve the pilot's color-and-shape template, rejecting absent/ambiguous targets."""
-    match = re.fullmatch(r"Pick the (\w+) (cube|cylinder) and place it in the bin\.", instruction)
-    matches = [] if match is None else [o.id for o in scene.objects
-                                       if (o.color, o.shape) == match.groups()]
+    """The single referent of a template instruction, rejecting absent/ambiguous/unknown phrasing."""
+    try:
+        matches = resolve_referent(instruction, scene)
+    except ValueError:
+        matches = []
     if len(matches) != 1:
         raise ValueError(f"instruction must resolve to exactly one object; found {len(matches)}")
     return matches[0]
@@ -67,10 +69,9 @@ def generate_candidate(seed: int, stratum: TaskStratum) -> TaskCandidate:
                   bin=Bin(floor_center=(rng.uniform(.435, .465), rng.uniform(.27, .29), .01),
                           inner_size_xy=(.16, .16), wall_height=.08))
     instruction = f"Pick the {color} cube and place it in the bin."
-    # 1.6 m is a loose upper bound from the sum of Panda link translations,
-    # including base and TCP. It is informational, never a feasibility proof.
+    # Max TCP distance from the shoulder (tasks.reach); informational here, never a feasibility proof.
     task = TaskSpec(instruction=instruction, scene=scene,
-                    robot_facts=RobotFacts(base_pose=scene.robot_base, reach_bound_m=1.6,
+                    robot_facts=RobotFacts(base_pose=scene.robot_base, reach_bound_m=reach_bound_m(),
                                            gripper_opening_m=.08, table_height_m=scene.table_top_z))
     target_id = resolve_instruction(instruction, scene)
     return TaskCandidate(metadata=_metadata(seed, stratum), task=task, target_id=target_id)

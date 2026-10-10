@@ -306,16 +306,45 @@ class WitnessEvaluation(Frozen):
     result: JudgeResult | None = None
 
 
-class TaskOracle(Frozen):
-    target_id: str
-    feasibility: Literal["feasible"] = "feasible"
-    reference_plan: PickPlacePlan
-    reference_result: JudgeResult
+ImpossibleType = Literal[1, 2, 3, 4]  # spec §6 numbering
+# The correct refusal per impossibility type; index = type - 1.
+IMPOSSIBLE_REFUSALS: tuple[str, ...] = ("target_unreachable", "destination_unreachable", "target_enclosed",
+                                        "no_matching_object")
+
+
+class ImpossibilityProof(Frozen):
+    """Construction type and proof parameters; the proof is rechecked from the scene (tasks.check_impossibility)."""
+    type: ImpossibleType
+    refusal_reason: Literal["target_unreachable", "destination_unreachable", "target_enclosed", "no_matching_object"]
+    params: dict[str, float] = Field(default_factory=dict)  # e.g. measured distance, reach bound, margin
+    enclosure: tuple[Obstacle, ...] = ()  # exact type-3 geometry (also present in the scene)
 
     @model_validator(mode="after")
-    def _successful_reference(self) -> "TaskOracle":
-        if self.reference_plan.target_id != self.target_id or not self.reference_result.success:
-            raise ValueError("a feasible oracle requires a successful reference for its target")
+    def _consistent(self) -> "ImpossibilityProof":
+        if IMPOSSIBLE_REFUSALS[self.type - 1] != self.refusal_reason:
+            raise ValueError(f"impossibility type {self.type} requires refusal {IMPOSSIBLE_REFUSALS[self.type - 1]!r}")
+        if bool(self.enclosure) != (self.type == 3):
+            raise ValueError("enclosure geometry belongs to type 3 only")
+        return self
+
+
+class TaskOracle(Frozen):
+    target_id: str | None  # None only for an absent referent (type 4)
+    feasibility: Literal["feasible", "impossible"] = "feasible"
+    reference_plan: PickPlacePlan | None = None
+    reference_result: JudgeResult | None = None
+    proof: ImpossibilityProof | None = None
+
+    @model_validator(mode="after")
+    def _label(self) -> "TaskOracle":
+        if self.feasibility == "feasible":
+            if (self.target_id is None or self.proof is not None or self.reference_plan is None
+                    or self.reference_result is None or self.reference_plan.target_id != self.target_id
+                    or not self.reference_result.success):
+                raise ValueError("a feasible oracle requires a successful reference for its target")
+        elif (self.proof is None or self.reference_plan is not None or self.reference_result is not None
+              or (self.target_id is None) != (self.proof.type == 4)):
+            raise ValueError("an impossible oracle carries a proof, no reference, and a target unless it is absent")
         return self
 
 
