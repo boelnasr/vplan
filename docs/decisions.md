@@ -1193,7 +1193,7 @@ No thresholds are relaxed. Judge independence is preserved. Harder task generati
 
 **Problem.** In the D38 R6 spike, 6 of 21 cylinder witnesses failed Judge S1 `at_rest`, and no cube failed. The accepted feasible set was skewed toward cubes (37 vs 14).
 
-**Root cause (measured; scripts in `runs/cyl-debug/`, untracked).**
+**Root cause (measured during the investigation; the comparison can be rerun with `scripts/spikes/cylinder_contact.py`).**
 - Contact with the bin floor is the only contact during the dwell. The robot and other objects do not touch the target.
 - PyBullet's built-in `GEOM_CYLINDER` generates its floor contacts from points on the curved rim and keeps re-picking them. Now and then a new point lands about 0.1° deeper into the floor. The Baumgarte correction then pushes the cylinder back out: |ω| jumps to 0.3–0.5 rad/s in one step, and the tilt decays by exactly 1 − ERP = 0.8 per step.
 - The object barely moves: under 0.02 mm and 0.11°. The reported velocity comes from the solver correcting the overlap, not from motion. The 0.1 rad/s dwell threshold catches it.
@@ -1207,12 +1207,12 @@ No thresholds are relaxed. Judge independence is preserved. Harder task generati
 
 **Fix.**
 - The collision shape of a cylinder is a convex prism with `CYLINDER_SIDES` = 16 (`sim/scene._cylinder_prism`). The visual shape is still a cylinder. The Verifier preview and the physics client both use `build_scene`, so they stay consistent.
-- The vertices are shrunk by PyBullet's 1 mm convex collision margin (`CONVEX_MARGIN_M`, measured). The effective surface then rests at the true half height, as a box does (−0.01 mm), and its flats lie on the nominal radius. Without the shrink it rested 1 mm high.
+- The vertices are shrunk by PyBullet's 1 mm convex collision margin (`CONVEX_MARGIN_M`, measured). The effective surface then rests at the true half height, as a box does (−0.01 mm), and its flats lie on the nominal radius. Its corners extend about 0.37 mm beyond the nominal radius at a 20 mm radius. Without the shrink it rested 1 mm high.
 - No Judge threshold was changed. Raising the 0.1 rad/s threshold would hide genuine motion for every object.
 
-**Evidence: cylinder witnesses succeeding under S1** (the first 20 R6 cylinder seeds plus 45 held-out seeds from 60–143):
+**Evidence: cylinder witnesses succeeding under S1** (20 Judge-eligible R6 cylinder seeds plus 45 additional comparison seeds from 60–143; these results were used to select 16 sides):
 
-| Collision shape | First 20 | Held-out 45 | Failures |
+| Collision shape | First 20 | Comparison 45 | Failures |
 |---|---|---|---|
 | Built-in cylinder | 14/20 | 41/45 | 10/65 |
 | 32-sided prism | 18/20 | 43/45 | 4/65 |
@@ -1229,6 +1229,20 @@ No thresholds are relaxed. Judge independence is preserved. Harder task generati
 - 0 Judge failures. The impossible-task types are unchanged.
 - The D38 cube bias is resolved.
 
-**Residual risk.** About 1.5% of cylinder runs may still fail S1 because of this artifact. That is a false negative against the planner, and it applies in every configuration alike. If it matters in the W3 results, the alternative is a Judge change that measures rest by displacement over the dwell instead of peak instantaneous velocity. That changes spec §13, so it is the owner's decision.
+**Residual risk.** One of the 65 measured Judge-eligible cylinder runs still failed S1 because of this artifact. The 65 seeds include the comparison used to select the shape, so 1/65 is not an independent failure-rate estimate; configuration-specific rates are unknown. If the artifact matters in the W3 results, the alternative is a Judge change that measures rest by displacement over the dwell instead of peak instantaneous velocity. That changes spec §13, so it is the owner's decision.
 
 As with any source change, this invalidates prepared cohorts under D33.
+
+## D44. Guard small-cylinder geometry and qualify D43 evidence (2026-10-10)
+
+**Geometry.** `SceneObject` accepts any positive cylinder dimensions, but D43's fixed 1 mm margin compensation inverted the prism's dimensions when radius was ≤1 mm or height was ≤2 mm. `build_scene` now uses PyBullet's nominal `GEOM_CYLINDER` for those small objects and retains the 16-sided mesh for larger ones. This preserves the declared small-object dimensions; the native cylinder's rest-contact artifact may still occur for those unusual sizes. The task generator's 4–5 cm objects stay on the prism path. A side-contact test measures the normal 20 mm-radius prism at a flat (nominal contact) and a corner (about 0.37 mm outward), making the polygon approximation explicit. No Judge rule changes.
+
+**Evidence.** `scripts/spikes/cylinder_contact.py` selects cylinder targets, substitutes the requested collision variant, and runs the same heuristic witness through Verifier, physics and Judge. Run it from the repo root with Windows Python 3.10, `PYTHONPATH='src;.'` and `PYTHONUTF8=1`, for example:
+
+```powershell
+python scripts/spikes/cylinder_contact.py --variant prism16 --cohort fresh --json runs/cylinder-contact-fresh.json
+```
+
+`first` covers seeds 0–59 (21 cylinder drafts, one Verifier-blocked); `comparison` covers 60–143 (45 cylinder drafts). Both were involved in selecting 16 sides, so neither is a held-out estimate. The predeclared fresh range 144–263 yielded 60 cylinder drafts: **58/58 Judge-eligible accepted**, with seeds 165 and 179 blocked by the Verifier before Judge. The per-seed result is in `docs/evidence/cylinder-contact-fresh.json`. This gives a separate post-selection check, not a guarantee that the residual S1 artifact is gone or that all configurations have the same risk.
+
+This source change invalidates previously prepared task sets under D33. GUI and Cosmos-view visual checks remain open.

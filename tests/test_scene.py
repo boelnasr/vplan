@@ -86,3 +86,33 @@ def test_cylinder_collides_as_a_prism_with_its_true_size(client) -> None:
     assert abs(z - (scene.table_top_z + 0.04)) < 1e-4  # resting height = half height, as for a box
     radii = [np.hypot(x, y) for x, y, _ in _cylinder_prism(0.02, 0.08)]
     assert np.allclose(radii, (0.02 - CONVEX_MARGIN_M) / np.cos(np.pi / CYLINDER_SIDES))  # flats on r - margin
+
+
+@pytest.mark.parametrize(("diameter", "height"), ((0.001, 0.001), (0.001, 0.05), (0.04, 0.001)))
+def test_small_cylinder_uses_nominal_collision_dimensions(client, diameter, height) -> None:
+    """A valid object smaller than the convex margin must not acquire inverted prism dimensions."""
+    d = make_basic_scene().model_dump()
+    d["objects"] = [SceneObject(id="tiny", shape="cylinder", color="blue", size=(diameter, diameter, height),
+                                pose=Pose(position=(0.40, 0.10, 0.02))).model_dump()]
+    h = build_scene(Scene.model_validate(d), client)
+    body = h.bodies["tiny"]
+    shape = p.getCollisionShapeData(body, -1, physicsClientId=client)[0]
+    assert shape[2] == p.GEOM_CYLINDER
+    assert shape[3][0] == pytest.approx(height)
+    assert shape[3][1] == pytest.approx(diameter / 2)
+
+
+def test_cylinder_side_contact_stays_within_polygon_error(client) -> None:
+    """The collision prism has nominal flats and at most 0.4 mm outward corner error."""
+    radius, height, probe_radius = 0.02, 0.08, 0.005
+    shape = p.createCollisionShape(p.GEOM_MESH, vertices=_cylinder_prism(radius, height), physicsClientId=client)
+    body = p.createMultiBody(0, shape, physicsClientId=client)
+    sphere = p.createCollisionShape(p.GEOM_SPHERE, radius=probe_radius, physicsClientId=client)
+    probe = p.createMultiBody(0, sphere, physicsClientId=client)
+    for angle, expected in ((0.0, 0.0), (np.pi / 16, -0.0003722)):
+        p.resetBasePositionAndOrientation(probe, ((radius + probe_radius) * np.cos(angle),
+                                               (radius + probe_radius) * np.sin(angle), 0),
+                                          (0, 0, 0, 1), physicsClientId=client)
+        contacts = p.getClosestPoints(body, probe, 0.01, physicsClientId=client)
+        assert contacts
+        assert contacts[0][8] == pytest.approx(expected, abs=0.0001)

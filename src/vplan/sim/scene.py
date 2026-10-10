@@ -107,7 +107,11 @@ def build_scene(scene: Scene, client: int, q: np.ndarray = HOME_Q) -> SceneHandl
         if obj.shape == "cube":
             bid = _box(client, half, obj.pose.position, obj.pose.orientation, obj.mass_kg, COLORS[obj.color])
         else:
-            col = p.createCollisionShape(p.GEOM_MESH, vertices=_cylinder_prism(half[0], obj.size[2]), physicsClientId=client)
+            # A fixed margin cannot be subtracted from a smaller shape without inverting its dimensions.
+            if half[0] <= CONVEX_MARGIN_M or obj.size[2] <= 2 * CONVEX_MARGIN_M:
+                col = p.createCollisionShape(p.GEOM_CYLINDER, radius=half[0], height=obj.size[2], physicsClientId=client)
+            else:
+                col = p.createCollisionShape(p.GEOM_MESH, vertices=_cylinder_prism(half[0], obj.size[2]), physicsClientId=client)
             vis = p.createVisualShape(p.GEOM_CYLINDER, radius=half[0], length=obj.size[2],
                                       rgbaColor=COLORS[obj.color], physicsClientId=client)
             bid = p.createMultiBody(obj.mass_kg, col, vis, basePosition=obj.pose.position,
