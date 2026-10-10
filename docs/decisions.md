@@ -1056,3 +1056,15 @@ Official adapter references checked during implementation: [OpenRouter tool call
 **Tooling:** `pilot show --run DIR [--task ID --arm repair|resample --round N --unverified]` lists a run's rounds, or re-executes one recorded plan in the PyBullet GUI.
 - This re-simulates the plan; it is not the bit-exact replay of W2.6.
 - `--unverified` executes a blocked plan, to show the failure the verifier prevented.
+
+## D36. Close approval, dwell and input-validation gaps (2026-10-10)
+
+The owner approved the five findings from the implementation review for correction.
+
+- **Live scene binding.** Execution checks the initialized scene identity and the live poses of all expected bodies, including obstacles, table, bin parts and robot base, using the existing position/orientation tolerances. A missing body or changed pose produces `stale_approval`. The initialized base pose accounts for PyBullet's inertial/COM frame. This extends the existing arm/object checks; it does not authenticate arbitrary changes to the simulator's internals.
+- **S1 dwell evidence.** The Executor records object poses at every physics step of the final dwell alongside linear/angular speed histories. The independent Judge requires matching, complete histories and whole-box containment throughout that dwell, as well as the final containment check. Older execution records remain readable with empty pose history, but cannot establish S1 when rejudged. Previously saved verdicts are historical evidence under the earlier implementation, not retroactively recomputed results.
+- **Physical geometry.** Object dimensions, obstacle half-extents and bin dimensions/thickness must be strictly positive and finite. Object mass is nonnegative; zero remains valid for a static body. Cylinder x/y diameters must agree so the simulator and bounding-box geometry describe the same object.
+- **Simulation diagnostics.** Simulation and stale-approval outcomes retain sanitized exception messages and tracebacks without local-variable capture. Known planner credentials and recognized credential patterns are redacted. This evidence is logged with the evaluation and is not supplied as planner feedback.
+- **Cosmos reply format.** After an optional reasoning block, the answer must contain exactly one verdict line followed by one nonempty reason line. Missing, duplicate or extra answer lines become `uncertain`. Cosmos remains shadow-only under D34.
+
+No thresholds are relaxed. Judge independence is preserved. Harder task generation and worker supervision remain separate W2/W3 work. Source changes invalidate existing prepared cohort snapshots under D33; prepare a fresh cohort before collecting new comparable evidence.

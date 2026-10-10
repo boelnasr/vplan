@@ -33,6 +33,7 @@ def rec(cube: Pose = Pose(position=(0.45, 0.28, 0.02)), contacts: tuple[ContactS
                            contacts=contacts, tracking_error_rad={}, final_poses={"cube_red": cube, "cube_green": green},
                            rest_lin_hist={"cube_red": lin, "cube_green": (0.0,) * DWELL},
                            rest_ang_hist={"cube_red": ang, "cube_green": (0.0,) * DWELL},
+                           rest_pose_hist={"cube_red": (cube,) * DWELL, "cube_green": (green,) * DWELL},
                            q_replay=(), finger_replay=(), object_replay={})
 
 

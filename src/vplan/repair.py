@@ -3,10 +3,31 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from copy import deepcopy
+import re
+import traceback
 
 from vplan.config import config_hash, config_snapshot as read_config_snapshot
 from vplan.records import (ArmResult, EvaluationResult, GeneratedTask, PairedResult, PickPlacePlan,
                            PlannerFeedback, Refusal, RoundRecord)
+
+
+def _simulation_error(exc: Exception, outcome: str, secret: str | None) -> EvaluationResult:
+    """Persist useful exception evidence without credentials or captured frame locals."""
+    from vplan.planners.nemotron import _sanitize
+
+    def sanitize(text):
+        text = _sanitize(text, secret)
+        text = re.sub(r"(?i)\bbasic\s+[A-Za-z0-9+/=_-]+", "Basic [REDACTED]", text)
+        text = re.sub(r"\b(?:sk-|nvapi-)[A-Za-z0-9_-]{8,}", "[REDACTED]", text)
+        return re.sub(r"(?i)\b(api[_-]?key|access[_-]?token|authorization|password|secret)"
+                      r"([\"']?\s*[:=]\s*)"
+                      r"(?:\"(?:\\[^\r\n]|[^\"\\\r\n])*\"|'(?:\\[^\r\n]|[^'\\\r\n])*'"
+                      r"|[\"'][^\r\n]*|[^\s\"'<>;,]+)",
+                      r"\1\2[REDACTED]", text)
+
+    trace = "".join(traceback.TracebackException.from_exception(exc, capture_locals=False).format())
+    return EvaluationResult(outcome=outcome, error_type=type(exc).__name__,
+                            error_message=sanitize(str(exc)), error_traceback=sanitize(trace))
 
 
 def _wrap_deg(yaw: float) -> int:
@@ -101,9 +122,9 @@ def evaluate_pair(task: GeneratedTask, planner, *,
                 if not isinstance(evaluation, EvaluationResult):
                     raise TypeError("evaluator must return EvaluationResult")
             except StaleApproval as exc:
-                evaluation = EvaluationResult(outcome="stale_approval", error_type=type(exc).__name__)
+                evaluation = _simulation_error(exc, "stale_approval", getattr(planner, "_secret", None))
             except Exception as exc:
-                evaluation = EvaluationResult(outcome="sim_error", error_type=type(exc).__name__)
+                evaluation = _simulation_error(exc, "sim_error", getattr(planner, "_secret", None))
         failures = ()
         if evaluation is not None:
             failures = tuple(f"{f.check}:{f.stage}" for f in evaluation.findings)

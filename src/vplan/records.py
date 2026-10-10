@@ -8,6 +8,8 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 Vec3 = tuple[float, float, float]
+PositiveFloat = Annotated[float, Field(gt=0)]
+PositiveVec3 = tuple[PositiveFloat, PositiveFloat, PositiveFloat]
 Quat = tuple[float, float, float, float]
 IDENTITY_QUAT: Quat = (0.0, 0.0, 0.0, 1.0)
 UNIT_QUAT_TOL = 1e-5  # |norm - 1|; PyBullet's float32-normalised quaternions are well inside this
@@ -45,22 +47,28 @@ class SceneObject(Frozen):
     id: str
     shape: Literal["cube", "cylinder"]
     color: Color
-    size: Vec3  # full bounding-box extents in the object frame, m
+    size: PositiveVec3  # full bounding-box extents in the object frame, m
     pose: Pose  # pose of the object's center
-    mass_kg: float = 0.1
+    mass_kg: float = Field(default=0.1, ge=0)
+
+    @model_validator(mode="after")
+    def _cylinder_diameter(self) -> "SceneObject":
+        if self.shape == "cylinder" and self.size[0] != self.size[1]:
+            raise ValueError("cylinder x/y dimensions must be the same diameter")
+        return self
 
 
 class Obstacle(Frozen):
     id: str
-    half_extents: Vec3
+    half_extents: PositiveVec3
     pose: Pose
 
 
 class Bin(Frozen):
     floor_center: Vec3  # top surface of the bin floor, m
-    inner_size_xy: tuple[float, float]
-    wall_height: float
-    wall_thickness: float = 0.01
+    inner_size_xy: tuple[PositiveFloat, PositiveFloat]
+    wall_height: PositiveFloat
+    wall_thickness: PositiveFloat = 0.01
 
 
 class Scene(Frozen):
@@ -243,6 +251,7 @@ class ExecutionRecord(Frozen):
     final_poses: dict[str, Pose]
     rest_lin_hist: dict[str, tuple[float, ...]]  # |v| per physics step over the final dwell, per object
     rest_ang_hist: dict[str, tuple[float, ...]]  # |w| per physics step over the final dwell, per object
+    rest_pose_hist: dict[str, tuple[Pose, ...]] = Field(default_factory=dict)  # aligned with dwell velocities, 240 Hz
     q_replay: tuple[tuple[float, ...], ...]  # 60 Hz arm joints
     finger_replay: tuple[tuple[float, float], ...]  # 60 Hz finger joints
     object_replay: dict[str, tuple[Pose, ...]]  # 60 Hz object poses: replay is playback, not re-simulation
@@ -380,6 +389,8 @@ class EvaluationResult(Frozen):
     judge: JudgeResult | None = None
     record: ExecutionRecord | None = None
     error_type: str | None = None
+    error_message: str | None = None
+    error_traceback: str | None = None
 
 
 class RoundRecord(Frozen):

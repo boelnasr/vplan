@@ -80,10 +80,20 @@ def judge(rec: ExecutionRecord, scene: Scene, oracle_target: str, outcome: str =
                            details={"refusal": "correct" if ok else "false refusal on a feasible task"})
     size = {o.id: o.size for o in scene.objects}
     in_bin = {oid: _in_bin(scene, rec.final_poses[oid], size[oid], cfg["bin_floor_tol_m"]) for oid in size}
-    lin, ang = rec.rest_lin_hist[oracle_target], rec.rest_ang_hist[oracle_target]
-    dwell_ok = len(lin) * rec.dt_s >= cfg["rest_dwell_s"] - 1e-9 and len(ang) == len(lin)
+    lin, ang = rec.rest_lin_hist.get(oracle_target, ()), rec.rest_ang_hist.get(oracle_target, ())
+    poses = rec.rest_pose_hist.get(oracle_target, ())
+    evidence_error = ""
+    if rec.dt_s <= 0 or not poses or len(poses) * rec.dt_s < cfg["rest_dwell_s"] - 1e-9:
+        evidence_error = "missing or short physics-frequency dwell pose history"
+    elif len(lin) != len(poses) or len(ang) != len(poses):
+        evidence_error = "dwell pose and velocity history lengths do not match"
+    elif poses[-1] != rec.final_poses[oracle_target]:
+        evidence_error = "last dwell pose does not match the final pose"
+    dwell_ok = not evidence_error
     at_rest = dwell_ok and max(lin) < cfg["rest_lin_vel_mps"] and max(ang) < cfg["rest_ang_vel_radps"]
-    s1 = in_bin[oracle_target] and at_rest
+    dwell_containment = dwell_ok and all(_in_bin(scene, pose, size[oracle_target], cfg["bin_floor_tol_m"])
+                                       for pose in poses)
+    s1 = in_bin[oracle_target] and at_rest and dwell_containment
     s2 = in_bin[oracle_target] and not any(v for k, v in in_bin.items() if k != oracle_target)
 
     def significant(cs: ContactSummary) -> bool:
@@ -96,5 +106,6 @@ def judge(rec: ExecutionRecord, scene: Scene, oracle_target: str, outcome: str =
     preds = {"S1": s1, "S2": s2, "V1": not bad, "V2": rec.max_joint_violation_rad <= 0.0, "V3": v3, "V4": not self_hits}
     violations = tuple(f"{cs.body_a}:{cs.link_a}<->{cs.body_b}:{cs.link_b}@{cs.stage}" for cs in (bad + self_hits)[:20])
     details = {"in_bin": str(in_bin), "at_rest": str(at_rest), "dwell_ok": str(dwell_ok),
+               "dwell_containment": str(dwell_containment), "dwell_evidence_error": evidence_error,
                "sigma_evidence_steps": str(len(rec.sigma_min_steps))}
     return JudgeResult(success=all(preds.values()), predicates=preds, violations=violations, details=details)
