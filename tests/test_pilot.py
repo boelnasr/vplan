@@ -482,3 +482,59 @@ def test_wsl_paths_are_rejected_for_the_windows_interpreter(monkeypatch, capsys)
     monkeypatch.setattr(pilot, "prepare", lambda out, **kw: pytest.fail("must refuse before preparing"))
     assert main(["pilot", "prepare", "--output", "/mnt/c/Users/x/pilot"]) == 2
     assert "Windows" in capsys.readouterr().err
+
+
+def multi_round_run(prepared, monkeypatch):
+    """Task 1 is blocked once in the repair arm, then repaired (same script as the end-to-end test)."""
+    from vplan.evaluate import pilot
+    from vplan.repair import evaluate_pair
+    tasks = fake_cohort().tasks
+    bad = tasks[1].oracle.reference_plan.model_copy(update={"rationale": "blocked-me"})
+    scripted_provider(monkeypatch, [response(tasks[0].oracle.reference_plan)] + [response(bad)] * 4
+                      + [response(tasks[1].oracle.reference_plan)] + [status_error(500)])
+    monkeypatch.setattr(pilot, "evaluate_pair", lambda task, planner, **kw: evaluate_pair(
+        task, planner, evaluator=lambda p: blocked() if p.rationale == "blocked-me" else executed(), **kw))
+    return pilot.run_live(prepared, env_file=env_file(prepared.parent)), tasks
+
+
+def test_select_round_returns_the_recorded_plan_and_task(prepared, monkeypatch):
+    from vplan.evaluate import pilot
+    run, tasks = multi_round_run(prepared, monkeypatch)
+    task_id = tasks[1].metadata.task_id
+    task, rnd = pilot.select_round(run, task_id, "repair", 0)
+    assert task.metadata.task_id == task_id and rnd.round_index == 0
+    assert rnd.call.plan.rationale == "blocked-me" and rnd.evaluation.outcome == "blocked"
+    task, last = pilot.select_round(run, task_id, "repair")  # default: the arm's final round
+    assert last.round_index == 1 and last.evaluation.outcome == "executed"
+    assert last.call.plan == tasks[1].oracle.reference_plan
+
+
+def test_select_round_errors_are_clean(prepared, monkeypatch):
+    from vplan.evaluate import pilot
+    run, tasks = multi_round_run(prepared, monkeypatch)
+    with pytest.raises(pilot.PilotError, match="no task"):
+        pilot.select_round(run, "dev_missing", "repair")
+    with pytest.raises(pilot.PilotError, match="round 3"):
+        pilot.select_round(run, tasks[1].metadata.task_id, "repair", 3)
+
+
+def test_list_rounds_summarizes_each_task_and_arm(prepared, monkeypatch):
+    from vplan.evaluate import pilot
+    run, tasks = multi_round_run(prepared, monkeypatch)
+    lines = pilot.list_rounds(run)
+    assert len(lines) == 3
+    assert lines[1].startswith(tasks[1].metadata.task_id) and "repair: blocked -> executed" in lines[1]
+    assert "service_failure" in lines[2]
+
+
+def test_cli_pilot_show_wiring(monkeypatch, tmp_path, capsys):
+    from vplan import cli
+    from vplan.evaluate import pilot
+    calls = []
+    monkeypatch.setattr(pilot, "list_rounds", lambda run: ["dev_a  repair: executed"])
+    monkeypatch.setattr(cli, "_show_round", lambda *a, **kw: calls.append((a, kw)) or 0)
+    assert cli.main(["pilot", "show", "--run", str(tmp_path)]) == 0
+    assert "dev_a" in capsys.readouterr().out and calls == []
+    assert cli.main(["pilot", "show", "--run", str(tmp_path), "--task", "dev_a", "--arm", "resample",
+                     "--round", "1", "--unverified"]) == 0
+    assert calls == [((str(tmp_path), "dev_a", "resample", 1), {"unverified": True})]

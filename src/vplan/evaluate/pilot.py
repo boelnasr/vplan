@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 
 from vplan.config import CONFIG_DIR, config_hash, config_snapshot
 from vplan.planners.nemotron import NemotronPlanner
-from vplan.records import GeneratedTask, PairedResult, TaskMetadata, TaskOracle, TaskSpec
+from vplan.records import GeneratedTask, PairedResult, RoundRecord, TaskMetadata, TaskOracle, TaskSpec
 from vplan.repair import _terminal, evaluate_pair
 from vplan.tasks import CohortPreparationError, prepare_cohort
 
@@ -454,3 +454,45 @@ def write_report(run_dir: Path) -> dict:
     _write_json(run_dir / "summary.json", summary)
     (run_dir / "report.md").write_text(_render(summary, meta), encoding="utf-8")
     return summary
+
+
+def _read_results(run_dir: Path) -> list[PairedResult]:
+    path = Path(run_dir) / "results.jsonl"
+    if not path.is_file():
+        raise PilotError(f"{path} is missing: not a pilot run directory")
+    # a killed run may leave a truncated final line; write_report flags it, viewing just skips it
+    results = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            results.append(PairedResult.model_validate_json(line))
+        except ValueError:
+            continue
+    return results
+
+
+def _round_label(rnd: RoundRecord) -> str:
+    return rnd.evaluation.outcome if rnd.evaluation is not None else rnd.call.outcome
+
+
+def list_rounds(run_dir: Path) -> list[str]:
+    """One line per task: the outcome of every round in each arm (round 0 is the shared initial call)."""
+    return [f"{r.task_id}  " + "  ".join(f"{arm.arm}: " + " -> ".join(_round_label(x) for x in arm.rounds)
+                                         for arm in (r.repair, r.resample))
+            for r in _read_results(run_dir)]
+
+
+def select_round(run_dir: Path, task_id: str, arm: str, round_index: int | None = None
+                 ) -> tuple[GeneratedTask, RoundRecord]:
+    """The recorded plan of one round plus its task, for re-execution. The run lives at <cohort>/runs/<run_id>;
+    source drift is tolerated because viewing produces no evidence."""
+    result = next((r for r in _read_results(run_dir) if r.task_id == task_id), None)
+    if result is None:
+        raise PilotError(f"no task {task_id} in {run_dir}")
+    rounds = getattr(result, arm).rounds
+    if round_index is None:
+        round_index = rounds[-1].round_index
+    rnd = next((x for x in rounds if x.round_index == round_index), None)
+    if rnd is None:
+        raise PilotError(f"{arm} arm of {task_id} has no round {round_index} (rounds 0-{rounds[-1].round_index})")
+    tasks = load_prepared(Path(run_dir).parent.parent, allow_source_drift=True).tasks
+    return next(t for t in tasks if t.metadata.task_id == task_id), rnd

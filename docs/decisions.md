@@ -1020,3 +1020,39 @@ Official adapter references checked during implementation: [OpenRouter tool call
 **Decision: NO-GO** (D24). The live Cosmos gate is dropped from the demo. Cosmos remains a shadow annotator only (spec §11 shadow study), run offline over saved frames and never called verification.
 
 **Not pursued:** Cosmos3-Nano (16B) does not fit 16 GB in BF16, and the card supports only BF16. A prompt or camera search on these same 30 frames would overfit the pilot.
+
+## D35. Feedback pilot result (R7): retries help, feedback value unproven (2026-10-10)
+
+**Run:** `runs/pilot-dev-20c/runs/20261010T104124Z`.
+- The cohort was re-prepared after the D33 M9 fix and the D34 visual code (manifest sha256 `ab7b2e72…`).
+- Model: `nvidia/nemotron-3-ultra-550b-a55b:free` via OpenRouter, temperature 0.7 for both arms.
+- The run completed 20/20, with no service failures and no malformed replies. It made 28 unique requests, 24 logical calls per arm.
+
+**Result:**
+
+| Measure | Value |
+|---|---|
+| First attempt | 16/20 |
+| Repair | 20/20 |
+| Resample | 20/20 |
+| Repair only / resample only | 0 / 0 |
+| Both arms succeed | 20 |
+| Repair opportunities | 4 |
+| Repair-arm tokens | about 87k |
+| Resample-arm tokens | about 80k |
+
+- All 4 initial failures were verifier blocks: collision in transport (3) and in the place descent (1).
+- In every one of the 4, both arms succeeded on their first retry.
+
+**Reading:**
+- Verifier-gated retrying raises success from 80% to 100% on this cohort.
+- Whether findings beat blind resampling is **not shown**: the cohort is too easy to separate the arms.
+- This is a development pilot with no significance claim. R7 stays open.
+
+**Next:** W2.2 harder tasks (denser transport obstacles, tighter placements, the impossibility types), then repeat the comparison on a cohort where first attempts and resampling fail more often.
+
+**Earlier runs** (`runs/pilot-dev-20/…`) are evidence of the M9 bug only, not results.
+
+**Tooling:** `pilot show --run DIR [--task ID --arm repair|resample --round N --unverified]` lists a run's rounds, or re-executes one recorded plan in the PyBullet GUI.
+- This re-simulates the plan; it is not the bit-exact replay of W2.6.
+- `--unverified` executes a blocked plan, to show the failure the verifier prevented.

@@ -66,6 +66,11 @@ python -m vplan pilot run --input runs/pilot-dev --env-file .env
 
 # 3. Rebuild summary.json/report.md for a run that was killed before it could write them.
 python -m vplan pilot report --run runs/pilot-dev/runs/<run_id>
+
+# 4. List every task's rounds, then watch one recorded plan in the PyBullet GUI.
+#    --round 0 is the shared first attempt; --unverified executes it even if the verifier blocked it.
+python -m vplan pilot show --run runs/pilot-dev/runs/<run_id>
+python -m vplan pilot show --run runs/pilot-dev/runs/<run_id> --task <task_id> --round 0 --unverified
 ```
 
 - `prepare` writes `tasks.jsonl` (planner-visible), `oracle.jsonl` (private targets and reference plans), `exclusions.jsonl` and, last, `manifest.json` with file, config and source hashes.

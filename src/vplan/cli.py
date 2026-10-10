@@ -1,4 +1,4 @@
-"""Command-line entry points: demo-once and the feedback pilot (prepare / run / report)."""
+"""Command-line entry points: demo-once and the feedback pilot (prepare / run / report / show)."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +8,47 @@ import pybullet as p
 
 from vplan.pipeline import run_attempt
 from vplan.planners.heuristic import heuristic_geometry
+from vplan.records import PickPlacePlan
+
+
+def _open_gui() -> int:
+    # only the execution client gets the GUI; the verifier's preview client stays DIRECT (one GUI per process)
+    gui = p.connect(p.GUI)
+    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=gui)
+    p.resetDebugVisualizerCamera(1.3, 45, -30, [0.45, 0.1, 0.1], physicsClientId=gui)
+    return gui
+
+
+def _print_result(res) -> None:
+    print("outcome:", res.outcome)
+    for f in res.findings:
+        print("finding:", f.model_dump_json())
+    if res.judge:
+        print("judge:", res.judge.model_dump_json())
+
+
+def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, unverified: bool) -> int:
+    """Re-execute one recorded pilot plan in the GUI. Re-simulation, not a bit-exact replay (W2.6)."""
+    from vplan.evaluate import pilot
+    task, rnd = pilot.select_round(run, task_id, arm, round_index)
+    print(f"{task_id} {arm} round {rnd.round_index}: recorded {rnd.evaluation.outcome if rnd.evaluation else rnd.call.outcome}")
+    print("instruction:", task.task.instruction)
+    if not isinstance(rnd.call.plan, PickPlacePlan):
+        print("nothing to execute:", rnd.call.plan.model_dump_json() if rnd.call.plan else rnd.call.outcome)
+        return 1
+    print("plan:", rnd.call.plan.model_dump_json())
+    gui = _open_gui()
+    try:
+        # unverified executes even a blocked plan, to show the failure the verifier prevented
+        res = run_attempt(rnd.call.plan, task.task.scene, task.oracle.target_id, verify_gate=not unverified,
+                          physics_client=gui, realtime=True)
+        if res.outcome == "blocked":
+            print("blocked before motion (pass --unverified to watch it execute anyway)")
+        input("done - press Enter to close the GUI ")
+    finally:
+        p.disconnect(gui)
+    _print_result(res)
+    return 0 if (res.judge and res.judge.success) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,6 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--allow-paid", action="store_true", help="permit non-free or non-OpenRouter models")
     rp = psub.add_parser("report", help="rebuild summary.json and report.md for a run directory")
     rp.add_argument("--run", required=True)
+    sh = psub.add_parser("show", help="list a run's rounds, or re-execute one recorded plan in the PyBullet GUI")
+    sh.add_argument("--run", required=True)
+    sh.add_argument("--task", help="task id; omit to list every task's rounds")
+    sh.add_argument("--arm", choices=("repair", "resample"), default="repair")
+    sh.add_argument("--round", type=int, help="0 is the shared initial call; default: the arm's final round")
+    sh.add_argument("--unverified", action="store_true", help="execute even if the verifier blocks the plan")
     args = parser.parse_args(argv)
     if args.cmd == "pilot":
         from vplan.evaluate import pilot
@@ -51,6 +98,11 @@ def main(argv: list[str] | None = None) -> int:
                                          temperature=args.temperature, limit=args.limit,
                                          allow_source_drift=args.allow_source_drift, allow_paid=args.allow_paid)
                 print(f"report: {run_dir}")
+            elif args.pilot_cmd == "show":
+                if args.task is None:
+                    print("\n".join(pilot.list_rounds(args.run)))
+                    return 0
+                return _show_round(args.run, args.task, args.arm, args.round, unverified=args.unverified)
             else:
                 summary = pilot.write_report(args.run)
                 print("complete" if summary["complete"] else "INCOMPLETE" if not summary["finished"] else "limited")
@@ -62,12 +114,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "demo-once":
         from vplan.tasks.scenes import make_basic_scene
         scene = make_basic_scene(with_obstacle=args.obstacle)
-        gui = None
-        if args.gui:
-            # only the execution client gets the GUI; the verifier's preview client stays DIRECT (one GUI per process)
-            gui = p.connect(p.GUI)
-            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=gui)
-            p.resetDebugVisualizerCamera(1.3, 45, -30, [0.45, 0.1, 0.1], physicsClientId=gui)
+        gui = _open_gui() if args.gui else None
         try:
             res = run_attempt(heuristic_geometry(scene, "cube_red"), scene, "cube_red",
                               physics_client=gui, realtime=gui is not None)
@@ -76,10 +123,6 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if gui is not None:
                 p.disconnect(gui)
-        print("outcome:", res.outcome)
-        for f in res.findings:
-            print("finding:", f.model_dump_json())
-        if res.judge:
-            print("judge:", res.judge.model_dump_json())
+        _print_result(res)
         return 0 if (res.judge and res.judge.success) else 1
     return 2
