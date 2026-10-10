@@ -22,8 +22,8 @@ QUESTIONS: dict[str, str] = {
 }
 REPLY_FORMAT = ("Answer pass if yes, fail if no, uncertain if the images do not show it clearly. "
                 "Reply with exactly two lines:\nVERDICT: pass|fail|uncertain\nREASON: <one line>")
-_VERDICT_LINE = re.compile(r"^VERDICT:(.*)$", re.MULTILINE)
-_REASON_LINE = re.compile(r"^REASON:(.*)$", re.MULTILINE)
+_VERDICT_LINE = re.compile(r"VERDICT:\s*(pass|fail|uncertain)\s*", re.IGNORECASE)
+_REASON_LINE = re.compile(r"REASON:\s*(.+)")
 
 
 class CosmosUnavailable(RuntimeError):
@@ -40,16 +40,18 @@ def stage_question(stage: Stage, task: TaskSpec) -> str:
 
 
 def parse_verdict(raw: str) -> tuple[Verdict, str]:
-    """Strict: exactly one `VERDICT:` line with pass/fail/uncertain after any reasoning block, else uncertain."""
+    """Require exactly a verdict and a nonempty reason after any optional reasoning block."""
     if "</think>" in raw:
         raw = raw.rsplit("</think>", 1)[1]
     elif "<think>" in raw:
         raw = ""  # truncated reasoning: any verdict-looking text is still thought, not the answer
-    values = [v.strip().lower() for v in _VERDICT_LINE.findall(raw)]
-    if len(values) != 1 or values[0] not in ("pass", "fail", "uncertain"):
+    lines = [line.strip() for line in raw.strip().splitlines()]
+    if len(lines) != 2:
         return "uncertain", "unparseable reply"
-    reason = _REASON_LINE.search(raw)
-    return values[0], reason.group(1).strip() if reason else ""
+    verdict, reason = _VERDICT_LINE.fullmatch(lines[0]), _REASON_LINE.fullmatch(lines[1])
+    if verdict is None or reason is None or not reason.group(1).strip():
+        return "uncertain", "unparseable reply"
+    return verdict.group(1).lower(), reason.group(1).strip()
 
 
 def ask_cosmos(images: dict[str, bytes], question: str, base_url: str, *, model: str = DEFAULT_MODEL,

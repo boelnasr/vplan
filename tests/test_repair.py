@@ -125,10 +125,11 @@ def test_events_preserve_call_before_evaluator_crash_and_no_oracle_feedback():
     client = FakeClient([response(generated().oracle.reference_plan)])
     def crash(plan):
         assert events[-1]["event"] == "request_completed"
-        raise RuntimeError("internal secret")
+        raise RuntimeError("solver diagnostic")
     result = evaluate_pair(task, planner(client), evaluator=crash, event_sink=events.append)
     assert result.repair.outcome == "sim_error"
-    assert "internal secret" not in result.model_dump_json()
+    assert "solver diagnostic" in result.initial.evaluation.error_message
+    assert "solver diagnostic" not in json.dumps(client.requests)
 
 
 def test_only_one_schema_retry_per_consecutive_malformed_sequence():

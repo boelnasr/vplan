@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pybullet as p
 
-from vplan.records import Scene
+from vplan.records import Pose, Scene, scene_hash
 from vplan.robot import ARM_JOINTS, HOME_Q, PANDA_URDF, TCP_LINK
 
 FINGER_JOINTS = ("panda_finger_joint1", "panda_finger_joint2")
@@ -29,6 +29,8 @@ class SceneHandles:
     names: dict[int, str] = field(default_factory=dict)
     self_excluded: set[tuple[int, int]] = field(default_factory=set)
     physics_hash: str = ""  # config_hash of the physics config the world was initialised with (set by init_physics)
+    initialized_scene_hash: str = ""
+    initial_base_poses: dict[str, Pose] = field(default_factory=dict)
 
 
 def _box(client: int, half: tuple[float, float, float], pos: tuple[float, float, float],
@@ -113,6 +115,12 @@ def build_scene(scene: Scene, client: int, q: np.ndarray = HOME_Q) -> SceneHandl
     set_arm(h, q)
     for j in h.finger_joints:
         p.resetJointState(robot, j, FINGER_OPEN_M, physicsClientId=client)
+    h.initialized_scene_hash = scene_hash(scene)
+    # PyBullet reports the base COM, which may differ from the URDF base frame.
+    # Compare live COM transforms to these initialized COM transforms, never to robot_base directly.
+    for name, bid in {**h.bodies, "robot": robot}.items():
+        pos, orn = p.getBasePositionAndOrientation(bid, physicsClientId=client)
+        h.initial_base_poses[name] = Pose(position=tuple(pos), orientation=tuple(orn))
     return h
 
 

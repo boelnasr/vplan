@@ -73,13 +73,20 @@ def _check_start_state(h: SceneHandles, traj: CandidateTrajectory, scene: Scene,
     phys = cfgs["physics"]
     if h.physics_hash != config_hash(phys):
         raise StaleApproval("world was initialised with a different physics config than the approved one")
+    if h.initialized_scene_hash != scene_hash(scene):
+        raise StaleApproval("world was initialised with a different scene than the approved one")
+    live_ids = {p.getBodyUniqueId(i, physicsClientId=h.client)
+                for i in range(p.getNumBodies(physicsClientId=h.client))}
+    for name, expected in h.initial_base_poses.items():
+        bid = h.robot if name == "robot" else h.bodies.get(name)
+        if bid not in live_ids:
+            raise StaleApproval(f"expected body '{name}' is missing since approval")
+        pos, orn = p.getBasePositionAndOrientation(bid, physicsClientId=h.client)
+        if (np.linalg.norm(np.array(pos) - np.array(expected.position)) > phys["start_state_tol_m"]
+                or rot_angle(quat_to_R(orn), quat_to_R(expected.orientation)) > phys["start_state_tol_orient_rad"]):
+            raise StaleApproval(f"body '{name}' moved since approval")
     if np.max(np.abs(_arm_q(h) - np.array(traj.q_start))) > phys["start_state_tol_rad"]:
         raise StaleApproval("arm start state differs from the verified start state")
-    for o in scene.objects:
-        pos, orn = p.getBasePositionAndOrientation(h.bodies[o.id], physicsClientId=h.client)
-        if (np.linalg.norm(np.array(pos) - np.array(o.pose.position)) > phys["start_state_tol_m"]
-                or rot_angle(quat_to_R(orn), quat_to_R(o.pose.orientation)) > phys["start_state_tol_orient_rad"]):
-            raise StaleApproval(f"object '{o.id}' moved since approval")
 
 
 def _set_fingers(h: SceneHandles, width_each: float, force: float) -> None:
@@ -181,12 +188,15 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
         tracking[f"{i}:{seg.label}"] = float(np.max(np.abs(_arm_q(h) - Q[-1])))  # index: transports repeat labels
     lin_hist: dict[str, list[float]] = {o.id: [] for o in scene.objects}
     ang_hist: dict[str, list[float]] = {o.id: [] for o in scene.objects}
+    pose_hist: dict[str, list[Pose]] = {o.id: [] for o in scene.objects}
     for _ in range(int(round(jcfg["rest_dwell_s"] / dt))):
         physics_step("rest")
         for o in scene.objects:
             v, w = p.getBaseVelocity(h.bodies[o.id], physicsClientId=client)
             lin_hist[o.id].append(float(np.linalg.norm(v)))
             ang_hist[o.id].append(float(np.linalg.norm(w)))
+            pos, orn = p.getBasePositionAndOrientation(h.bodies[o.id], physicsClientId=client)
+            pose_hist[o.id].append(Pose(position=tuple(pos), orientation=tuple(orn)))
     final = {}
     for o in scene.objects:
         pos, orn = p.getBasePositionAndOrientation(h.bodies[o.id], physicsClientId=client)
@@ -199,5 +209,6 @@ def execute(h: SceneHandles, traj: CandidateTrajectory, scene: Scene, target_id:
                            tracking_error_rad=tracking, final_poses=final,
                            rest_lin_hist={k: tuple(v) for k, v in lin_hist.items()},
                            rest_ang_hist={k: tuple(v) for k, v in ang_hist.items()},
+                           rest_pose_hist={k: tuple(v) for k, v in pose_hist.items()},
                            q_replay=tuple(q_rep), finger_replay=tuple(f_rep),
                            object_replay={k: tuple(v) for k, v in o_rep.items()})

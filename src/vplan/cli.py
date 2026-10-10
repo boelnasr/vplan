@@ -19,6 +19,16 @@ def _open_gui() -> int:
     return gui
 
 
+def _wait_and_close(gui: int) -> None:
+    try:
+        input("done - press Enter to close the GUI ")
+    except EOFError:  # no interactive stdin (piped or backgrounded): nothing to wait for
+        pass
+    finally:
+        if p.isConnected(gui):  # the user may already have closed the window
+            p.disconnect(gui)
+
+
 def _print_result(res) -> None:
     print("outcome:", res.outcome)
     for f in res.findings:
@@ -44,9 +54,8 @@ def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, un
                           physics_client=gui, realtime=True)
         if res.outcome == "blocked":
             print("blocked before motion (pass --unverified to watch it execute anyway)")
-        input("done - press Enter to close the GUI ")
     finally:
-        p.disconnect(gui)
+        _wait_and_close(gui)
     _print_result(res)
     return 0 if (res.judge and res.judge.success) else 1
 
@@ -118,11 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         try:
             res = run_attempt(heuristic_geometry(scene, "cube_red"), scene, "cube_red",
                               physics_client=gui, realtime=gui is not None)
-            if gui is not None:
-                input("done - press Enter to close the GUI ")
         finally:
             if gui is not None:
-                p.disconnect(gui)
+                _wait_and_close(gui)
         _print_result(res)
         return 0 if (res.judge and res.judge.success) else 1
     return 2

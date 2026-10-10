@@ -538,3 +538,27 @@ def test_cli_pilot_show_wiring(monkeypatch, tmp_path, capsys):
     assert cli.main(["pilot", "show", "--run", str(tmp_path), "--task", "dev_a", "--arm", "resample",
                      "--round", "1", "--unverified"]) == 0
     assert calls == [((str(tmp_path), "dev_a", "resample", 1), {"unverified": True})]
+
+
+def test_show_round_survives_closed_window_and_closed_stdin(monkeypatch, capsys):
+    """Closing the GUI window or running without a terminal must still print the outcome."""
+    import builtins
+    import pybullet as p
+    from vplan import cli
+    from vplan.evaluate import pilot
+    task = fake_cohort(n=1).tasks[0]
+    rnd = records.RoundRecord(call_id="c0", round_index=0, call=records.PlannerCall.model_validate_json(
+        json.dumps({"outcome": "proposed", "plan": task.oracle.reference_plan.model_dump(mode="json"),
+                    "provider": "x", "model": "m", "protocol": "forced", "next_protocol": "forced",
+                    "temperature": 0.7, "latency_s": 0.0, "raw_request": {}})))
+    monkeypatch.setattr(pilot, "select_round", lambda *a: (task, rnd))
+    client = p.connect(p.DIRECT)
+    monkeypatch.setattr(cli, "_open_gui", lambda: client)
+
+    def fake_attempt(*a, **kw):
+        p.disconnect(client)  # the user closed the window
+        return type("R", (), {"outcome": "executed", "findings": [], "judge": None})()
+    monkeypatch.setattr(cli, "run_attempt", fake_attempt)
+    monkeypatch.setattr(builtins, "input", lambda *a: (_ for _ in ()).throw(EOFError()))
+    assert cli._show_round("run", task.metadata.task_id, "repair", 0, unverified=False) == 1
+    assert "outcome: executed" in capsys.readouterr().out
