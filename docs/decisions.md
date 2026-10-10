@@ -1246,3 +1246,36 @@ python scripts/spikes/cylinder_contact.py --variant prism16 --cohort fresh --jso
 `first` covers seeds 0–59 (21 cylinder drafts, one Verifier-blocked); `comparison` covers 60–143 (45 cylinder drafts). Both were involved in selecting 16 sides, so neither is a held-out estimate. The predeclared fresh range 144–263 yielded 60 cylinder drafts: **58/58 Judge-eligible accepted**, with seeds 165 and 179 blocked by the Verifier before Judge. The per-seed result is in `docs/evidence/cylinder-contact-fresh.json`. This gives a separate post-selection check, not a guarantee that the residual S1 artifact is gone or that all configurations have the same risk.
 
 This source change invalidates previously prepared task sets under D33. GUI and Cosmos-view visual checks remain open.
+
+## D45. Hard feasible pilot cohort, and the easy rerun after D36/D43 (2026-10-10)
+
+**Easy rerun.** The pilot cohort was prepared fresh on the fixed code (`runs/pilot-dev-20d`, seed 0, n 20: 20/20 accepted from 20 candidates) and run on OpenRouter with the free Ultra model at temperature 0.7 (run `20261010T210231Z`).
+- OpenRouter returned 429 on tasks 15–17, and the D33 guard stopped the run after 3 consecutive service failures (status `incomplete`).
+- Over the 14 tasks that did not hit a service failure:
+  - first attempt succeeded 12/14;
+  - repair succeeded 14/14;
+  - resample succeeded 14/14;
+  - repair-only 0, resample-only 0.
+- There were no simulation errors or stale approvals under the D36 checks.
+- This repeats D35: retries help, but the easy cohort cannot separate feedback from resampling. It is incomplete evidence, not a result.
+
+**Hard cohort.** `pilot prepare --generator hard` builds feasible-only tasks from W2.2 `draft_task(seed, "feasible", distractors, obstacles)`. The default `--generator pilot` is unchanged: its files are byte-identical.
+- **Acceptance** uses the same loop as `prepare_cohort`: one captured config snapshot, and a heuristic witness that must pass `run_attempt` with Judge success (`witness_rejection` rules).
+- **Strata** rotate by accepted index:
+
+  | Stratum | Distractors | Obstacles |
+  |---|---|---|
+  | `dense_distractors` | 3 | 1 |
+  | `dense_obstacles` | 1 | 3 |
+  | `dense_both` | 3 | 3 |
+
+  Templates are whatever `draft_task` picks. Draft dead ends are excluded with their `GenerationRejected` reason.
+- **Ids** hash `feedback-pilot-hard-v1:{seed}:{stratum}`, so they never collide with pilot ids.
+- **Manifest.** It records `generator`; a missing field means `pilot`. `load_prepared` refuses unknown generators and strata the generator doesn't produce. `run.json` records the generator, and `TaskStratum` gains the three dense values.
+- **Trial yield** (seed 0, n 20, max 100): 20/22.
+  - The 2 exclusions are `no_room_for_obstacle`; there were 0 witness or Judge failures.
+  - Strata 7/7/6.
+  - Templates: color 13, next_to 4, shape 2, nearest_bin 1.
+  - Targets: 14 cubes, 6 cylinders.
+- **Reading.** The dense scenes are solvable by the heuristic witness by construction (draft clearances), so "hard" means more clutter and more varied phrasing, not harder geometry. Whether this lowers first-attempt success enough to separate the arms is open until the R7 rerun.
+- No Judge, Verifier, physics or threshold change.
