@@ -1019,6 +1019,8 @@ Official adapter references checked during implementation: [OpenRouter tool call
 
 **Decision: NO-GO** (D24). The live Cosmos gate is dropped from the demo. Cosmos remains a shadow annotator only (spec §11 shadow study), run offline over saved frames and never called verification.
 
+**Note (D36 parser, 2026-10-10):** the numbers above use the lenient parser that ran during the pilot. Rescoring the saved replies with the strict two-line parser from D36 leaves thinking off at 0.500 and lowers thinking on to about 0.60: 7 replies have no `REASON:` line and become `uncertain`. The figure is approximate because those replies never got the side-view re-ask. The no-go stands.
+
 **Not pursued:** Cosmos3-Nano (16B) does not fit 16 GB in BF16, and the card supports only BF16. A prompt or camera search on these same 30 frames would overfit the pilot.
 
 ## D35. Feedback pilot result (R7): retries help, feedback value unproven (2026-10-10)
