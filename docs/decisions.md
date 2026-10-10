@@ -752,7 +752,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
 
 **Residual rulings:**
 - **Release height exactly 0 is legal but brittle.** The zero-penetration rule plus the IK and height tolerances can produce a spurious V-6 finding. The W2.3 prompt recommends 0.02–0.10 m; the heuristic uses 0.05.
-- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation.
+- **Unverified mode (config 1) currently blocks any grounding finding,** including a place outside the bin. W2.5 must restrict that to an unknown target_id, so out-of-bin plans execute and fail S1 in the ablation. **Fixed 2026-10-04** (ahead of W2.5): `pipeline.run_attempt` filters to `plan_field == "target_id"`, covered by two tests in `tests/test_pipeline.py`.
 
 **W2.2 generator checklist** (from the review):
 - Bins sit on the table: `floor_center.z = table_top_z + wall_thickness`.
@@ -970,3 +970,89 @@ Consequences:
 ## Tooling notes (not project decisions)
 
 - gstack: auto-upgrade is enabled. Continuous checkpoint mode is enabled, which conflicts with the global "never commit unless asked" rule. Decide which one wins when the repo is `git init`-ed.
+
+
+## D32. Development feedback pilot (2026-10-04)
+
+**Approval:** the owner accepted the proposed 20-task experiment and asked to implement it. Implementation details and progress live in `docs/pilot-plan.md`.
+
+- Build a frozen cohort of 20 feasible development tasks across clear, distractor and obstacle scenes before any model calls. Every accepted task has a successful reference execution; rejected candidate seeds and reasons are retained. Held-out test tasks remain untouched.
+- Compare first-attempt success, verifier-feedback repair, and equal-budget resampling. Repair and resampling share the initial proposal and evaluation, followed by at most three further requests per arm. Stop after execution (even if the Judge fails), refusal or infrastructure failure as required by the existing attempt semantics.
+- Every provider request, including protocol fallbacks and malformed retries, consumes budget. SDK retries are disabled for this pilot so measured request counts match the experiment. Report logical per-arm use and actual unique requests separately.
+- Reference plans, labels and oracle targets remain private. Repair sees structured verifier findings; resampling sees no previous answers or findings.
+- Report every task in the denominator, with paired wins/losses, failure categories, calls, tokens and latency. A 20-task result is diagnostic, not a held-out headline claim or proof that feedback helps.
+- This implements an early slice of W2.2/W2.3/W2.5 and W3 reporting. Impossible-task generation, Cosmos, cloud supervision, deployment, UI and replay remain scheduled work.
+
+Official adapter references checked during implementation: [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/tool-calling), [OpenAI Python SDK retries and timeouts](https://github.com/openai/openai-python#retries).
+
+## D33. Feedback pilot artifacts and run guards (2026-10-04)
+
+- **Layout.** `pilot prepare` writes `tasks.jsonl` (task id, seed, stratum and `TaskSpec` only), `oracle.jsonl` (private target and reference), `exclusions.jsonl`, and finally `manifest.json` with file sha256s, config hashes, per-file and combined source hashes, Python/ManipulaPy versions and git HEAD/dirty. Without a manifest, a directory is not a valid cohort, so a crashed preparation cannot pass as finished. Existing non-empty directories are never overwritten.
+- **Runs.** Each `pilot run` creates a new `runs/<UTC timestamp>/` and never reuses one. `run.json` (status `running` → `complete`, or `incomplete` on an exception), `events.jsonl` and `results.jsonl` are flushed as the run proceeds; `summary.json` and `report.md` follow. Any run that is not complete, or has fewer results than tasks, is titled `INCOMPLETE: k/n tasks`. A `--limit` smoke test is titled `LIMITED: first k of n tasks` and is never reported as complete. `run.json` also records the source digest, git HEAD/dirty, Python and openai/pybullet/ManipulaPy versions; the report warns if ManipulaPy differs from preparation.
+- **Provider failures.** Service failures stay in every denominator, are counted by HTTP status for the shared initial call and per arm, and any failure prefixes the report title with `DEGRADED: n service failures`. A run stops (status `incomplete`, `pilot run` exits 2) before the next task after a 401/402/403/404 or after three consecutive service-failure requests across tasks (likely a quota or rate cap), so a quota outage cannot produce a "complete" report that measures infrastructure.
+- **Arm order alternates.** Odd-numbered tasks (1st, 3rd, ...) run repair then resampling; even-numbered tasks run resampling first. Otherwise an outage or rate cap that starts mid-task would always land on the second arm. `PairedResult.arm_order` records the order; the shared initial call is unchanged.
+- **Repair opportunities** are tasks whose initial round was not terminal, i.e. whose arms actually continued. Tasks that stopped after the shared initial call without success (Judge failure, refusal, simulation error, stale approval, service failure) are reported separately as initial terminal failures.
+- **Temperature 0.7 for both arms.** Resampling only means something if samples differ. Using one temperature for every call in both arms keeps the comparison fair; it is recorded per call and per run.
+- **Free-model guard.** Without `--allow-paid`, runs only call `https://openrouter.ai` with an `nvidia/...` model ending in `:free`. Credentials are read only from the file given with `--env-file` and are never printed or persisted. Path arguments starting with `/mnt/` are refused because the interpreter is Windows Python.
+- **Source-drift refusal.** A run refuses when task/oracle hashes, config hashes or the source digest differ from the manifest, so evidence never mixes snapshots. `--allow-source-drift` proceeds, lists the changed files in `run.json`, and the report flags them. Config changes are always refused.
+- **M9, confirmed and fixed (2026-10-10):** the first full live run (`runs/pilot-dev-20/runs/20261009T233238Z`) received HTTP 200 responses with `choices: null` and `error: {code: 503, metadata.error_type: provider_overloaded}` from the Nvidia upstream. They were scored as `malformed`, which contaminated both `repair_only` pairs (two `malformed_final` resample arms and one malformed shared initial call). `planners/nemotron.py` now classifies an `error` body without `choices` as `service_failure` with `error_type="provider_error_body"` and the body's integer `code` as `status_code`, so it also feeds the stop rule and the fatal-status check. That run stopped as INCOMPLETE at 15/20 after three HTTP 502s and is kept only as evidence; it is not a pilot result. The cohort was re-prepared into `runs/pilot-dev-20b` because the source hash changed.
+
+## D34. Cosmos gate pilot: no-go for the live gate (2026-10-10)
+
+**Setup (W2.1, spec §11).**
+- `nvidia/Cosmos3-Edge` at revision `344d602b128d1bbdacb43b08d0a3626f46343e29`, served locally by vLLM 0.31.0 (torch 2.13.0+cu130) on the RTX 5070 Ti from a separate WSL venv (`~/venvs/cosmos`, outside the repo).
+- Server flags: `--max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 --limit-mm-per-prompt '{"image":3,"video":0}'`, `max_pixels` 409600. It uses about 15.3 of 16 GB. `VLLM_USE_FLASHINFER_SAMPLER=0` is required because the FlashInfer sampler JIT-compiles at startup and needs `nvcc`, which is not installed.
+- 30 independent scenes (generator seeds 1000–1029, disjoint from the dev cohort), 10 per stage, 5 predicate-true / 5 predicate-false. Truth comes from the spec §11 state predicates read back from PyBullet. All negatives are injected (wrong object, offset grasp, outside bin); there are no natural negatives.
+- Two views (front-oblique, top) at 512×512. After `uncertain`, one re-ask adds the side view. A final `uncertain` counts as wrong; abstention is reported separately. One error moves balanced accuracy by 1/30.
+- Code: `src/vplan/visual/` (`render.py`, `cosmos.py`, `predicates.py`), `scripts/spikes/cosmos_pilot.py`. Evidence: `runs/cosmos-pilot/frames/report_{off,on}.md`.
+
+**Result.**
+
+| Mode | Balanced accuracy | TPR | TNR | Abstention | Median / max latency |
+|---|---|---|---|---|---|
+| Thinking off | 0.500 | 0.733 | 0.267 | 0.300 | 0.21 / 0.93 s |
+| Thinking on | 0.700 | 0.933 | 0.467 | 0.000 | 1.18 / 3.45 s |
+
+- Latency passes easily; accuracy misses the 0.90 bar in both modes.
+- The model is biased toward `pass`: with thinking on, it passes 4/5 wrong-object pre-grasps and 3/3 offset grasps.
+- Pre-release with thinking on is 9/10 (5/5 negatives caught). That stage alone is too small a sample to justify a gate.
+
+**Decision: NO-GO** (D24). The live Cosmos gate is dropped from the demo. Cosmos remains a shadow annotator only (spec §11 shadow study), run offline over saved frames and never called verification.
+
+**Not pursued:** Cosmos3-Nano (16B) does not fit 16 GB in BF16, and the card supports only BF16. A prompt or camera search on these same 30 frames would overfit the pilot.
+
+## D35. Feedback pilot result (R7): retries help, feedback value unproven (2026-10-10)
+
+**Run:** `runs/pilot-dev-20c/runs/20261010T104124Z`.
+- The cohort was re-prepared after the D33 M9 fix and the D34 visual code (manifest sha256 `ab7b2e72…`).
+- Model: `nvidia/nemotron-3-ultra-550b-a55b:free` via OpenRouter, temperature 0.7 for both arms.
+- The run completed 20/20, with no service failures and no malformed replies. It made 28 unique requests, 24 logical calls per arm.
+
+**Result:**
+
+| Measure | Value |
+|---|---|
+| First attempt | 16/20 |
+| Repair | 20/20 |
+| Resample | 20/20 |
+| Repair only / resample only | 0 / 0 |
+| Both arms succeed | 20 |
+| Repair opportunities | 4 |
+| Repair-arm tokens | about 87k |
+| Resample-arm tokens | about 80k |
+
+- All 4 initial failures were verifier blocks: collision in transport (3) and in the place descent (1).
+- In every one of the 4, both arms succeeded on their first retry.
+
+**Reading:**
+- Verifier-gated retrying raises success from 80% to 100% on this cohort.
+- Whether findings beat blind resampling is **not shown**: the cohort is too easy to separate the arms.
+- This is a development pilot with no significance claim. R7 stays open.
+
+**Next:** W2.2 harder tasks (denser transport obstacles, tighter placements, the impossibility types), then repeat the comparison on a cohort where first attempts and resampling fail more often.
+
+**Earlier runs** (`runs/pilot-dev-20/…`) are evidence of the M9 bug only, not results.
+
+**Tooling:** `pilot show --run DIR [--task ID --arm repair|resample --round N --unverified]` lists a run's rounds, or re-executes one recorded plan in the PyBullet GUI.
+- This re-simulates the plan; it is not the bit-exact replay of W2.6.
+- `--unverified` executes a blocked plan, to show the failure the verifier prevented.

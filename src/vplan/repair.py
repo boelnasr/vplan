@@ -1,0 +1,177 @@
+"""Paired feedback repair versus blind resampling, sharing the first request and attempt."""
+from __future__ import annotations
+
+from collections.abc import Callable
+from copy import deepcopy
+
+from vplan.config import config_hash, config_snapshot as read_config_snapshot
+from vplan.records import (ArmResult, EvaluationResult, GeneratedTask, PairedResult, PickPlacePlan,
+                           PlannerFeedback, Refusal, RoundRecord)
+
+
+def _wrap_deg(yaw: float) -> int:
+    """Round to 1 degree and wrap to [-180, 180) so 179.7 and -179.8 count as the same heading."""
+    return (round(yaw) + 180) % 360 - 180
+
+
+def _geometry(plan):
+    if plan is None:
+        return None
+    data = plan.model_dump(mode="json")
+    data.pop("rationale", None)
+    if isinstance(plan, PickPlacePlan):
+        data["grasp"]["yaw_deg"] = _wrap_deg(plan.grasp.yaw_deg)
+        data["grasp"]["pregrasp_offset_m"] = round(plan.grasp.pregrasp_offset_m, 3)
+        data["transport_via"] = [[round(v, 3) for v in xyz] for xyz in plan.transport_via]
+        data["place"]["position"] = [round(v, 3) for v in plan.place.position]
+        data["place"]["yaw_deg"] = _wrap_deg(plan.place.yaw_deg)
+        data["place"]["release_height_m"] = round(plan.place.release_height_m, 3)
+    return data  # Numeric equality identifies rounded -0.0 and +0.0 as the same geometry.
+
+
+def _terminal(record):
+    if record.call.outcome == "service_failure":
+        return "service_failure"
+    if record.evaluation is not None and record.evaluation.outcome != "blocked":
+        return record.evaluation.outcome
+    return None
+
+
+def _usage(rounds):
+    values = [r.call.total_tokens for r in rounds]
+    known = sum(v for v in values if v is not None)
+    missing = sum(v is None for v in values)
+    return (known if not missing else None), known, missing, sum(r.call.latency_s for r in rounds)
+
+
+def evaluate_pair(task: GeneratedTask, planner, *,
+                  evaluator: Callable[[PickPlacePlan], EvaluationResult] | None = None,
+                  config_snapshot: dict[str, dict] | None = None,
+                  event_sink: Callable[[dict], None] | None = None,
+                  arm_order: tuple[str, str] = ("repair", "resample")) -> PairedResult:
+    """Run at most seven unique requests (four logical calls per arm).
+
+    The initial proposal and its evaluation are shared. Subsequent resampling requests
+    receive no previous answers, findings, errors or summaries. event_sink is invoked
+    before/after each request and after each evaluation; sink exceptions propagate.
+    The optional evaluator is a one-plan offline seam; production closes over private
+    oracle truth only at the Judge boundary and uses one copied config snapshot.
+    arm_order lets callers alternate which arm runs first, so a mid-task outage or
+    rate cap does not systematically land on the same arm.
+    """
+    from vplan.execute.executor import StaleApproval
+
+    if sorted(arm_order) != ["repair", "resample"]:
+        raise ValueError("arm_order must contain 'repair' and 'resample' once each")
+
+    cfgs = deepcopy(read_config_snapshot() if config_snapshot is None else config_snapshot)
+    hashes = {key: config_hash(value) for key, value in cfgs.items()}
+    if evaluator is None:
+        from vplan.pipeline import run_attempt
+
+        def evaluator(plan):
+            attempt = run_attempt(plan, task.task.scene, task.oracle.target_id, feasible=True,
+                                  seed=task.metadata.seed % (2**32), config_snapshot=cfgs)
+            return EvaluationResult(outcome=attempt.outcome, findings=tuple(attempt.findings),
+                                    judge=attempt.judge, record=attempt.record)
+
+    counter = 0
+
+    def emit(event):
+        if event_sink is not None:
+            event_sink({"task_id": task.metadata.task_id, **event})
+
+    def run_round(arm, index, protocol, feedback, previous):
+        nonlocal counter
+        counter += 1
+        call_id = f"{task.metadata.task_id}:{counter}"
+        def call_event(event):
+            emit({"arm": arm, "round_index": index, "call_id": call_id, **event})
+        # Sink errors deliberately stay outside the simulation exception handler.
+        call = planner.plan(task.task, protocol=protocol, feedback=feedback, event_sink=call_event)
+        evaluation = None
+        if isinstance(call.plan, Refusal):
+            # Pilot tasks are feasible; refusal is terminal and unsuccessful.
+            from vplan.records import JudgeResult
+            evaluation = EvaluationResult(outcome="refused", judge=JudgeResult(
+                success=False, predicates={"R": False}, violations=("R",), details={"reason": "feasible task refused"}))
+        elif isinstance(call.plan, PickPlacePlan):
+            try:
+                evaluation = evaluator(call.plan)
+                if not isinstance(evaluation, EvaluationResult):
+                    raise TypeError("evaluator must return EvaluationResult")
+            except StaleApproval as exc:
+                evaluation = EvaluationResult(outcome="stale_approval", error_type=type(exc).__name__)
+            except Exception as exc:
+                evaluation = EvaluationResult(outcome="sim_error", error_type=type(exc).__name__)
+        failures = ()
+        if evaluation is not None:
+            failures = tuple(f"{f.check}:{f.stage}" for f in evaluation.findings)
+            if evaluation.outcome in ("sim_error", "stale_approval", "refused"):
+                failures += (evaluation.outcome,)
+            if evaluation.outcome == "executed" and evaluation.judge is not None and not evaluation.judge.success:
+                failures += tuple(dict.fromkeys(
+                    [f"judge:{name}" for name, passed in evaluation.judge.predicates.items() if not passed]
+                    + [f"judge:{v}" for v in evaluation.judge.violations]))
+        elif call.outcome != "proposed":
+            failures = (call.outcome,)
+        record = RoundRecord(call_id=call_id, round_index=index, call=call, evaluation=evaluation,
+                             repeat_plan=call.plan is not None and previous is not None and
+                                         _geometry(call.plan) == _geometry(previous),
+                             observable_failures=failures)
+        emit({"event": "round_completed", "arm": arm, "round": record.model_dump(mode="json")})
+        return record
+
+    initial = run_round("initial", 0, "forced", None, None)
+
+    def run_arm(name):
+        rounds = [initial]
+        terminal = _terminal(initial)
+        protocol = initial.call.next_protocol
+        previous = initial.call.plan
+        malformed_count = int(initial.call.outcome == "malformed")
+        for index in range(1, 4):
+            if terminal is not None:
+                break
+            last = rounds[-1]
+            feedback = None
+            if name == "repair":
+                # Verifier already limits findings; preserve order and one finding per check.
+                findings, checks = [], set()
+                for finding in (() if last.evaluation is None else last.evaluation.findings):
+                    if finding.check not in checks and len(findings) < 5:
+                        findings.append(finding)
+                        checks.add(finding.check)
+                feedback = PlannerFeedback(previous_plan=previous, findings=tuple(findings),
+                    schema_errors=last.call.errors,
+                    summaries=tuple(f"round {r.round_index}: " +
+                                    (r.evaluation.outcome if r.evaluation is not None else r.call.outcome)
+                                    for r in rounds[:-1]))
+            record = run_round(name, index, protocol, feedback, previous)
+            rounds.append(record)
+            protocol = record.call.next_protocol
+            if record.call.plan is not None:
+                previous = record.call.plan
+            terminal = _terminal(record)
+            if record.call.outcome == "malformed":
+                malformed_count += 1
+            elif record.call.outcome == "proposed":
+                malformed_count = 0
+            if malformed_count >= 2:
+                terminal = "malformed_final"
+        if terminal is None:
+            terminal = "malformed_final" if rounds[-1].call.outcome == "malformed" else "budget_exhausted"
+        total, known, missing, latency = _usage(rounds)
+        return ArmResult(arm=name, outcome=terminal, rounds=tuple(rounds), call_count=len(rounds),
+                         total_tokens=total, known_total_tokens=known, missing_usage_calls=missing, latency_s=latency)
+
+    arms = {name: run_arm(name) for name in arm_order}
+    repair, resample = arms["repair"], arms["resample"]
+    unique = (initial,) + repair.rounds[1:] + resample.rounds[1:]
+    total, known, missing, latency = _usage(unique)
+    result = PairedResult(task_id=task.metadata.task_id, initial=initial, repair=repair, resample=resample,
+                          unique_call_count=len(unique), unique_total_tokens=total, unique_known_total_tokens=known,
+                          unique_missing_usage_calls=missing, unique_latency_s=latency, config_hashes=hashes,
+                          arm_order=arm_order)
+    emit({"event": "pair_completed", "result": result.model_dump(mode="json")})
+    return result

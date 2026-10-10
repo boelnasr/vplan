@@ -115,3 +115,46 @@ def test_realtime_flag_reaches_the_executor(monkeypatch) -> None:  # demo-once -
     s = make_basic_scene()
     run_attempt(heuristic_geometry(s, "cube_red"), s, "cube_red", realtime=True)
     assert seen["realtime"] is True
+
+
+def test_unverified_mode_executes_out_of_bin_place_so_the_judge_scores_it() -> None:  # D29: config 1 blocks only unknown ids
+    s = make_basic_scene()
+    good = heuristic_geometry(s, "cube_red")
+    off_bin = good.model_copy(update={"place": good.place.model_copy(update={"position": (0.45, 0.10, 0.02)})})
+    res = run_attempt(off_bin, s, "cube_red", verify_gate=False)
+    assert res.outcome == "executed" and res.judge is not None and not res.judge.success
+
+
+def test_unverified_mode_still_blocks_an_unknown_target() -> None:
+    s = make_basic_scene()
+    ghost = heuristic_geometry(s, "cube_red").model_copy(update={"target_id": "cube_purple"})
+    res = run_attempt(ghost, s, "cube_red", verify_gate=False)
+    assert res.outcome == "blocked" and res.findings[0].plan_field == "target_id"
+
+
+def test_supplied_snapshot_controls_execution_when_disk_changes(monkeypatch, tmp_path):
+    import json
+    import vplan.config as config
+    cfgs = config_snapshot()
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    for name, cfg in cfgs.items():
+        (tmp_path / f"{name}.json").write_text(json.dumps(cfg), encoding="utf-8")
+    real_verify = pipeline.verify
+    def change_disk(*args, **kwargs):
+        (tmp_path / "judge.json").write_text('{"broken": true}', encoding="utf-8")
+        (tmp_path / "physics.json").write_text('{"broken": true}', encoding="utf-8")
+        return real_verify(*args, **kwargs)
+    monkeypatch.setattr(pipeline, "verify", change_disk)
+    scene = make_basic_scene()
+    result = run_attempt(heuristic_geometry(scene, "cube_red"), scene, "cube_red", config_snapshot=cfgs)
+    assert result.outcome == "executed" and result.judge.success
+
+
+def test_verified_unknown_target_is_repairable_before_motion(monkeypatch):
+    scene = make_basic_scene()
+    bad = heuristic_geometry(scene, "cube_red").model_copy(update={"target_id": "unknown_object"})
+    monkeypatch.setattr(pipeline, "build_trajectory", lambda *a, **k: pytest.fail("unknown target reached motion"))
+    monkeypatch.setattr(pipeline, "execute", lambda *a, **k: pytest.fail("unknown target reached execution"))
+    result = run_attempt(bad, scene, "cube_red", verify_gate=True)
+    assert result.outcome == "blocked" and result.record is None
+    assert [(f.check, f.plan_field) for f in result.findings] == [("grounding", "target_id")]
