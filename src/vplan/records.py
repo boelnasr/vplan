@@ -455,3 +455,33 @@ class PairedResult(Frozen):
     config_hashes: dict[str, str]
     # Execution order of the two arms after the shared initial call; default matches pre-alternation data.
     arm_order: tuple[Literal["repair", "resample"], Literal["repair", "resample"]] = ("repair", "resample")
+
+
+AttemptMode = Literal["repair", "resample", "unverified"]
+
+
+class AttemptRecord(Frozen):
+    """One run_task attempt (spec §10): every round's call and evaluation, and exactly one outcome."""
+    attempt_id: str
+    mode: AttemptMode
+    k: int = Field(ge=0, le=3)
+    outcome: AttemptOutcome
+    rounds: tuple[RoundRecord, ...] = Field(min_length=1, max_length=4)
+    call_count: int = Field(ge=1, le=4)
+    judge: JudgeResult | None = None  # the final round's Judge result (executed or refused); None otherwise
+    total_tokens: int | None
+    known_total_tokens: int = Field(ge=0)
+    missing_usage_calls: int = Field(ge=0)
+    latency_s: float = Field(ge=0)
+    config_hashes: dict[str, str]
+
+    @model_validator(mode="after")
+    def _budget(self) -> "AttemptRecord":
+        if self.call_count != len(self.rounds) or self.call_count > self.k + 1:
+            raise ValueError("one round per planner call, at most k + 1 calls")
+        return self
+
+    @property
+    def success(self) -> bool:
+        """Every outcome stays in the denominator; only an executed or refused attempt the Judge accepts counts."""
+        return self.outcome in ("executed", "refused") and self.judge is not None and self.judge.success
