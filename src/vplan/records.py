@@ -485,3 +485,32 @@ class AttemptRecord(Frozen):
     def success(self) -> bool:
         """Every outcome stays in the denominator; only an executed or refused attempt the Judge accepts counts."""
         return self.outcome in ("executed", "refused") and self.judge is not None and self.judge.success
+
+
+# ---- R9 supervised worker (W2.8) -------------------------------------------------------------
+class WorkerResult(Frozen):
+    """What one worker try writes to its result file; the parent never parses worker stdout."""
+    attempt_id: str
+    job: str
+    outcome: AttemptOutcome
+    status_code: int | None = None
+    retry_after_s: float | None = Field(default=None, ge=0)
+    payload: dict[str, Any] = {}
+    error_type: str | None = None
+    error_message: str | None = None
+    error_traceback: str | None = None
+
+
+class SupervisedAttempt(Frozen):
+    """One results.jsonl line, written only by the parent. Crashes and hangs are sim_error (spec §16)."""
+    attempt_id: str
+    job: str
+    outcome: AttemptOutcome
+    tries: int = Field(ge=1)
+    wall_s: float = Field(ge=0)
+    exit_code: int | None = None
+    status_code: int | None = None
+    payload: dict[str, Any] = {}
+    error_type: str | None = None
+    error_message: str | None = None
+    error_traceback: str | None = None
