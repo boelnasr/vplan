@@ -996,3 +996,27 @@ Official adapter references checked during implementation: [OpenRouter tool call
 - **Free-model guard.** Without `--allow-paid`, runs only call `https://openrouter.ai` with an `nvidia/...` model ending in `:free`. Credentials are read only from the file given with `--env-file` and are never printed or persisted. Path arguments starting with `/mnt/` are refused because the interpreter is Windows Python.
 - **Source-drift refusal.** A run refuses when task/oracle hashes, config hashes or the source digest differ from the manifest, so evidence never mixes snapshots. `--allow-source-drift` proceeds, lists the changed files in `run.json`, and the report flags them. Config changes are always refused.
 - **M9, confirmed and fixed (2026-10-10):** the first full live run (`runs/pilot-dev-20/runs/20261009T233238Z`) received HTTP 200 responses with `choices: null` and `error: {code: 503, metadata.error_type: provider_overloaded}` from the Nvidia upstream. They were scored as `malformed`, which contaminated both `repair_only` pairs (two `malformed_final` resample arms and one malformed shared initial call). `planners/nemotron.py` now classifies an `error` body without `choices` as `service_failure` with `error_type="provider_error_body"` and the body's integer `code` as `status_code`, so it also feeds the stop rule and the fatal-status check. That run stopped as INCOMPLETE at 15/20 after three HTTP 502s and is kept only as evidence; it is not a pilot result. The cohort was re-prepared into `runs/pilot-dev-20b` because the source hash changed.
+
+## D34. Cosmos gate pilot: no-go for the live gate (2026-10-10)
+
+**Setup (W2.1, spec §11).**
+- `nvidia/Cosmos3-Edge` at revision `344d602b128d1bbdacb43b08d0a3626f46343e29`, served locally by vLLM 0.31.0 (torch 2.13.0+cu130) on the RTX 5070 Ti from a separate WSL venv (`~/venvs/cosmos`, outside the repo).
+- Server flags: `--max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 --limit-mm-per-prompt '{"image":3,"video":0}'`, `max_pixels` 409600. It uses about 15.3 of 16 GB. `VLLM_USE_FLASHINFER_SAMPLER=0` is required because the FlashInfer sampler JIT-compiles at startup and needs `nvcc`, which is not installed.
+- 30 independent scenes (generator seeds 1000–1029, disjoint from the dev cohort), 10 per stage, 5 predicate-true / 5 predicate-false. Truth comes from the spec §11 state predicates read back from PyBullet. All negatives are injected (wrong object, offset grasp, outside bin); there are no natural negatives.
+- Two views (front-oblique, top) at 512×512. After `uncertain`, one re-ask adds the side view. A final `uncertain` counts as wrong; abstention is reported separately. One error moves balanced accuracy by 1/30.
+- Code: `src/vplan/visual/` (`render.py`, `cosmos.py`, `predicates.py`), `scripts/spikes/cosmos_pilot.py`. Evidence: `runs/cosmos-pilot/frames/report_{off,on}.md`.
+
+**Result.**
+
+| Mode | Balanced accuracy | TPR | TNR | Abstention | Median / max latency |
+|---|---|---|---|---|---|
+| Thinking off | 0.500 | 0.733 | 0.267 | 0.300 | 0.21 / 0.93 s |
+| Thinking on | 0.700 | 0.933 | 0.467 | 0.000 | 1.18 / 3.45 s |
+
+- Latency passes easily; accuracy misses the 0.90 bar in both modes.
+- The model is biased toward `pass`: with thinking on, it passes 4/5 wrong-object pre-grasps and 3/3 offset grasps.
+- Pre-release with thinking on is 9/10 (5/5 negatives caught). That stage alone is too small a sample to justify a gate.
+
+**Decision: NO-GO** (D24). The live Cosmos gate is dropped from the demo. Cosmos remains a shadow annotator only (spec §11 shadow study), run offline over saved frames and never called verification.
+
+**Not pursued:** Cosmos3-Nano (16B) does not fit 16 GB in BF16, and the card supports only BF16. A prompt or camera search on these same 30 frames would overfit the pilot.

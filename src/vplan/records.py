@@ -197,6 +197,15 @@ class CandidateTrajectory(Frozen):
         return self
 
 
+
+# ---- visual gate (spec §11) ------------------------------------------------------------------
+class VisualVerdict(Frozen):
+    """One Cosmos request. A learned visual check, never verification; unparseable replies become `uncertain`."""
+    verdict: Literal["pass", "fail", "uncertain"]
+    reason: str
+    latency_s: float = Field(ge=0)
+    raw: str
+
 # ---- execution and judging ---------------------------------------------------------------------
 class ContactSummary(Frozen):
     """Contacts aggregated per (bodies, links, stage): per-step rows would be megabytes per attempt."""
