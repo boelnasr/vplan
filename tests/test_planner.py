@@ -120,6 +120,18 @@ def test_service_error_is_sanitized_and_no_retry():
     assert result.total_tokens is None
 
 
+@pytest.mark.parametrize("code, status", [(503, 503), (402, 402), ("overloaded", None)])
+def test_http_200_error_body_is_a_service_failure_not_malformed(code, status):
+    # Observed on OpenRouter: HTTP 200, choices null, error {code: 503, "provider_overloaded"} (D33 M9).
+    task, _ = fixture()
+    body = {"id": "gen-1", "choices": None, "model": None, "usage": None,
+            "error": {"message": "Upstream error from Nvidia: Service temporarily overloaded", "code": code,
+                      "metadata": {"error_type": "provider_overloaded"}}}
+    result = planner(FakeClient([body])).plan(task)
+    assert result.outcome == "service_failure" and result.status_code == status
+    assert result.next_protocol == "forced" and result.raw_response["error"]["code"] == code
+
+
 def test_unsupported_protocol_is_an_outcome_with_next_budgeted_format():
     task, _ = fixture()
     error = RuntimeError("tools unsupported")

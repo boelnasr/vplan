@@ -95,6 +95,12 @@ def _response_call(response, common: dict, secret: str | None) -> PlannerCall:
         raw = sanitized if isinstance(sanitized, dict) else {"provider_response": sanitized}
         if not isinstance(sanitized, dict):
             raise ValueError("response must be an object")
+        provider_error = raw.get("error")
+        if provider_error and not raw.get("choices"):
+            # OpenRouter can return HTTP 200 with an error body (e.g. upstream 503); that is the provider failing, not the model.
+            code = provider_error.get("code") if isinstance(provider_error, dict) else None
+            return PlannerCall(**common, **metadata, raw_response=raw, outcome="service_failure",
+                               error_type="provider_error_body", status_code=code if type(code) is int else None)
         errors = []
         model = raw.get("model")
         if model is None or isinstance(model, str):
