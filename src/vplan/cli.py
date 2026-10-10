@@ -37,12 +37,33 @@ def _print_result(res) -> None:
         print("judge:", res.judge.model_dump_json())
 
 
-def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, unverified: bool) -> int:
-    """Re-execute one recorded pilot plan in the GUI. Re-simulation, not a bit-exact replay (W2.6)."""
+def _replay_round(task, rnd) -> int:
+    """Play back the stored ExecutionRecord of one round (W2.6): no physics, so it shows exactly what was judged."""
+    from vplan import replay
+    rec = rnd.evaluation.record if rnd.evaluation else None
+    if rec is None:
+        print("no execution record to replay (the round was not executed)")
+        return 1
+    print(f"replaying {len(rec.q_replay)} recorded frames")
+    gui = _open_gui()
+    try:
+        replay.replay(rec, task.task.scene, gui=True, client=gui)
+    finally:
+        _wait_and_close(gui)
+    if rnd.evaluation.judge:
+        print("recorded judge:", rnd.evaluation.judge.model_dump_json())
+    return 0
+
+
+def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, unverified: bool,
+                replay: bool = False) -> int:
+    """Re-execute one recorded pilot plan in the GUI (re-simulation), or with replay=True play back its stored record."""
     from vplan.evaluate import pilot
     task, rnd = pilot.select_round(run, task_id, arm, round_index)
     print(f"{task_id} {arm} round {rnd.round_index}: recorded {rnd.evaluation.outcome if rnd.evaluation else rnd.call.outcome}")
     print("instruction:", task.task.instruction)
+    if replay:
+        return _replay_round(task, rnd)
     if not isinstance(rnd.call.plan, PickPlacePlan):
         print("nothing to execute:", rnd.call.plan.model_dump_json() if rnd.call.plan else rnd.call.outcome)
         return 1
@@ -89,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--arm", choices=("repair", "resample"), default="repair")
     sh.add_argument("--round", type=int, help="0 is the shared initial call; default: the arm's final round")
     sh.add_argument("--unverified", action="store_true", help="execute even if the verifier blocks the plan")
+    sh.add_argument("--replay", action="store_true", help="play back the stored execution record instead of re-simulating")
     args = parser.parse_args(argv)
     if args.cmd == "pilot":
         from vplan.evaluate import pilot
@@ -111,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
                 if args.task is None:
                     print("\n".join(pilot.list_rounds(args.run)))
                     return 0
-                return _show_round(args.run, args.task, args.arm, args.round, unverified=args.unverified)
+                extra = {"replay": True} if args.replay else {}  # default call unchanged
+                return _show_round(args.run, args.task, args.arm, args.round, unverified=args.unverified, **extra)
             else:
                 summary = pilot.write_report(args.run)
                 print("complete" if summary["complete"] else "INCOMPLETE" if not summary["finished"] else "limited")
