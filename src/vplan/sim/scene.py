@@ -14,6 +14,20 @@ HAND_LINK = "panda_hand"
 FINGER_OPEN_M = 0.04  # per finger
 COLORS = {"red": (0.85, 0.1, 0.1, 1), "green": (0.1, 0.7, 0.2, 1), "blue": (0.1, 0.3, 0.9, 1),
           "yellow": (0.95, 0.85, 0.1, 1), "purple": (0.6, 0.2, 0.7, 1), "orange": (0.95, 0.5, 0.1, 1)}
+# D43: PyBullet's built-in cylinder re-picks its rim contacts on a flat floor and gets ERP kicks of ~0.5 rad/s
+# that fail the Judge's at-rest check. A convex prism with few corners has far fewer such re-picks; 16 sides measured
+# best (1/65 cylinder witnesses still kicked, vs 4/65 for 32 sides and 10/65 for the built-in shape).
+CYLINDER_SIDES = 16
+CONVEX_MARGIN_M = 0.001  # PyBullet's default margin inflates convex meshes outward by this much (measured: rests 1 mm high)
+
+
+def _cylinder_prism(radius: float, height: float) -> list[tuple[float, float, float]]:
+    """Vertices of a CYLINDER_SIDES-gon prism, centred on the origin, shrunk by the collision margin so that the
+    effective contact surface has its flats on `radius` and its faces at +-height/2."""
+    radius, height = radius - CONVEX_MARGIN_M, height - 2 * CONVEX_MARGIN_M
+    r_vertex = radius / np.cos(np.pi / CYLINDER_SIDES)
+    angles = 2 * np.pi * (np.arange(CYLINDER_SIDES) + 0.5) / CYLINDER_SIDES
+    return [(float(r_vertex * np.cos(a)), float(r_vertex * np.sin(a)), z) for z in (-height / 2, height / 2) for a in angles]
 
 
 @dataclass
@@ -93,7 +107,7 @@ def build_scene(scene: Scene, client: int, q: np.ndarray = HOME_Q) -> SceneHandl
         if obj.shape == "cube":
             bid = _box(client, half, obj.pose.position, obj.pose.orientation, obj.mass_kg, COLORS[obj.color])
         else:
-            col = p.createCollisionShape(p.GEOM_CYLINDER, radius=half[0], height=obj.size[2], physicsClientId=client)
+            col = p.createCollisionShape(p.GEOM_MESH, vertices=_cylinder_prism(half[0], obj.size[2]), physicsClientId=client)
             vis = p.createVisualShape(p.GEOM_CYLINDER, radius=half[0], length=obj.size[2],
                                       rgbaColor=COLORS[obj.color], physicsClientId=client)
             bid = p.createMultiBody(obj.mass_kg, col, vis, basePosition=obj.pose.position,

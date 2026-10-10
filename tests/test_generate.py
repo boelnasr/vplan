@@ -256,13 +256,14 @@ def test_generate_task_returns_none_when_the_witness_fails():
     assert all(generate_task(s, "feasible", None, witness_evaluator=failing) is None for s in range(3))
 
 
-@pytest.mark.parametrize("seed", [1, 5])  # a cube and a cylinder target (R6 spike: both accepted)
+# a cube, a cylinder, and a cylinder rejected before D43 (S1 at_rest: the built-in cylinder contact artifact)
+@pytest.mark.parametrize("seed", [1, 5, 8])
 def test_feasible_witness_passes_run_attempt_with_judge_success(seed):
     """Real simulation: the stored witness replays to a Judge success under the same snapshot."""
     from vplan.pipeline import run_attempt
     from vplan.tasks import generate_task
     out = generate_task(seed, "feasible", None)
-    assert out is not None, "accepted in the R6 spike"
+    assert out is not None, "accepted in the R6 spike (seed 8 since D43)"
     spec, oracle = out
     assert oracle.reference_result.success
     replay = run_attempt(oracle.reference_plan, spec.scene, oracle.target_id, seed=seed)

@@ -6,7 +6,7 @@ from tests.conftest import make_basic_scene
 from vplan.records import Pose, Scene, SceneObject
 
 from vplan.robot import HOME_Q
-from vplan.sim.scene import build_scene, set_arm
+from vplan.sim.scene import CONVEX_MARGIN_M, CYLINDER_SIDES, _cylinder_prism, build_scene, set_arm
 
 
 def test_build_scene_creates_all_bodies(basic_scene, client) -> None:
@@ -66,3 +66,23 @@ def test_cylinder_object_builds_and_registers(client) -> None:
     h = build_scene(Scene.model_validate(d), client)
     assert "can" in h.bodies and h.names[h.bodies["can"]] == "can"
     assert p.getBodyInfo(h.bodies["can"], physicsClientId=client) is not None
+
+
+def test_cylinder_collides_as_a_prism_with_its_true_size(client) -> None:
+    """D43: the built-in cylinder's rim contacts kick it during the Judge dwell; a convex prism rests like a box.
+    The effective surface (vertices plus the collision margin) keeps the nominal height and radius."""
+    d = make_basic_scene().model_dump()
+    d["objects"] = [*d["objects"], SceneObject(id="can", shape="cylinder", color="blue", size=(0.04, 0.04, 0.08),
+                                                pose=Pose(position=(0.40, 0.10, 0.045))).model_dump()]
+    scene = Scene.model_validate(d)
+    h = build_scene(scene, client)
+    can = h.bodies["can"]
+    assert p.getCollisionShapeData(can, -1, physicsClientId=client)[0][2] == p.GEOM_MESH
+    assert p.getVisualShapeData(can, physicsClientId=client)[0][2] == p.GEOM_CYLINDER
+    p.setGravity(0, 0, -9.81, physicsClientId=client)
+    for _ in range(480):
+        p.stepSimulation(physicsClientId=client)
+    z = p.getBasePositionAndOrientation(can, physicsClientId=client)[0][2]
+    assert abs(z - (scene.table_top_z + 0.04)) < 1e-4  # resting height = half height, as for a box
+    radii = [np.hypot(x, y) for x, y, _ in _cylinder_prism(0.02, 0.08)]
+    assert np.allclose(radii, (0.02 - CONVEX_MARGIN_M) / np.cos(np.pi / CYLINDER_SIDES))  # flats on r - margin
