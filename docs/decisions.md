@@ -780,7 +780,7 @@ Source: `docs/reviews/2026-10-03-codex-gpt-6-astra-design-review.md` (gpt-6-astr
   - Ultra is a reasoning model, so thinking output can multiply the output cost.
   - The hackathon credits ($25 + $25) cover about 1–2 final passes.
   - Task 9 (R4) must record tokens per call, including reasoning, so the budget can be set from measurements. Whether reasoning can be turned off on each provider is an open item.
-- **Forced tool calls on Token Factory are unverified for Ultra.** The D13 fallback chain applies, and the W2.6 smoke test decides.
+- **Forced tool calls on Token Factory are unverified for Ultra.** The D13 fallback chain applies, and the W2.6 smoke test decides (moved to W3.0 by D37).
 - **Headline story:** with the largest Nemotron, first-try success is likely higher and the repair gain smaller. The original framing ("verifier makes a mid-tier model reliable") weakens.
   - Option, not adopted: a cheap Lightning comparison configuration to show that the verifier helps the smaller model more. The owner decides.
 
@@ -912,7 +912,7 @@ Consequences:
 - Development keeps the forced tool call as the primary path. The `"required"` and content-JSON fallbacks stay in W2.3 but are unexercised.
 - The spike checks the schema only. Whether the plans are physically valid is for the verifier, measured in W2.3/W2.5.
 - **Budget:** about 35 s per first-try plan on `:free`. Repair rounds add a similar amount, so plan for parallel calls in batch evaluation.
-- **Still unverified:** forced tool calls for Ultra on **Nebius Token Factory** (the catalog has no function-calling tag). The W2.6 smoke test decides that.
+- **Still unverified:** forced tool calls for Ultra on **Nebius Token Factory** (the catalog has no function-calling tag). The W2.6 smoke test decides that (moved to W3.0 by D37).
 
 ---
 
@@ -1070,3 +1070,121 @@ The owner approved the five findings from the implementation review for correcti
 - **Cosmos reply format.** After an optional reasoning block, the answer must contain exactly one verdict line followed by one nonempty reason line. Missing, duplicate or extra answer lines become `uncertain`. Cosmos remains shadow-only under D34.
 
 No thresholds are relaxed. Judge independence is preserved. Harder task generation and worker supervision remain separate W2/W3 work. Source changes invalidate existing prepared cohort snapshots under D33; prepare a fresh cohort before collecting new comparable evidence.
+
+## D37. Week-2 schedule shift: Nebius work to week 3 (2026-10-10)
+
+- **Token Factory smoke test moves to W3.0.** The forced `submit_plan` call against Nebius Token Factory leaves W2.6 and becomes "W3.0: Nebius setup and Token Factory smoke test", placed before W3.1 and done with the owner's OK first (D19). If forced tool choice is rejected, the D13 fallbacks are tried, and the result is recorded in D13. Token Factory is needed only from the W3.6 dry run onward. W2.6 is renamed "Replay".
+- **No visual gate in `run_task`.** After the D34 no-go, Cosmos is shadow-only, so the `visual_gate` parameter and the W2.5 visual-gate transition tests are dropped. The spec §11 shadow study stays in week 4.
+- **R8 local Docker moves to week 3**, alongside W3.4, unless the owner OKs a Docker install in WSL during week 2. W2.8 keeps the R9 supervisor spike.
+- **Revised Oct 16 milestone:** the repair loop runs on harder `dev` tasks through OpenRouter, the R7 rerun is recorded on a freshly prepared cohort (D33/D36), and the ManipulaPy release is confirmed (W2.7).
+- **W2.7:** `pyproject.toml` already pins `ManipulaPy[simulation]==1.4.1` from PyPI. The owner confirms whether that release contains the spec §17 fixes.
+- The detailed week-2 plan is `docs/plans/week2.md`.
+
+## D38. Task generator and R6 result (W2.2, 2026-10-10)
+
+- **Reach bound.** `tasks/reach.reach_bound_m()` = 0.9489 m: the maximum TCP (`panda_grasptarget`) distance from the shoulder point S = (0, 0, 0.333), the joint-2 origin. Joint axes 1 and 2 pass through S, so the reachable set is a ball around S. The value is the larger of two estimates:
+  - a dense sample (20,000 configs within the URDF limits plus the q4 limit corners): 0.9480 m;
+  - an analytic triangle-inequality bound over the rigid segments S → joint 4 → joint 6 → TCP (0.3266 + 0.3928 + 0.2295 m): 0.9489 m.
+  - The 0.855 m nominal Panda reach is measured to the flange; the TCP adds about 0.1 m. This replaces the hard-coded 1.6 m in the pilot's `RobotFacts`, which changes the planner-visible TaskSpec; cohorts prepared before this change are invalid under D33.
+  - **Open:** `RobotFacts` doesn't say the bound is measured from the shoulder, not the base. The prompt must state it, or a reach-center field must be added.
+- **Proof margin:** `REACH_MARGIN_M` = 0.05 m.
+  - **Type 1, target out of reach:** |center − S| − half-diagonal(size) > bound + margin.
+  - **Type 2, bin out of reach:** the xy distance from S to the bin center, minus the interior half-diagonal, must exceed bound + margin. The bin interior is treated as a column unbounded in z.
+- **Type 3, target enclosed:** four 2 cm walls plus a lid over a stored cavity (the target's circumscribed footprint plus 1 cm). The proof requires every closed face of the cavity to lie inside a solid panel, with the table as the floor, so the gap is 0.
+  - Those 5 panels come on top of the 0–3 sampled obstacles, so a type-3 scene can have up to 8 obstacles. This deliberately deviates from spec §6's "0–3".
+- **Type 4, referent absent:** a colour+shape pair that is absent from the scene; `target_id` is None.
+- **Templates** (`tasks/referents.resolve_referent`):
+  - color: "the red cube";
+  - shape: "the cylinder";
+  - nearest_bin: xy distance to the bin center;
+  - leftmost: left = world +y;
+  - next_to: the nearest other object within 0.20 m of the anchor.
+  - Values within 3 cm of the extreme count as a tie, so the instruction is ambiguous. The generator picks at random among the phrasings that resolve to exactly the target.
+- **Oracle:** `TaskOracle` gains `feasibility="impossible"` and `proof: ImpossibilityProof`. The reference fields become optional for impossible tasks. The pilot form is unchanged.
+- **Feasible construction:**
+  - 0–3 distractors and 0–3 obstacles;
+  - the bin sits on the table; objects are 4–5 cm;
+  - no initial contacts;
+  - a task is accepted only if the heuristic witness passes `run_attempt` with Judge success.
+  - RNG: `np.random.default_rng([seed, type])` only.
+- **R6 result (60 seeds, deterministic): R6 closed.**
+  - Feasible: 51/60 (85%).
+    - Cubes: 37/37.
+    - Cylinders: 14/21. The 6 failures are all Judge S1 `at_rest`: a single dwell step shows an angular-velocity spike of about 0.3 rad/s against the 0.1 rad/s threshold, most likely PyBullet cylinder contact chatter.
+    - Other rejections: 2 no room for an obstacle, 1 hand–distractor collision.
+    - 0 self-collision findings and 0 `attach_rejected`, so the D29 watch items did not trigger.
+  - Impossible types 1/2/3/4: 59, 60, 59, 60 of 60.
+  - 300 stratified feasible tasks need about 350–400 seeds.
+  - **Open:** accepted feasible tasks lean toward cubes (37 vs. 14). Decide before W3.3 whether to accept that or investigate the cylinder dwell spike. No threshold was changed.
+
+## D39. Template-aware heuristic planner (W2.4, 2026-10-10)
+
+- `planners/heuristic.HeuristicPlanner` uses the same `PlannerCall` interface as `NemotronPlanner` (provider "heuristic", model "template-heuristic"). It accepts only a `TaskSpec`; anything else raises TypeError.
+- Grounding uses `resolve_referent`.
+- **Refusal order:**
+  1. no template match → `other`;
+  2. no referent → `no_matching_object`;
+  3. ambiguous → `other`;
+  4. target clearance > reach bound + margin → `target_unreachable`;
+  5. bin clearance > the same bound → `destination_unreachable`.
+- The reach cutoffs reuse the D38 proof tests, so the heuristic never refuses a task that is within reach.
+- The heuristic doesn't refuse type 3 (enclosed). Spec §7 lists only the reach and no-match refusals, so the Verifier blocks these plans, and the heuristic baseline scores 0 on type 3.
+- It is deterministic and ignores feedback. Its repair rounds after the first therefore end as `repeat_plan`; the report must say so for the heuristic row.
+
+## D40. `run_task` and the spec §10 outcomes (W2.5, 2026-10-10)
+
+- `repair.run_task(spec, oracle, planner, k=3, mode)` returns an `AttemptRecord`. The mode is "repair", "resample" or "unverified".
+  - The pilot's `evaluate_pair` shares the same round and continuation helpers, so pilot behaviour and saved `PairedResult` data are unchanged.
+- **Budget:** k is 0–3, so at most k+1 planner calls. k=0 is config 2.
+  - A malformed reply or a protocol error uses up a round.
+  - Two malformed replies in a row end the attempt as `malformed_final`. This is the pilot rule, stricter than spec §10's "on the last allowed round". **Open:** keep this rule for configs 3 and 7?
+- **`unverified` (config 1):** blocks only an unknown `target_id` (D29). Out-of-bin plans execute and fail S1.
+  - This holds only through the default evaluator; a custom evaluator controls its own verify gate.
+  - **Open:** run config 1 with k=0?
+- **Impossible tasks:**
+  - A refusal is scored by the Judge's refusal branch (R = not feasible).
+  - An executed plan on an impossible task gets R=False in `repair._attempted_impossible`, outside `judge/`. **Open:** move this into `judge.judge`?
+  - On type 4, the planned target stands in as the oracle target for physics evidence, so S1/S2 on such records describe the planned object.
+  - Whether the refusal reason matches the proof's reason is scored at report time (spec §13).
+- **Exceptions:** exceptions from motion, verify or execute become `sim_error`; `StaleApproval` becomes `stale_approval`.
+- **R7 rerun:** not run here; it needs a fresh cohort and the owner's OK for live calls.
+
+## D41. Keyless replay (W2.6, 2026-10-10)
+
+- `vplan.replay.replay(record, scene, gui=False, client=None, on_frame=None)` plays back an `ExecutionRecord`'s `q_replay`, `finger_replay` and `object_replay` (60 Hz) using resets only. It never steps physics, so it needs no keys or GPU.
+- It takes `scene` in addition to the plan's interface, because a record stores only `scene_hash`. It rejects:
+  - a scene whose hash doesn't match;
+  - misaligned stream lengths;
+  - object streams that don't match the scene.
+- **"Bit-for-bit":**
+  - the returned frames are the recorded values;
+  - joints and positions read back from PyBullet exactly;
+  - orientations read back only to about 1e-19, because PyBullet converts quaternions through a rotation matrix.
+- `pilot show … --replay` plays a stored round and prints its recorded Judge verdict. Plain `pilot show` still re-simulates.
+- `on_frame` is the hook for 30 fps capture in W3.5.
+
+## D42. R9 supervised worker (W2.8, 2026-10-10)
+
+- **One process per attempt:** each attempt runs as `sys.executable -m vplan.evaluate.worker` with an argument list (no shell), `PYTHONUTF8=1`, and the package's src directory prepended to `PYTHONPATH`.
+- **Worker output:** stdout and stderr go to log files and are never parsed. The result is a `WorkerResult` JSON file, written to a temp file and renamed.
+- **Parent output:** the parent is the only writer of `results.jsonl` (one `SupervisedAttempt` per line, fsynced). It refuses a directory that already has one.
+  - Resume, and spec §14's `attempts.jsonl` naming, are W3.1 work.
+  - Worker files are named by batch index, because attempt IDs contain ':', which Windows does not allow in file names.
+- **Outcomes** (spec §10/§16):
+
+  | What happens | Outcome |
+  |---|---|
+  | Hang past the timeout | `sim_error/worker_timeout` |
+  | Non-zero exit, no result | `sim_error/worker_crash` |
+  | Missing or invalid result | `sim_error/worker_bad_result` |
+  | Exception inside a job | `sim_error`, with its traceback |
+
+  - Provider failures stay `service_failure`.
+  - Re-running a whole attempt on a 429 or 5xx is opt-in (`service_retries` = 0 by default), because a re-run spends planner budget again.
+- **D33 stop rules, applied per attempt:**
+  - 401/402/403/404 stops the batch at once;
+  - 3 consecutive failed attempts stop it.
+  - This is coarser than D33's per-request count. W3.1 decides whether the worker reports failures per request.
+  - The default 600 s timeout must be set for W3.1 against the 180 s LLM deadline.
+- **Jobs** are pluggable through `register(name)` and `--import MODULE`. `basic_attempt` is included; `run_task` gets registered in W3.1.
+- **Tested** with fake faults (kill, hang, fake 429, garbage stdout) under Windows Python launched from WSL. Not tested: a real 429, and Linux-native Python.
