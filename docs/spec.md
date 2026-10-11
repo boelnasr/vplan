@@ -373,7 +373,7 @@ Object names come only from `TaskSpec` attributes (color and shape).
 **Pilot (gate by 2026-10-12)**
 - 30 frames, 10 per stage, balanced by the state predicates.
 - **Go if** balanced accuracy ≥ 0.90 and median latency ≤ 5 s per stage request.
-- **Otherwise:** shadow study only, and the live gate is dropped from the demo.
+- **Otherwise:** shadow study only, and the live gate is dropped from the demo. *Amended by D47 (2026-10-11): after the D34 no-go the owner restored the live gate in the demo only, as an opt-in learned visual check with the pilot numbers shown; evaluation stays physics-only.*
 - It is called a pilot, not validation.
 
 ## 12. Executor [D21, D23.4, D23.8]

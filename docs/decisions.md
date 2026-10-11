@@ -1086,7 +1086,7 @@ No thresholds are relaxed. Judge independence is preserved. Harder task generati
   - a dense sample (20,000 configs within the URDF limits plus the q4 limit corners): 0.9480 m;
   - an analytic triangle-inequality bound over the rigid segments S → joint 4 → joint 6 → TCP (0.3266 + 0.3928 + 0.2295 m): 0.9489 m.
   - The 0.855 m nominal Panda reach is measured to the flange; the TCP adds about 0.1 m. This replaces the hard-coded 1.6 m in the pilot's `RobotFacts`, which changes the planner-visible TaskSpec; cohorts prepared before this change are invalid under D33.
-  - **Open:** `RobotFacts` doesn't say the bound is measured from the shoulder, not the base. The prompt must state it, or a reach-center field must be added.
+  - **Settled (D48):** the planner prompt states that the bound is measured from the shoulder.
 - **Proof margin:** `REACH_MARGIN_M` = 0.05 m.
   - **Type 1, target out of reach:** |center − S| − half-diagonal(size) > bound + margin.
   - **Type 2, bin out of reach:** the xy distance from S to the bin center, minus the interior half-diagonal, must exceed bound + margin. The bin interior is treated as a column unbounded in z.
@@ -1137,13 +1137,13 @@ No thresholds are relaxed. Judge independence is preserved. Harder task generati
   - The pilot's `evaluate_pair` shares the same round and continuation helpers, so pilot behaviour and saved `PairedResult` data are unchanged.
 - **Budget:** k is 0–3, so at most k+1 planner calls. k=0 is config 2.
   - A malformed reply or a protocol error uses up a round.
-  - Two malformed replies in a row end the attempt as `malformed_final`. This is the pilot rule, stricter than spec §10's "on the last allowed round". **Open:** keep this rule for configs 3 and 7?
+  - Two malformed replies in a row end the attempt as `malformed_final`. This is the pilot rule, stricter than spec §10's "on the last allowed round". **Settled (D48):** kept for configs 3 and 7.
 - **`unverified` (config 1):** blocks only an unknown `target_id` (D29). Out-of-bin plans execute and fail S1.
   - This holds only through the default evaluator; a custom evaluator controls its own verify gate.
-  - **Open:** run config 1 with k=0?
+  - **Settled (D48):** config 1 runs with k=0.
 - **Impossible tasks:**
   - A refusal is scored by the Judge's refusal branch (R = not feasible).
-  - An executed plan on an impossible task gets R=False in `repair._attempted_impossible`, outside `judge/`. **Open:** move this into `judge.judge`?
+  - An executed plan on an impossible task gets R=False in `repair._attempted_impossible`, outside `judge/`. **Settled (D48):** moves into `judge.judge` in W3.
   - On type 4, the planned target stands in as the oracle target for physics evidence, so S1/S2 on such records describe the planned object.
   - Whether the refusal reason matches the proof's reason is scored at report time (spec §13).
 - **Exceptions:** exceptions from motion, verify or execute become `sim_error`; `StaleApproval` becomes `stale_approval`.
@@ -1279,3 +1279,56 @@ This source change invalidates previously prepared task sets under D33. GUI and 
   - Targets: 14 cubes, 6 cylinders.
 - **Reading.** The dense scenes are solvable by the heuristic witness by construction (draft clearances), so "hard" means more clutter and more varied phrasing, not harder geometry. Whether this lowers first-attempt success enough to separate the arms is open until the R7 rerun.
 - No Judge, Verifier, physics or threshold change.
+
+## D46. R7 rerun on the hard cohort (2026-10-11)
+
+**Run.** `pilot prepare --generator hard --output runs/pilot-hard-20a --n 20 --seed 0 --max-candidates 100` (20/20 accepted from 22 candidates), then `pilot run` with the free Ultra model at temperature 0.7 via OpenRouter (run `20261011T105143Z`, manifest sha256 `e0ae9338…`). All 20 tasks finished; the report is marked DEGRADED by 3 provider 503s (tasks 3, 4, 6), which stay in the denominators.
+
+| | successes / 20 |
+|---|---|
+| first attempt | 9 |
+| repair | 17 |
+| resample | 17 |
+
+- Paired: repair-only 2, resample-only 2, both 15, neither 1; 10 repair opportunities.
+- Calls: repair 32 logical calls, resample 41. Repeat plans: repair 0, resample 3. Resample ran out of budget once.
+- Failures are almost all `collision:transport` (first round 10; repair 11, resample 22); repair also had one `ik_accuracy:transport`, one `judge:S1` and one `judge:S2`.
+
+**Reading.** The hard cohort does what D35 asked: first-attempt success falls from 12/14 (easy, D45) to 9/20. On success, repair and resample still tie (17/17, 2 vs 2 discordant pairs), so the pilot shows no success advantage for feedback. Repair reaches the same success with fewer calls and never repeats a plan; resample repeated a plan 3 times (once each in 3 tasks). A development pilot, not a held-out result.
+
+**Decision.** R7 is closed as a pilot: the repair loop stays (equal success at lower cost, D23 headline wording unchanged), and the W3 batch evaluation on more tasks decides whether repair raises success over resampling.
+
+## D47. Live Cosmos gate returns, demo only (2026-10-11)
+
+The owner asked for the Cosmos visual gate back, run locally. This revises D34/D37 for the demo only; evaluation stays physics-only and the spec §11 shadow study is unchanged.
+
+**Design** (D5/D20 as approved, D8 item 4: live gate in the demo, shadow in evaluation):
+- `vplan.visual.gate.CosmosGate` runs after the Verifier passes a plan, so it can only add rejections; it never overrides a geometric result.
+- Key frames are the verified trajectory's own joint states (ends of approach, descend and descend_place) posed kinematically in a private DIRECT client. At pre-release the planned object hangs from the closed fingers at its grasp-frame offset. Two views (front-oblique, top); `uncertain` → one re-ask with the side view added.
+- Thinking on by default (the better D34 mode). The object is named only as `<color> <shape>` from the instruction (`subject(spec)`); no single object → `skipped`.
+- Results: `pass` → execute; `fail` → one `visual` Finding (plan field per stage) goes to repair like any Finding; still `uncertain` → `visual_uncertain`, a terminal outcome, nothing executes; endpoint error → `unavailable`, a banner, and execution on the geometric checks alone.
+- `run_attempt(..., visual_gate=)` and `run_task(..., visual_gate=)`, off by default. `run_task` refuses a gate with `mode="unverified"` or a custom evaluator. `EvaluationResult.visual` stores every verdict; the approval token covers exactly the trajectory Cosmos saw.
+- CLI: `demo-once --cosmos-url URL` and `pilot show ... --cosmos-url URL`. A header line says "learned visual check (not verification; D34 pilot balanced accuracy 0.70)" and each per-stage verdict line is tagged "learned check". `--unverified` turns the gate off and says so.
+- Review fixes: any gate-side error (endpoint, rendering, callback) degrades to `unavailable`, never `sim_error`; the repair Finding uses fixed per-stage text, and Cosmos's free-text reason stays in `VisualGateReport.checks` only (D17); the timeout is 90 s to cover a full thinking reply. Known simplifications: the pre-release frame closes the fingers to the object's smaller footprint half-width rather than the executor's squeeze width, and attaches the object at its initial pose; the visual Finding's `stage` is the gate stage (`pregrasp`/`grasp`/`prerelease`), not a segment label.
+- The spec §11 "live gate is dropped" clause carries a D47 amendment note.
+
+**Serving (local).** The D34 command unchanged (`~/venvs/cosmos`, Cosmos3-Edge revision `344d602b…`, `--host 127.0.0.1 --port 8000`). Windows Python reaches it at `http://127.0.0.1:8000/v1` through WSL localhost forwarding.
+
+**First live check (2026-10-11, basic scene, heuristic plans that pass the Verifier and the Judge):**
+- no obstacle: pregrasp pass, grasp **fail** ("the cube is already held") → blocked;
+- with obstacle: pregrasp pass, grasp pass, pre-release `uncertain` twice (unparseable reply) → `visual_uncertain`. A rerun of the same pre-release frame answered `fail`: "the cube is inside the bin, not over it", because the release pose sits below the bin rim.
+- Latency 6–16 s per question (22 tokens/s), not the D34 1.2 s median: other Windows applications held the GPU at 100 % during the check.
+
+Both are false rejections of correct plans, consistent with the D34 numbers. The question wording is unchanged from the pilot; any rewording ("over or inside the bin") needs fresh frames, not the D34 set, to avoid overfitting.
+
+Source change: prepared cohorts are invalidated under D33.
+
+## D48. Open week-2 questions settled (2026-10-11)
+
+The owner accepted the recommendations for the questions left open in D38 and D40:
+
+- **Reach center (D38).** The planner prompt now states that `robot_facts.reach_bound_m` is measured from the shoulder at (0, 0, 0.333), not the base; a test ties the wording to `tasks.reach.SHOULDER`. No `RobotFacts` field is added, so saved TaskSpecs keep their schema. The prompt is source, so prepared cohorts are invalidated under D33.
+- **Malformed rule (D40).** Two malformed replies in a row end the attempt as `malformed_final` for configs 3 and 7 too, as in the pilot. Spec §10's "last allowed round" wording is the weaker case of this rule.
+- **Config 1 (D40).** The unverified ablation runs with k=0: one blind attempt, no retries, so it measures the planner without the gate rather than resampling luck. `run_task` still defaults to k=3; the W3 batch wiring passes k=0 for config 1.
+- **Impossible-task scoring (D40).** `repair._attempted_impossible` moves into `judge.judge` in W3, before the W3.3 freeze, so every scored predicate lives in the Judge. Behaviour is unchanged until then.
+- **Docker (R8, D37).** The local container work stays in W3, alongside W3.4; no Docker install in week 2.
