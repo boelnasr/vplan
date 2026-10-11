@@ -29,7 +29,27 @@ def _wait_and_close(gui: int) -> None:
             p.disconnect(gui)
 
 
+def _cosmos_gate(url: str | None, subject: str | None):
+    """The demo-only live Cosmos gate (D47) bound to the instructed object, or None without --cosmos-url."""
+    if url is None:
+        return None
+    from vplan.records import VisualGateReport
+    from vplan.visual.gate import CosmosGate
+    if subject is None:
+        print("cosmos: skipped (the instruction names no single object)")
+        return lambda plan, traj, scene: VisualGateReport(status="skipped", note="no single instructed object")
+    gate = CosmosGate(url, on_check=lambda c: print(
+        f"cosmos (learned check) {c.stage} [{', '.join(c.views)}]: {c.verdict.verdict} ({c.verdict.latency_s:.1f} s) - {c.verdict.reason}",
+        flush=True))
+    print(f"cosmos: learned visual check on the {subject} (not verification; D34 pilot balanced accuracy 0.70)")
+    return lambda plan, traj, scene: gate(plan, traj, scene, subject=subject)
+
+
 def _print_result(res) -> None:
+    if res.visual is not None and res.visual.status == "unavailable":
+        print(f"*** COSMOS UNAVAILABLE - executed on the geometric checks only ({res.visual.note}) ***")
+    elif res.visual is not None:
+        print("cosmos gate:", res.visual.status)
     print("outcome:", res.outcome)
     for f in res.findings:
         print("finding:", f.model_dump_json())
@@ -56,7 +76,7 @@ def _replay_round(task, rnd) -> int:
 
 
 def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, unverified: bool,
-                replay: bool = False) -> int:
+                replay: bool = False, cosmos_url: str | None = None) -> int:
     """Re-execute one recorded pilot plan in the GUI (re-simulation), or with replay=True play back its stored record."""
     from vplan.evaluate import pilot
     task, rnd = pilot.select_round(run, task_id, arm, round_index)
@@ -68,12 +88,18 @@ def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, un
         print("nothing to execute:", rnd.call.plan.model_dump_json() if rnd.call.plan else rnd.call.outcome)
         return 1
     print("plan:", rnd.call.plan.model_dump_json())
+    from vplan.visual.gate import subject
+    if unverified and cosmos_url:
+        print("cosmos: off - the visual gate runs only after the Verifier, and --unverified skips it")
+    gate = None if unverified else _cosmos_gate(cosmos_url, subject(task.task))
     gui = _open_gui()
     try:
         # unverified executes even a blocked plan, to show the failure the verifier prevented
         res = run_attempt(rnd.call.plan, task.task.scene, task.oracle.target_id, verify_gate=not unverified,
-                          physics_client=gui, realtime=True)
-        if res.outcome == "blocked":
+                          physics_client=gui, realtime=True, visual_gate=gate)
+        if res.outcome == "blocked" and res.visual is not None and res.visual.status == "fail":
+            print("blocked by the Cosmos visual check (learned, not verification)")
+        elif res.outcome == "blocked":
             print("blocked before motion (pass --unverified to watch it execute anyway)")
     finally:
         _wait_and_close(gui)
@@ -87,6 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("demo-once", help="run the heuristic plan on the basic scene")
     d.add_argument("--obstacle", action="store_true")
     d.add_argument("--gui", action="store_true", help="watch execution in the PyBullet GUI at real-time speed")
+    d.add_argument("--cosmos-url", help="live Cosmos gate (demo only, D47), e.g. http://127.0.0.1:8000/v1")
     pl = sub.add_parser("pilot", help="feasible-only development feedback pilot")
     psub = pl.add_subparsers(dest="pilot_cmd", required=True)
     pp = psub.add_parser("prepare", help="freeze a witness-validated cohort (no model calls)")
@@ -113,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--round", type=int, help="0 is the shared initial call; default: the arm's final round")
     sh.add_argument("--unverified", action="store_true", help="execute even if the verifier blocks the plan")
     sh.add_argument("--replay", action="store_true", help="play back the stored execution record instead of re-simulating")
+    sh.add_argument("--cosmos-url", help="live Cosmos gate before re-execution (demo only, D47)")
     args = parser.parse_args(argv)
     if args.cmd == "pilot":
         from vplan.evaluate import pilot
@@ -137,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
                     print("\n".join(pilot.list_rounds(args.run)))
                     return 0
                 extra = {"replay": True} if args.replay else {}  # default call unchanged
+                if args.cosmos_url:
+                    extra["cosmos_url"] = args.cosmos_url
                 return _show_round(args.run, args.task, args.arm, args.round, unverified=args.unverified, **extra)
             else:
                 summary = pilot.write_report(args.run)
@@ -149,10 +179,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "demo-once":
         from vplan.tasks.scenes import make_basic_scene
         scene = make_basic_scene(with_obstacle=args.obstacle)
+        red = next(o for o in scene.objects if o.id == "cube_red")
+        gate = _cosmos_gate(args.cosmos_url, f"{red.color} {red.shape}")
         gui = _open_gui() if args.gui else None
         try:
             res = run_attempt(heuristic_geometry(scene, "cube_red"), scene, "cube_red",
-                              physics_client=gui, realtime=gui is not None)
+                              physics_client=gui, realtime=gui is not None, visual_gate=gate)
         finally:
             if gui is not None:
                 _wait_and_close(gui)

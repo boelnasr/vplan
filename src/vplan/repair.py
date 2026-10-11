@@ -70,7 +70,7 @@ def _observable_failures(call, evaluation) -> tuple[str, ...]:
     if evaluation is None:
         return () if call.outcome == "proposed" else (call.outcome,)
     failures = tuple(f"{f.check}:{f.stage}" for f in evaluation.findings)
-    if evaluation.outcome in ("sim_error", "stale_approval", "refused"):
+    if evaluation.outcome in ("sim_error", "stale_approval", "refused", "visual_uncertain"):
         failures += (evaluation.outcome,)
     if evaluation.outcome == "executed" and evaluation.judge is not None and not evaluation.judge.success:
         failures += tuple(dict.fromkeys(
@@ -236,13 +236,17 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
              evaluator: Callable[[PickPlacePlan], EvaluationResult] | None = None,
              config_snapshot: dict[str, dict] | None = None,
              event_sink: Callable[[dict], None] | None = None,
-             attempt_id: str = "attempt", seed: int = 0) -> AttemptRecord:
+             attempt_id: str = "attempt", seed: int = 0, visual_gate: Callable | None = None) -> AttemptRecord:
     """One attempt (spec §10): at most k + 1 planner calls and exactly one outcome.
 
     repair: stateless feedback (latest plan, its findings, one summary per earlier round).
     resample: identical blind requests (config 7). unverified: blind requests with the verify gate off
     except target grounding (config 1, D29). The planner sees only `spec`; `oracle` is used only at the
-    Judge boundary. Cosmos is shadow-only (D34), so there is no visual gate here.
+    Judge boundary.
+
+    visual_gate is the demo-only live Cosmos gate (D47), called as visual_gate(plan, traj, scene, subject=...) after
+    the Verifier passes. Its visual Finding is repair feedback like any other; a final uncertain ends the attempt as
+    visual_uncertain. Evaluation runs never pass it (spec §11 shadow study instead).
     """
     if type(spec) is not TaskSpec:
         raise TypeError("run_task takes the public TaskSpec, never a private task envelope")
@@ -252,20 +256,30 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
         raise ValueError(f"unknown mode {mode!r}")
     if not 0 <= k <= 3:
         raise ValueError("k must be 0..3 (spec §10 budget: at most four planner calls)")
+    if visual_gate is not None and (mode == "unverified" or evaluator is not None):
+        raise ValueError("the visual gate runs only in the verified default pipeline")
 
     cfgs = deepcopy(read_config_snapshot() if config_snapshot is None else config_snapshot)
     hashes = {key: config_hash(value) for key, value in cfgs.items()}
     feasible = oracle.feasibility == "feasible"
     if evaluator is None:
         from vplan.pipeline import run_attempt
+        gate = None
+        if visual_gate is not None:
+            from vplan.records import VisualGateReport
+            from vplan.visual.gate import subject
+            obj = subject(spec)
+            gate = ((lambda plan, traj, scene: VisualGateReport(status="skipped", note="no single instructed object"))
+                    if obj is None else (lambda plan, traj, scene: visual_gate(plan, traj, scene, subject=obj)))
 
         def evaluator(plan):
             # An absent referent (type 4) has no oracle object: the planned target stands in for the physics
             # evidence, and R (below) already makes the attempt a failure.
             attempt = run_attempt(plan, spec.scene, oracle.target_id or plan.target_id, feasible=feasible,
-                                  verify_gate=mode != "unverified", seed=seed % (2**32), config_snapshot=cfgs)
+                                  verify_gate=mode != "unverified", seed=seed % (2**32), config_snapshot=cfgs,
+                                  visual_gate=gate)
             return EvaluationResult(outcome=attempt.outcome, findings=tuple(attempt.findings),
-                                    judge=attempt.judge, record=attempt.record)
+                                    judge=attempt.judge, record=attempt.record, visual=attempt.visual)
     evaluate = evaluator if feasible else (lambda plan: _attempted_impossible(evaluator(plan)))
 
     def refused(plan):

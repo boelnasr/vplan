@@ -214,6 +214,33 @@ class VisualVerdict(Frozen):
     latency_s: float = Field(ge=0)
     raw: str
 
+
+VisualStage = Literal["pregrasp", "grasp", "prerelease"]
+
+
+class VisualCheck(Frozen):
+    """One Cosmos request at one key frame; `views` are the rendered viewpoints it saw, in order."""
+    stage: VisualStage
+    views: tuple[str, ...] = Field(min_length=1)
+    verdict: VisualVerdict
+
+
+class VisualGateReport(Frozen):
+    """The live demo gate (D47) for one verified plan. pass: every stage passed; fail: one `visual` Finding goes
+    to repair; uncertain: still uncertain after the third view, nothing executes; unavailable: the endpoint
+    failed, so execution goes ahead on the geometric checks alone; skipped: no single instructed object to ask
+    about."""
+    status: Literal["pass", "fail", "uncertain", "unavailable", "skipped"]
+    checks: tuple[VisualCheck, ...] = ()
+    findings: tuple[Finding, ...] = Field(default=(), max_length=1)
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _finding_iff_fail(self) -> "VisualGateReport":
+        if (self.status == "fail") != bool(self.findings) or any(f.check != "visual" for f in self.findings):
+            raise ValueError("exactly a failed gate carries one visual Finding")
+        return self
+
 # ---- execution and judging ---------------------------------------------------------------------
 class ContactSummary(Frozen):
     """Contacts aggregated per (bodies, links, stage): per-step rows would be megabytes per attempt."""
@@ -382,7 +409,7 @@ class PreparedCohort(Frozen):
 # ---- bounded paired feedback experiment ------------------------------------------------------
 PlannerProtocol = Literal["forced", "required", "content"]
 AttemptOutcome = Literal["executed", "refused", "budget_exhausted", "malformed_final",
-                         "service_failure", "stale_approval", "sim_error"]
+                         "service_failure", "stale_approval", "sim_error", "visual_uncertain"]
 
 
 class PlannerFeedback(Frozen):
@@ -414,9 +441,10 @@ class PlannerCall(Frozen):
 
 class EvaluationResult(Frozen):
     """Serializable attempt result; Judge/oracle evidence never becomes planner feedback."""
-    outcome: Literal["blocked", "executed", "refused", "stale_approval", "sim_error"]
+    outcome: Literal["blocked", "executed", "refused", "stale_approval", "sim_error", "visual_uncertain"]
     findings: tuple[Finding, ...] = ()
     judge: JudgeResult | None = None
+    visual: VisualGateReport | None = None  # demo-only live Cosmos gate (D47); None when no gate ran
     record: ExecutionRecord | None = None
     error_type: str | None = None
     error_message: str | None = None

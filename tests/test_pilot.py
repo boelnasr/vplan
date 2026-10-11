@@ -557,7 +557,7 @@ def test_show_round_survives_closed_window_and_closed_stdin(monkeypatch, capsys)
 
     def fake_attempt(*a, **kw):
         p.disconnect(client)  # the user closed the window
-        return type("R", (), {"outcome": "executed", "findings": [], "judge": None})()
+        return type("R", (), {"outcome": "executed", "findings": [], "judge": None, "visual": None})()
     monkeypatch.setattr(cli, "run_attempt", fake_attempt)
     monkeypatch.setattr(builtins, "input", lambda *a: (_ for _ in ()).throw(EOFError()))
     assert cli._show_round("run", task.metadata.task_id, "repair", 0, unverified=False) == 1

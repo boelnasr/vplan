@@ -34,9 +34,13 @@ def stage_question(stage: Stage, task: TaskSpec) -> str:
     """The object is named only by its TaskSpec color and shape; ids would leak nothing visual and oracle data
     must never reach the gate."""
     obj = next(o for o in task.scene.objects if o.id == resolve_instruction(task.instruction, task.scene))
+    return subject_question(stage, f"{obj.color} {obj.shape}")
+
+
+def subject_question(stage: Stage, subject: str) -> str:
+    """subject: the instructed object as '<color> <shape>', the only object description Cosmos ever gets."""
     return ("The images show a simulated Franka Panda robot arm, a table with objects and a blue bin, "
-            "from different camera viewpoints. " + QUESTIONS[stage].format(obj=f"{obj.color} {obj.shape}")
-            + "\n" + REPLY_FORMAT)
+            "from different camera viewpoints. " + QUESTIONS[stage].format(obj=subject) + "\n" + REPLY_FORMAT)
 
 
 def parse_verdict(raw: str) -> tuple[Verdict, str]:
