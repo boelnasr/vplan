@@ -237,3 +237,10 @@ def test_sdk_response_dump_error_still_completes_evidence_and_sink_failure_propa
             raise OSError("evidence disk full")
     with pytest.raises(OSError, match="disk full"):
         planner(FakeClient([{"choices": [None]}])).plan(task, event_sink=broken)
+
+
+def test_system_prompt_states_the_reach_center_matching_the_task_generator():
+    """D48: reach_bound_m is measured from the shoulder (D38), so the planner must be told where that is."""
+    from vplan.planners.nemotron import SYSTEM_PROMPT
+    from vplan.tasks.reach import SHOULDER
+    assert f"shoulder at ({SHOULDER[0]:g}, {SHOULDER[1]:g}, {SHOULDER[2]:g})" in SYSTEM_PROMPT

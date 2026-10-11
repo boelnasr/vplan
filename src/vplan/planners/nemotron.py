@@ -22,6 +22,7 @@ place.position is the object's resting center: z = bin floor top + half the obje
 release_height_m is the additional drop height; prefer 0.02–0.10 m because zero is legal but brittle.
 Between grasp and release the gripper turns
 about world +z by place.yaw_deg minus grasp.yaw_deg. transport_via holds up to three world points.
+robot_facts.reach_bound_m is the maximum gripper-center distance from the shoulder at (0, 0, 0.333), not from the base.
 Use only object IDs in the scene. Feedback reports violated constraints, not suggested fixes.
 If no valid plan can be found, return the refusal schema. Rationale is for logging only."""
 
