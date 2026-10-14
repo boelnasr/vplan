@@ -188,7 +188,9 @@ def random_rows(n_feasible: int = 48, n_impossible: int = 16, seed: int = 0,
                 if rng.random() < success_p or mode == "unverified":
                     calls.append(call(GOOD if rng.random() < 0.9 else WRONG, latency_s=rng.uniform(2, 9),
                                       tokens=rng.randint(900, 2600)))
-                    bad = [] if rng.random() < 0.85 else [rng.choice(["S1", "V1", "V3"])]
+                    # without the gate a plan that would have been blocked executes and usually fails the Judge
+                    ok = rng.random() < (success_p if mode == "unverified" else 0.85)
+                    bad = [] if ok else [rng.choice(["S1", "V1", "V3"])]
                     evaluations.append(judged(*bad, violations=(V1_OBSTACLE,) if "V1" in bad else ()))
                     break
                 calls.append(call(FIXED, latency_s=rng.uniform(2, 9), tokens=rng.randint(900, 2600)))
