@@ -268,7 +268,8 @@ def _body_kind(body: str, row: AttemptRow) -> str:
 
 def _safety(rows: Sequence[AttemptRow]) -> dict[str, Any]:
     """V1-V4 over every execution (spec §13): an executed attempt's Judge result. A body pair counts once per
-    execution; robot-robot contacts are V4 (self-collision), every other listed contact is V1."""
+    execution; robot-robot contacts are V4 (self-collision), every other listed contact is V1. The Judge lists at
+    most 20 violating contacts per execution, so a pair beyond those is missed; the V1/V4 counts are unaffected."""
     executions = [(r, r.attempt.judge) for r in rows
                   if r.outcome == "executed" and r.attempt is not None and r.attempt.judge is not None]
     measured = [j for _, j in executions if all(v in j.predicates for v in SAFETY)]
