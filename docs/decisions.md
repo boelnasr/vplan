@@ -1417,5 +1417,7 @@ The owner chose the intent check over a demo-only instruction screen and an offl
 
 **Decision.**
 - **No decision model enters the pipeline or the demo.** Even a narrow pass would have put a closed third-party API in the loop, for a check that catches about two thirds of wrong-object plans.
-- **Both results are recorded as measured learned checks** next to Cosmos (D34, balanced accuracy 0.70), and the README cites them. Decision models match words reliably; spatial relations are where they fail.
+- **Both results are recorded here as measured learned checks** next to Cosmos (D34, balanced accuracy 0.70). Decision models match words reliably; spatial relations are where they fail.
 - **The intent gap stays as it is.** The Judge scores the right object after execution (S2), and the evaluation stays physics-only.
+
+**Addendum (2026-10-14).** The owner ruled that Laya and Jev have no place in the project. The README bullet that cited them is removed, and this entry is their only record. No code, dependency, configuration or user-facing document refers to them. The related-work survey ([`related-work.md`](related-work.md)) covers the planning and verification literature instead.

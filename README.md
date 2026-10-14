@@ -26,10 +26,6 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 - **Judge:** scores the executed run on its own. It shares no code with the verifier, so the safety numbers are not the verifier grading itself.
 - **Repair:** when the verifier blocks a plan, `run_task` sends its findings back to the planner (fixed-text directions, never a ready-made fix) and tries again within a call budget.
 - **Cosmos gate (demo only, optional):** after the verifier passes a plan, NVIDIA **Cosmos3-Edge** looks at rendered key frames (pre-grasp, grasp, pre-release) and can still block it. It is a learned visual check, not verification: it can add rejections but never approves a geometric failure, and the evaluation uses physics only (D34, D47).
-- **Intent check (tested, not used):** we tried fast "System One" decision models as a pre-execution check that the planner picked the instructed object, on 240 held-out generated tasks.
-  - Laya (open, 421M) was perfect on color and shape phrasing but at or below chance on spatial relations ("leftmost", "next to").
-  - Jev (closed, via OpenRouter) reached 84% overall but missed the bar we fixed in advance, and was near chance on "next to".
-  - The right object is therefore scored only by the Judge, after execution (D50).
 
 ## Setup
 
@@ -138,7 +134,7 @@ After the [D36 validation fixes](docs/decisions.md#d36-close-approval-dwell-and-
 | `src/vplan/sim/` | PyBullet scene building and self-collision exclusions |
 | `src/vplan/evaluate/` | Feedback pilot preparation, supervised runs and reports |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
-| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), reviews |
+| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [related work](docs/related-work.md), reviews |
 
 ## Conventions
 
