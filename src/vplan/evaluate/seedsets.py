@@ -46,6 +46,7 @@ IMPOSSIBLE_TYPES = (1, 2, 3, 4)
 CELLS: tuple[tuple[int, int], ...] = tuple((d, (d + k) % 4) for k in range(4) for d in range(4))
 FILES = ("tasks.jsonl", "oracle.jsonl", "exclusions.jsonl")
 MANIFEST_KEYS = ("schema_version", "kind", "split", "n", "files", "seed_set_hash", "config_hashes", "source_hashes")
+SEED_ROOT = Path("runs") / "seeds"  # `eval prepare/run --seeds S` default to SEED_ROOT/S (relative to the repo root)
 
 WitnessEvaluator = Callable[[TaskSpec, str], WitnessEvaluation]
 
@@ -71,6 +72,10 @@ class Slot:
     distractors: int | None = None
     obstacles: int | None = None
     impossible_type: int | None = None
+
+
+def default_seed_dir(split: str) -> Path:
+    return SEED_ROOT / split
 
 
 def _spread(total: int, keys: tuple) -> dict:

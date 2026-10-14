@@ -590,3 +590,45 @@ class SeedSetExclusion(Frozen):
     reason: str
     witness: WitnessEvaluation | None = None
 
+
+# Runnable spec §14 configs: 2 is round 1 of 3, and 4 is the Cosmos shadow study over config 3's frames.
+EvalConfigNumber = Literal[1, 3, 5, 6, 7]
+
+
+class EvalAttempt(Frozen):
+    """One runs/<run_id>/attempts.jsonl line (W3.1), written only by the parent process.
+
+    - attempt_id is "{config}:{split}:{task_index}". task_index (and task_id) join the row with the seed set's
+      tasks.jsonl and oracle.jsonl lines of the same index; the run's manifest.json names the seed set and its hash.
+    - outcome is the supervisor outcome: the AttemptRecord's outcome when the worker produced one, otherwise
+      sim_error for a crash, kill, hang or invalid result (error_type worker_crash, worker_timeout,
+      worker_bad_result, invalid_attempt_record or the exception name; spec §16).
+    - record is the full run_task AttemptRecord: every round's raw planner request and response, Findings,
+      ExecutionRecord (with the replay streams, D41) and Judge result. None when the worker produced none.
+    - session numbers the run session that recorded the row (0 is the first; sessions.jsonl holds each session's
+      provenance). tries, wall_s and exit_code describe the supervised worker; status_code is the provider status of
+      a failed request.
+    """
+    attempt_id: str
+    config: EvalConfigNumber
+    split: Split
+    task_index: int = Field(ge=0)
+    task_id: str
+    session: int = Field(ge=0)
+    outcome: AttemptOutcome
+    tries: int = Field(ge=1)
+    wall_s: float = Field(ge=0)
+    exit_code: int | None = None
+    status_code: int | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+    error_traceback: str | None = None
+    record: AttemptRecord | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "EvalAttempt":
+        if self.attempt_id != f"{self.config}:{self.split}:{self.task_index}":
+            raise ValueError("attempt_id must be '{config}:{split}:{task_index}'")
+        if self.record is not None and (self.record.attempt_id, self.record.outcome) != (self.attempt_id, self.outcome):
+            raise ValueError("the AttemptRecord must carry this row's attempt_id and outcome")
+        return self

@@ -3,8 +3,8 @@
 Usage (argument list, never a shell): python -m vplan.evaluate.worker --job NAME --attempt-id ID
     --params PARAMS.json --out RESULT.json [--import MODULE ...]
 stdout/stderr are only logs: ManipulaPy prints a banner on import, so the result travels via --out.
-A job is `fn(params: dict) -> dict` with WorkerResult's outcome/status_code/retry_after_s/payload keys;
-W2.5's run_task registers here as another job kind.
+A job is `fn(params: dict) -> dict` with WorkerResult's outcome/status_code/retry_after_s/payload keys.
+Built-in jobs: basic_attempt (W2.8) and run_task (one W3.1 evaluation attempt, D42).
 """
 from __future__ import annotations
 
@@ -44,6 +44,13 @@ def basic_attempt(params: dict) -> dict:
     return {"outcome": "executed" if res.outcome == "executed" else "budget_exhausted",
             "payload": {"judge_success": None if res.judge is None else res.judge.success,
                         "findings": [f.model_dump(mode="json") for f in res.findings]}}
+
+
+@register("run_task")
+def run_task(params: dict) -> dict:
+    """One evaluation attempt: repair.run_task on one seed-set task; payload["record"] is the AttemptRecord."""
+    from vplan.evaluate.runner import run_task_job
+    return run_task_job(params)
 
 
 def write_result(path: Path, result: WorkerResult) -> None:
