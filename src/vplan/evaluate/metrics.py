@@ -6,6 +6,9 @@ refusals are separate results (D8), and every outcome stays in its denominator (
 Nebius Token Factory runs only (spec §14): a Nemotron configuration that ran on any other provider is labelled a
 dry run. The repair gain (3 - 2) is reported without crediting feedback; only the feedback gain (3 - 7) compares
 feedback with retrying at the same budget (docs/related-work.md, "Claims vplan must not make").
+
+Units: rates and their 95% intervals are fractions in [0, 1] and gains are differences of fractions in [-1, 1], never
+percent; every time is in seconds (keys ending in _s, or inside latency_s); tokens are provider-reported counts.
 """
 from __future__ import annotations
 
