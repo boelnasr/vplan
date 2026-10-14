@@ -1421,3 +1421,17 @@ The owner chose the intent check over a demo-only instruction screen and an offl
 - **The intent gap stays as it is.** The Judge scores the right object after execution (S2), and the evaluation stays physics-only.
 
 **Addendum (2026-10-14).** The owner ruled that Laya and Jev have no place in the project. The README bullet that cited them is removed, and this entry is their only record. No code, dependency, configuration or user-facing document refers to them. The related-work survey ([`related-work.md`](related-work.md)) covers the planning and verification literature instead.
+
+## D51. Week 3 starts without Token Factory; seed-set mix (2026-10-14)
+
+- **W3.0 deferred.** The owner applied for free Token Factory credits and is waiting for the answer. Token Factory is needed only for the final runs (Oct 24–25, spec §18); the W3.6 dry run uses OpenRouter (D30).
+  - **Cutoff Oct 21:** without an answer by then, the owner decides whether to pay for the smoke test (about 20 calls).
+  - **Risk of waiting:** if forced tool calls fail for Ultra on Token Factory, the week-4 model choice is re-planned later. The D13 fallbacks still apply.
+- **W3.4 approved by the owner (2026-10-14).** Docker Engine comes from Ubuntu's `docker.io` and `docker-buildx` packages. The owner installs them, because `sudo` needs a password. The Jobs smoke test still needs the Nebius account.
+- **Parallel tracks.** Week 3 starts on Oct 14 with four tracks in separate worktrees: the Judge change (D40, D48), W3.1, W3.2 and R8 local. Each runs as implementer → reviewer. The integrator merges them one at a time with the full suite green, and writes the decision-log and README changes.
+- **Seed sets.** Spec §6 fixes `test` and leaves the `dev` mix open.
+  - `dev`: 100 tasks, 75 feasible and 25 impossible (7, 6, 6 and 6 for types 1–4), the same ratio as `test`.
+  - `test`: 300 feasible and 100 impossible (25 per type).
+  - Feasible tasks are spread as evenly as possible over the 16 cells of distractor count × obstacle count (0–3 each).
+  - `dev` candidate seeds start at 0; `test` candidate seeds start at 10,000,000, a range no earlier experiment used.
+  - `test` is generated only after the W3.3 freeze (spec §6).
