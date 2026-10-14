@@ -213,7 +213,7 @@ wheels = [
 
 [[package]]
 name = "manipulapy"
-version = "1.4.1"
+version = "1.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -222,9 +222,9 @@ dependencies = [
     { name = "pillow" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cb/d5/c769fe0255e90257908275b2697512cfc064b4c4d3109b94565ed46106fb/manipulapy-1.4.1.tar.gz", hash = "sha256:ca295a4da0a482c285757bf784f64b7b57c9a3a0f92c33d595cef05d8c8f566e", size = 587582, upload-time = "2026-08-14T20:00:38.911Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/99/51d33ef62b44e9e7116d3d39644d244bc720b790be5b6dd72b21441c69f5/manipulapy-1.4.2.tar.gz", hash = "sha256:9a3e5aa83c213bb1bd69a66665445739913bda950f708f5ce310207e72457a37", size = 604422, upload-time = "2026-10-13T20:13:40.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/1c/9e4bb3168beb6a44ebfb3ac80e99f2228a70def73177af3eba7a11588536/manipulapy-1.4.1-py3-none-any.whl", hash = "sha256:3495403c23b3cb660d54acb5fded35aa87ecf9a33576be39d671f9273af06218", size = 349691, upload-time = "2026-08-14T20:00:36.869Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/6d/c6a3b10c3194baebaf8eba2b35d9f5840b110eae7cbe63f769be21ea5960/manipulapy-1.4.2-py3-none-any.whl", hash = "sha256:611c2aa0708cc965b2f681d7a324e97f74578a77cec6cef9bea47be3d376cb10", size = 353532, upload-time = "2026-10-13T20:13:38.915Z" },
 ]
 
 [package.optional-dependencies]
@@ -544,7 +544,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "manipulapy", extras = ["simulation"], specifier = "==1.4.1" },
+    { name = "manipulapy", extras = ["simulation"], specifier = "==1.4.2" },
     { name = "matplotlib", specifier = "==3.10.9" },
     { name = "numpy", specifier = "==2.2.6" },
     { name = "openai", specifier = "==3.24.0" },

@@ -1,5 +1,5 @@
 """Panda kinematics for the Verifier side (ManipulaPy). The Judge uses PyBullet instead (judge/kinematics.py).
-ManipulaPy 1.4.1 counts finger joints as arm DOF; we slice screw axes to panda_joint1..7 by name (D17).
+ManipulaPy >= 1.4.2 restricts screw axes to the tip_link chain; load_panda checks it is panda_joint1..7 (D17, D49).
 Frames: ManipulaPy FK is in the robot base frame; Scene enforces base = world, so FK is world-frame (CR#16)."""
 from __future__ import annotations
 
@@ -53,13 +53,13 @@ class PandaModel:
 @functools.lru_cache(maxsize=1)
 def load_panda() -> PandaModel:
     urdf = URDF.load(PANDA_URDF)
-    params = urdf.extract_screw_axes(tip_link=TCP_LINK)
-    names = [j.name for j in urdf.actuated_joints]
-    idx = [names.index(n) for n in ARM_JOINTS]
-    S = np.asarray(params["S_list"])[:, idx]
-    B = np.asarray(params["B_list"])[:, idx]
-    limits = [params["joint_limits"][i] for i in idx]
-    # omega_list = rotation axes (3 x n); ManipulaPy's extract_omega_list returns the wrong shape for 6 x n input (CR#15)
+    params = urdf.extract_screw_axes(tip_link=TCP_LINK)  # 1.4.2: columns are the base -> TCP chain only
+    # Every downstream array (HOME_Q, velocity limits, PyBullet joint order) assumes this exact order.
+    if tuple(params["joint_names"]) != ARM_JOINTS:
+        raise RuntimeError(f"ManipulaPy chain to {TCP_LINK} is {params['joint_names']}, expected {list(ARM_JOINTS)}")
+    S = np.asarray(params["S_list"])
+    B = np.asarray(params["B_list"])
+    limits = list(params["joint_limits"])
     manip = SerialManipulator(M_list=np.asarray(params["M"]), omega_list=S[:3, :], S_list=S, B_list=B,
                               joint_limits=limits)
     lower = np.array([lo for lo, _ in limits], dtype=float)

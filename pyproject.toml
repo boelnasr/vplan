@@ -5,7 +5,7 @@ description = "Nemotron-planned, physics-verified robot manipulation (Nebius x N
 requires-python = ">=3.10,<3.11"
 license = { text = "AGPL-3.0-or-later" }
 dependencies = [
-  "ManipulaPy[simulation]==1.4.1",
+  "ManipulaPy[simulation]==1.4.2",
   "pybullet==3.2.7",
   "numpy==2.2.6",
   "pydantic==2.13.5",

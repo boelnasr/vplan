@@ -20,6 +20,18 @@ def test_model_is_seven_dof() -> None:
     assert np.asarray(m.manip.omega_list).shape == (3, 7)  # CR#15: not extract_omega_list's (6, 3)
 
 
+def test_load_refuses_a_chain_that_is_not_the_seven_arm_joints(monkeypatch) -> None:
+    from ManipulaPy.urdf.core import URDF
+    real = URDF.extract_screw_axes
+
+    def reordered(self, tip_link=None):
+        params = real(self, tip_link=tip_link)
+        return {**params, "joint_names": params["joint_names"][::-1]}
+    monkeypatch.setattr(URDF, "extract_screw_axes", reordered)
+    with pytest.raises(RuntimeError, match="panda_joint1"):
+        load_panda.__wrapped__()  # bypass the process-wide cache
+
+
 def test_fk_matches_pybullet(client: int) -> None:
     m = load_panda()
     rid, tcp, arm = _pb(client)
