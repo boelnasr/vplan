@@ -532,3 +532,62 @@ def test_the_api_key_never_reaches_the_run_directory_or_the_console(two_task_see
     assert SECRET not in out.out + out.err
     assert os.environ.get("LLM_API_KEY") != SECRET
 
+
+# ---- CLI ------------------------------------------------------------------------------------------------------
+def test_cli_eval_prepare_wiring(monkeypatch, capsys):
+    from vplan.cli import main
+    from vplan.evaluate import seedsets
+    calls = {}
+
+    def fake(output, split, **kw):
+        calls.update(output=str(output), split=split, **kw)
+        return {"n": 3, "seed_set_hash": "ab" * 32}
+    monkeypatch.setattr(seedsets, "prepare_seed_set", fake)
+    assert main(["eval", "prepare", "--seeds", "dev", "--feasible", "2", "--impossible", "1",
+                 "--max-candidates", "9"]) == 0
+    assert calls["output"] == os.path.join("runs", "seeds", "dev") and calls["split"] == "dev"
+    assert (calls["feasible"], calls["impossible"], calls["max_candidates"], calls["allow_test_split"]) == (
+        2, 1, 9, False)
+    assert "ab" * 32 in capsys.readouterr().out
+
+
+def test_cli_eval_run_wiring_and_exit_codes(monkeypatch, tmp_path, capsys):
+    from vplan.cli import main
+    from vplan.evaluate import runner
+    seen, status = [], ["complete"]
+
+    def fake(config, split, **kw):
+        seen.append((config, split, kw))
+        done = status[0] == "complete"
+        return runner.RunSummary(run_dir=tmp_path, status=status[0], stop_reason=None if done else "3 consecutive",
+                                 planned=5, recorded=5 if done else 3, session=0, outcomes={"refused": 5},
+                                 successes=5)
+    monkeypatch.setattr(runner, "run_eval", fake)
+    assert main(["eval", "run", "--config", "5", "--seeds", "dev", "--n", "3", "--seed-dir", "s",
+                 "--run-dir", "r"]) == 0
+    assert seen[0] == (5, "dev", {"seed_dir": "s", "run_dir": "r", "resume": None, "n": 3, "env_file": None,
+                                  "model": None, "temperature": None, "allow_paid": False,
+                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None})
+    status[0] = "incomplete"
+    assert main(["eval", "run", "--config", "3", "--seeds", "dev", "--env-file", "e.env", "--resume", "r",
+                 "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid"]) == 1
+    kw = seen[1][2]
+    assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"]) == (
+        "r", "e.env", 20.0, 300.0, 0.5, True)
+    assert "--resume" in capsys.readouterr().err
+
+
+def test_cli_eval_refusals_exit_2_with_a_clean_message(capsys):
+    from vplan.cli import main
+    assert main(["eval", "run", "--config", "2", "--seeds", "dev"]) == 2
+    err = capsys.readouterr().err
+    assert "round 1 of config 3" in err and "Traceback" not in err
+
+
+def test_cli_eval_refuses_wsl_paths(monkeypatch, capsys):
+    from vplan.cli import main
+    from vplan.evaluate import pilot, seedsets
+    monkeypatch.setattr(pilot, "_WINDOWS", True)
+    monkeypatch.setattr(seedsets, "prepare_seed_set", lambda *a, **kw: pytest.fail("must refuse first"))
+    assert main(["eval", "prepare", "--seeds", "dev", "--output", "/mnt/c/x"]) == 2
+    assert "Windows" in capsys.readouterr().err

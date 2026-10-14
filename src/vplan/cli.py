@@ -1,4 +1,5 @@
-"""Command-line entry points: demo-once and the feedback pilot (prepare / run / report / show)."""
+"""Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show) and the W3.1 evaluation
+(eval prepare / eval run)."""
 from __future__ import annotations
 
 import argparse
@@ -107,6 +108,42 @@ def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, un
     return 0 if (res.judge and res.judge.success) else 1
 
 
+def _eval(args) -> int:
+    """eval prepare / eval run. Exit codes: 0 done, 1 an incomplete run (resume it), 2 refused, 130 interrupted."""
+    from vplan.evaluate import pilot, runner, seedsets
+    try:
+        for name in ("output", "seed_dir", "run_dir", "resume", "env_file"):
+            if getattr(args, name, None):
+                pilot.check_path_arg(getattr(args, name))
+        if args.eval_cmd == "prepare":
+            output = args.output or seedsets.default_seed_dir(args.seeds)
+            manifest = seedsets.prepare_seed_set(
+                output, args.seeds, feasible=args.feasible, impossible=args.impossible,
+                max_candidates=args.max_candidates, allow_test_split=args.allow_test_split,
+                progress=lambda attempted, accepted, n: print(f"{accepted}/{n} accepted; {attempted} attempted",
+                                                              flush=True))
+            print(f"prepared {output}: {manifest['n']} tasks, seed-set hash {manifest['seed_set_hash']}")
+            return 0
+        summary = runner.run_eval(
+            args.config, args.seeds, seed_dir=args.seed_dir, run_dir=args.run_dir, resume=args.resume, n=args.n,
+            env_file=args.env_file, model=args.model, temperature=args.temperature, allow_paid=args.allow_paid,
+            allow_source_drift=args.allow_source_drift, timeout_s=args.timeout, max_rpm=args.max_rpm)
+    except pilot.PilotError as exc:  # EvalError is a PilotError; messages never carry credentials
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("interrupted: the run directory printed above can be continued with --resume", file=sys.stderr)
+        return 130
+    counts = ", ".join(f"{k} {v}" for k, v in sorted(summary.outcomes.items()))
+    if summary.status == "complete":
+        print(f"complete: {summary.recorded}/{summary.planned} attempts ({counts}; {summary.successes} judged "
+              f"successes) in {summary.run_dir}")
+        return 0
+    print(f"INCOMPLETE: {summary.recorded}/{summary.planned} attempts ({counts}); stopped: {summary.stop_reason}. "
+          f"Continue with --resume {summary.run_dir}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vplan")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -141,7 +178,33 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--unverified", action="store_true", help="execute even if the verifier blocks the plan")
     sh.add_argument("--replay", action="store_true", help="play back the stored execution record instead of re-simulating")
     sh.add_argument("--cosmos-url", help="live Cosmos gate before re-execution (demo only, D47)")
+    ev = sub.add_parser("eval", help="W3.1 evaluation: seed sets and supervised batch runs (spec §14)")
+    esub = ev.add_subparsers(dest="eval_cmd", required=True)
+    ep = esub.add_parser("prepare", help="generate and freeze a seed set (no model calls)")
+    ep.add_argument("--seeds", required=True, choices=("dev", "test"))
+    ep.add_argument("--output", help="default: runs/seeds/<split>")
+    ep.add_argument("--feasible", type=int, help="override the D51 mix; pass with --impossible")
+    ep.add_argument("--impossible", type=int, help="spread over types 1-4, lower types first")
+    ep.add_argument("--max-candidates", type=int, help="candidate seeds to try in total (default 2n + 20)")
+    ep.add_argument("--allow-test-split", action="store_true",
+                    help="the held-out test split, generated only after the W3.3 freeze (spec §6)")
+    er = esub.add_parser("run", help="run one spec §14 config over a prepared seed set")
+    er.add_argument("--config", required=True, type=int, help="1, 3, 5, 6 or 7 (config 2 is round 1 of 3)")
+    er.add_argument("--seeds", required=True, choices=("dev", "test"))
+    er.add_argument("--n", type=int, help="run only the first N tasks (a stratified prefix)")
+    er.add_argument("--seed-dir", help="the prepared seed set (default runs/seeds/<split>; on --resume, the run's)")
+    er.add_argument("--run-dir", help="a new run directory (default runs/c<config>-<split>-<UTC time>)")
+    er.add_argument("--resume", help="continue RUN_DIR: skip recorded attempts, refuse an incompatible run")
+    er.add_argument("--env-file", help="KEY=VALUE file with LLM_BASE_URL, LLM_API_KEY, LLM_MODEL (LLM configs)")
+    er.add_argument("--model", help="overrides LLM_MODEL; required for config 6")
+    er.add_argument("--temperature", type=float, help="every planner call (default 0.7)")
+    er.add_argument("--allow-paid", action="store_true", help="permit non-free or non-OpenRouter models")
+    er.add_argument("--allow-source-drift", action="store_true", help="record source changes instead of refusing")
+    er.add_argument("--timeout", type=float, default=600.0, help="per-attempt wall-clock limit, s")
+    er.add_argument("--max-rpm", type=float, help="pace provider requests to at most this many per minute")
     args = parser.parse_args(argv)
+    if args.cmd == "eval":
+        return _eval(args)
     if args.cmd == "pilot":
         from vplan.evaluate import pilot
         from vplan.tasks import CohortPreparationError
