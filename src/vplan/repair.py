@@ -222,9 +222,9 @@ def evaluate_pair(task: GeneratedTask, planner, *,
     return result
 
 
-def _contradicts_impossible(evaluation) -> bool:
-    """Whether a judged execution on an impossible task is not an R failure (spec §13). This only checks: the Judge
-    scores R (D48)."""
+def _contradicts_impossible(evaluation: object) -> bool:
+    """True for a judged execution that is not an R failure, which contradicts an impossible label (spec §13). It only
+    checks; the Judge scores R (D48)."""
     if not isinstance(evaluation, EvaluationResult) or evaluation.outcome != "executed" or evaluation.judge is None:
         return False
     return evaluation.judge.success or evaluation.judge.predicates.get("R") is not False

@@ -170,7 +170,8 @@ def test_only_the_judge_builds_judge_results() -> None:  # D48: every scored pre
         if path.parent == src / "judge":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "JudgeResult":
+            func = node.func if isinstance(node, ast.Call) else None  # JudgeResult(...) or records.JudgeResult(...)
+            if getattr(func, "id", getattr(func, "attr", None)) == "JudgeResult":
                 builders.append(f"{path.relative_to(src).as_posix()}:{node.lineno}")
     assert not builders, builders
 
@@ -202,7 +203,7 @@ def test_every_verifier_allowance_is_a_judge_allowance() -> None:  # final revie
 # ---- R on an executed plan (spec §13; D40, D48) ------------------------------------------------------------------
 
 def legacy_attempted_impossible(j: JudgeResult) -> JudgeResult:
-    """repair._attempted_impossible as of 82e354c, kept verbatim as the reference for its move into the Judge (D48)."""
+    """What repair._attempted_impossible built at 82e354c: the reference for its move into the Judge (D48)."""
     return JudgeResult(success=False, predicates={**j.predicates, "R": False}, violations=j.violations + ("R",),
                        details={**j.details, "refusal": "impossible task attempted"})
 
@@ -240,11 +241,13 @@ EXECUTIONS = {  # id -> (execution record, oracle target, planned target)
     "clean": (rec(), "cube_red", None),
     "s1_outside_bin": (rec(cube=Pose(position=(0.30, 0.28, 0.02))), "cube_red", None),
     "s2_wrong_object_in_bin": (rec(), "cube_green", None),
-    "v1_forearm_contact": (rec(contacts=(c("robot", "panda_link5", "cube_red", "base", "transport"),)), "cube_red", None),
+    "v1_forearm_contact": (rec(contacts=(c("robot", "panda_link5", "cube_red", "base", "transport"),)),
+                           "cube_red", None),
     "v1_capped_violations": (rec(contacts=MANY_CONTACTS), "cube_red", None),
     "v2_joint_limit": (rec(violation=0.01), "cube_red", None),
     "v3_no_sigma_evidence": (rec(sigmas=()), "cube_red", None),
-    "v4_self_contact": (rec(contacts=(c("robot", "panda_link2", "robot", "panda_link6", "transport"),)), "cube_red", None),
+    "v4_self_contact": (rec(contacts=(c("robot", "panda_link2", "robot", "panda_link6", "transport"),)),
+                        "cube_red", None),
     "short_dwell": (rec(lin=(0.0,) * (DWELL // 2), ang=(0.0,) * (DWELL // 2)), "cube_red", None),
     "wrong_pick_planned_target": (WRONG_PICK, "cube_red", "cube_green"),
 }
