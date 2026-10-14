@@ -68,8 +68,8 @@ CHECK_CATEGORIES: dict[str, str] = {
 CATEGORIES = ("physical_constraint", "solver_non_convergence", "learned_visual")
 
 # Spec §10 diagnostic attribution tags: evidence, not proof of cause.
-LLM_PLAN, MOTION_LAYER, GATE_EXECUTION = "LLM plan", "motion-layer limitation (diagnostic)", "gate/execution discrepancy"
-VERIFIER_SIM, MIXED, UNKNOWN = "verifier/sim issue", "mixed", "unknown"
+LLM_PLAN, MOTION_LAYER = "LLM plan", "motion-layer limitation (diagnostic)"
+GATE_EXECUTION, VERIFIER_SIM, MIXED, UNKNOWN = "gate/execution discrepancy", "verifier/sim issue", "mixed", "unknown"
 ATTRIBUTION_TAGS = (LLM_PLAN, MOTION_LAYER, GATE_EXECUTION, VERIFIER_SIM, MIXED, UNKNOWN)
 
 # The Judge's contact violation format: body_a:link_a<->body_b:link_b@stage (judge.judge).
@@ -435,9 +435,9 @@ def _seed_set(rows: Sequence[AttemptRow]) -> dict[str, Any]:
     for r in rows:
         tasks.setdefault(r.task_index, r)
     types = Counter(str(r.oracle.proof.type) for r in tasks.values() if r.oracle.proof is not None)
-    return {"name": rows[0].seed_set, "hash": rows[0].seed_set_hash, "tasks": len(tasks),
-            "feasible": sum(map(_feasible, tasks.values())), "impossible": sum(not _feasible(r) for r in tasks.values()),
-            "impossible_by_type": dict(sorted(types.items()))}
+    feasible = sum(map(_feasible, tasks.values()))
+    return {"name": rows[0].seed_set, "hash": rows[0].seed_set_hash, "tasks": len(tasks), "feasible": feasible,
+            "impossible": len(tasks) - feasible, "impossible_by_type": dict(sorted(types.items()))}
 
 
 def _validate(rows: Sequence[AttemptRow]) -> None:
