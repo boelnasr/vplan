@@ -543,3 +543,50 @@ class SupervisedAttempt(Frozen):
     error_type: str | None = None
     error_message: str | None = None
     error_traceback: str | None = None
+
+
+# ---- W3.1 evaluation seed sets and runs (spec §6 "Seed sets", §14) -----------------------------------
+Split = Literal["dev", "test"]
+
+
+class SeedSetTask(Frozen):
+    """One tasks.jsonl line of an evaluation seed set: planner-visible fields only, never feasibility or a proof.
+
+    distractors and obstacles are scene facts (objects besides one, obstacle boxes), so the five panels of a type-3
+    enclosure count as obstacles; the 0-3 x 0-3 strata apply to feasible tasks."""
+    task_id: str
+    index: int = Field(ge=0)
+    seed: int = Field(ge=0)
+    split: Split
+    distractors: int = Field(ge=0)
+    obstacles: int = Field(ge=0)
+    task: TaskSpec
+
+    @model_validator(mode="after")
+    def _scene_counts(self) -> "SeedSetTask":
+        if (self.distractors, self.obstacles) != (len(self.task.scene.objects) - 1, len(self.task.scene.obstacles)):
+            raise ValueError("distractor and obstacle counts must match the scene")
+        return self
+
+
+class SeedSetOracle(Frozen):
+    """One oracle.jsonl line: the private TaskOracle (feasibility, and its proof or witness reference) of the task with
+    the same index. Never sent to planners."""
+    task_id: str
+    index: int = Field(ge=0)
+    oracle: TaskOracle
+
+
+class SeedSetExclusion(Frozen):
+    """One exclusions.jsonl line: a candidate seed with neither a witness nor a proof (spec §6 undetermined) and the
+    task index (slot) it was tried for; the next candidate seed is tried for the same slot."""
+    seed: int = Field(ge=0)
+    split: Split
+    slot: int = Field(ge=0)
+    kind: Literal["feasible", "impossible"]
+    distractors: int | None = Field(default=None, ge=0, le=3)  # the requested cell (feasible slots)
+    obstacles: int | None = Field(default=None, ge=0, le=3)
+    impossible_type: ImpossibleType | None = None
+    reason: str
+    witness: WitnessEvaluation | None = None
+

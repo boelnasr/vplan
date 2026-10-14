@@ -62,8 +62,9 @@ def _write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _write_jsonl(path: Path, rows) -> None:
-    path.write_text("".join(row + "\n" for row in rows), encoding="utf-8")
+def _write_jsonl(path: Path, rows, newline: str | None = None) -> None:
+    # newline=None keeps the platform's line ending (the pilot's files); "\n" makes bytes, and hashes, OS-independent.
+    path.write_text("".join(row + "\n" for row in rows), encoding="utf-8", newline=newline)
 
 
 def source_hashes() -> dict[str, str]:
