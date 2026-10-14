@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
@@ -199,7 +200,7 @@ def _figure(width_in: float, height_in: float) -> Figure:
     return fig
 
 
-def _style(ax) -> None:
+def _style(ax: Axes) -> None:
     ax.set_facecolor(SURFACE)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -215,7 +216,7 @@ def _png(fig: Figure) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _title(ax, text: str, dry_run: bool) -> None:
+def _title(ax: Axes, text: str, dry_run: bool) -> None:
     ax.set_title(text + ("\nDRY RUN — not a headline result" if dry_run else ""), loc="left", fontsize=11,
                  color=INK)
 
