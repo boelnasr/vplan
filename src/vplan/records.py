@@ -290,7 +290,7 @@ class ExecutionRecord(Frozen):
 
 class JudgeResult(Frozen):
     success: bool
-    predicates: dict[str, bool]  # S1, S2, V1..V4 (or R for refusals)
+    predicates: dict[str, bool]  # S1, S2, V1..V4 (+ R=False on an impossible task); R alone for refusals
     violations: tuple[str, ...]
     details: dict[str, str]
 

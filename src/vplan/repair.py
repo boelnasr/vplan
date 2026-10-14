@@ -221,14 +221,12 @@ def evaluate_pair(task: GeneratedTask, planner, *,
     return result
 
 
-def _attempted_impossible(evaluation):
-    """Spec §13 R: an impossible task is correct only if refused, so any executed plan fails it."""
+def _contradicts_impossible(evaluation) -> bool:
+    """Whether a judged execution on an impossible task is not an R failure (spec §13). This only checks: the Judge
+    scores R (D48)."""
     if not isinstance(evaluation, EvaluationResult) or evaluation.outcome != "executed" or evaluation.judge is None:
-        return evaluation
-    j = evaluation.judge
-    return evaluation.model_copy(update={"judge": JudgeResult(
-        success=False, predicates={**j.predicates, "R": False}, violations=j.violations + ("R",),
-        details={**j.details, "refusal": "impossible task attempted"})})
+        return False
+    return evaluation.judge.success or evaluation.judge.predicates.get("R") is not False
 
 
 def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
@@ -243,6 +241,10 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
     resample: identical blind requests (config 7). unverified: blind requests with the verify gate off
     except target grounding (config 1, D29). The planner sees only `spec`; `oracle` is used only at the
     Judge boundary.
+
+    The Judge scores R (spec §13, D48): the default evaluator passes the oracle label to it. A custom `evaluator`
+    owns its Judge call, so on an impossible task it must judge with feasible=False. A judged execution there that
+    is not an R failure contradicts the label and ends the round as sim_error, never as a success.
 
     visual_gate is the demo-only live Cosmos gate (D47), called as visual_gate(plan, traj, scene, subject=...) after
     the Verifier passes. Its visual Finding is repair feedback like any other; a final uncertain ends the attempt as
@@ -274,13 +276,20 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
 
         def evaluator(plan):
             # An absent referent (type 4) has no oracle object: the planned target stands in for the physics
-            # evidence, and R (below) already makes the attempt a failure.
+            # evidence, and the Judge's R (feasible=False) already makes the attempt a failure.
             attempt = run_attempt(plan, spec.scene, oracle.target_id or plan.target_id, feasible=feasible,
                                   verify_gate=mode != "unverified", seed=seed % (2**32), config_snapshot=cfgs,
                                   visual_gate=gate)
             return EvaluationResult(outcome=attempt.outcome, findings=tuple(attempt.findings),
                                     judge=attempt.judge, record=attempt.record, visual=attempt.visual)
-    evaluate = evaluator if feasible else (lambda plan: _attempted_impossible(evaluator(plan)))
+
+    def evaluate(plan):
+        # Raising makes the round a sim_error in _round, as for an evaluator that returns no EvaluationResult.
+        evaluation = evaluator(plan)
+        if not feasible and _contradicts_impossible(evaluation):
+            raise ValueError("an executed plan on an impossible task must fail R: the evaluator must call the Judge "
+                             "with feasible=False (D48)")
+        return evaluation
 
     def refused(plan):
         from vplan.judge.judge import judge
