@@ -8,8 +8,8 @@ import traceback
 from typing import Literal
 
 from vplan.config import config_hash, config_snapshot as read_config_snapshot
-from vplan.records import (ArmResult, AttemptRecord, EvaluationResult, GeneratedTask, JudgeResult, PairedResult,
-                           PickPlacePlan, PlannerFeedback, Refusal, RoundRecord, TaskOracle, TaskSpec)
+from vplan.records import (ArmResult, AttemptRecord, EvaluationResult, GeneratedTask, PairedResult, PickPlacePlan,
+                           PlannerFeedback, Refusal, RoundRecord, TaskOracle, TaskSpec)
 
 
 def _simulation_error(exc: Exception, outcome: str, secret: str | None) -> EvaluationResult:
@@ -180,9 +180,10 @@ def evaluate_pair(task: GeneratedTask, planner, *,
                                     judge=attempt.judge, record=attempt.record)
 
     def refused(plan):
-        # Pilot tasks are feasible; refusal is terminal and unsuccessful.
-        return EvaluationResult(outcome="refused", judge=JudgeResult(
-            success=False, predicates={"R": False}, violations=("R",), details={"reason": "feasible task refused"}))
+        from vplan.judge.judge import judge
+        # Pilot tasks are feasible, so the Judge scores every refusal as a false refusal (R=False); it is terminal.
+        return EvaluationResult(outcome="refused", judge=judge(None, task.task.scene, task.oracle.target_id,
+                                                               "refused", True, cfg=cfgs["judge"]))
 
     counter = 0
 

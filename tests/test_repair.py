@@ -246,3 +246,15 @@ def test_default_arm_order_is_recorded_and_old_results_still_validate():
     old = result.model_dump(mode="json")
     del old["arm_order"]
     assert records.PairedResult.model_validate(old).arm_order == ("repair", "resample")
+
+
+def test_pilot_refusal_is_scored_by_the_judge():  # D48: every scored predicate lives in judge/
+    from vplan.judge.judge import judge
+    from vplan.repair import evaluate_pair
+    task = generated()
+    client = FakeClient([response(records.Refusal(reason="other", explanation="cannot plan"))])
+    result = evaluate_pair(task, planner(client), evaluator=lambda p: pytest.fail("refusals never simulate"))
+    refusal = result.initial.evaluation
+    assert result.repair.outcome == result.resample.outcome == "refused" and result.unique_call_count == 1
+    assert not refusal.judge.success and refusal.judge.predicates == {"R": False}  # pilot tasks are all feasible
+    assert refusal.judge == judge(None, task.task.scene, task.oracle.target_id, "refused", True)

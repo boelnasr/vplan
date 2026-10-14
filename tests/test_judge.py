@@ -1,3 +1,4 @@
+import ast
 import math
 import os
 import subprocess
@@ -160,6 +161,18 @@ def test_judge_imports_neither_verify_nor_geometry() -> None:  # D21 independenc
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(root / "src"), str(root)])}
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=root)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_only_the_judge_builds_judge_results() -> None:  # D48: every scored predicate lives in judge/
+    src = Path(__file__).resolve().parents[1] / "src" / "vplan"
+    builders = []
+    for path in sorted(src.rglob("*.py")):
+        if path.parent == src / "judge":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None)) == "JudgeResult":
+                builders.append(f"{path.relative_to(src).as_posix()}:{node.lineno}")
+    assert not builders, builders
 
 
 STAGES = ("approach", "descend", "lift", "transport", "descend_place", "retreat")  # Verifier segment labels
