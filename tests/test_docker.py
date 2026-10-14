@@ -228,3 +228,13 @@ def test_image_installs_the_manipulapy_1_4_2_wheel_from_pypi() -> None:  # D49
     assert version == "1.4.2" and MANIPULAPY_WHEEL_SHA256 in hashes
     assert image_requirements()["pybullet"][0] == "3.2.7"  # the [simulation] extra
 
+
+# --- run-local.sh -----------------------------------------------------------------------------------------------
+
+def test_run_local_is_strict_bash_and_never_passes_credentials() -> None:
+    text = (DOCKER / "run-local.sh").read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n") and "\nset -euo pipefail\n" in text
+    assert "--env-file" not in text and "API_KEY" not in text
+    mounts = re.findall(r"--(?:volume|mount)[ =](\S+)", text)  # the script spells docker flags out in full
+    assert mounts and all(m.strip("\"'").endswith(":/out") for m in mounts), mounts
+    assert "VPLAN_IMAGE_DIGEST=" in text
