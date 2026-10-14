@@ -152,6 +152,21 @@ def test_read_result_rejects_garbage_and_mismatched_ids(tmp_path):
     assert supervisor.read_result(tmp_path / "missing.json", "b") is None
 
 
+def test_supervise_runs_one_attempt_at_any_stem_without_a_results_file(tmp_path):
+    # W3.1 reuses the per-attempt loop with its own sink (attempts.jsonl) and resume-safe file stems.
+    (tmp_path / "w").mkdir()
+    sleeps = []
+    job = AttemptJob("5:dev:12", "fault_flaky_429", {"marker": str(tmp_path / "marker")})
+    a = supervisor.supervise(job, tmp_path / "w" / "0012.s1", timeout_s=60.0, service_retries=1, backoff_s=1.0,
+                             import_modules=FAULTS, sleep=sleeps.append)
+    assert isinstance(a, records.SupervisedAttempt) and a.attempt_id == "5:dev:12"
+    assert a.outcome == "executed" and a.tries == 2 and sleeps == [1.0]
+    names = {p.name for p in (tmp_path / "w").iterdir()}
+    assert {"0012.s1.params.json", "0012.s1.try1.result.json", "0012.s1.try2.result.json"} <= names
+    assert json.loads((tmp_path / "w" / "0012.s1.params.json").read_text(encoding="utf-8")) == job.params
+    assert not any(n.endswith(".jsonl") for n in names)
+
+
 def test_basic_attempt_job_runs_heuristic_plan_in_a_worker(tmp_path):
     (a,) = batch(tmp_path, [AttemptJob("basic:0", "basic_attempt", {"target_id": "cube_red"})],
                  timeout_s=300.0, import_modules=()).attempts

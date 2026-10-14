@@ -4,7 +4,8 @@ reported by the worker stay service_failure in the denominator, with the D33 sto
 
 Layout: RUN_DIR/results.jsonl (parent) and RUN_DIR/workers/NNNN.{params.json, tryT.result.json,
 tryT.stdout.log, tryT.stderr.log}. Files are named by batch index because attempt IDs such as "3:dev:7"
-contain ':', which Windows does not allow in file names.
+contain ':', which Windows does not allow in file names. supervise() is one attempt's try loop; the W3.1
+evaluation runner reuses it with its own sink (attempts.jsonl) and resume.
 """
 from __future__ import annotations
 
@@ -118,6 +119,29 @@ def _retryable(result: WorkerResult) -> bool:
         result.status_code == 429 or result.status_code >= 500)
 
 
+def supervise(job: AttemptJob, stem: Path, *, timeout_s: float = 600.0, service_retries: int = 0,
+              backoff_s: float = 5.0, max_backoff_s: float = 60.0, import_modules: Sequence[str] = (),
+              cwd: str | None = None, sleep: Callable[[float], None] = time.sleep) -> SupervisedAttempt:
+    """One attempt: write STEM.params.json, then run supervised tries (STEM.tryT.*) until a result that is not
+    retried. The caller owns the results sink; stem's directory must exist."""
+    stem = Path(stem)
+    stem.with_name(f"{stem.name}.params.json").write_text(json.dumps(job.params), encoding="utf-8")
+    start = time.monotonic()
+    tries = 0
+    while True:
+        tries += 1
+        result, exit_code = _run_try(job, stem, tries, timeout_s, import_modules, cwd)
+        if tries > service_retries or not _retryable(result) or result.status_code in FATAL_STATUS:
+            break
+        delay = backoff_s * 2 ** (tries - 1)
+        sleep(min(max_backoff_s, max(delay, result.retry_after_s or 0.0)))
+    return SupervisedAttempt(
+        attempt_id=job.attempt_id, job=job.job, outcome=result.outcome, tries=tries,
+        wall_s=time.monotonic() - start, exit_code=exit_code, status_code=result.status_code,
+        payload=result.payload, error_type=result.error_type, error_message=result.error_message,
+        error_traceback=result.error_traceback)
+
+
 def run_batch(jobs: Sequence[AttemptJob], run_dir: Path, *, timeout_s: float = 600.0, service_retries: int = 0,
               backoff_s: float = 5.0, max_backoff_s: float = 60.0, import_modules: Sequence[str] = (),
               cwd: str | None = None, sleep: Callable[[float], None] = time.sleep) -> BatchSummary:
@@ -140,23 +164,9 @@ def run_batch(jobs: Sequence[AttemptJob], run_dir: Path, *, timeout_s: float = 6
     consecutive = 0
     with open(results_path, "x", encoding="utf-8") as sink:
         for index, job in enumerate(jobs):
-            stem = workers / f"{index:04d}"
-            stem.with_name(f"{stem.name}.params.json").write_text(json.dumps(job.params), encoding="utf-8")
-            start = time.monotonic()
-            tries = 0
-            while True:
-                tries += 1
-                result, exit_code = _run_try(job, stem, tries, timeout_s, import_modules, cwd)
-                if (tries > service_retries or not _retryable(result)
-                        or result.status_code in FATAL_STATUS):
-                    break
-                delay = backoff_s * 2 ** (tries - 1)
-                sleep(min(max_backoff_s, max(delay, result.retry_after_s or 0.0)))
-            record = SupervisedAttempt(
-                attempt_id=job.attempt_id, job=job.job, outcome=result.outcome, tries=tries,
-                wall_s=time.monotonic() - start, exit_code=exit_code, status_code=result.status_code,
-                payload=result.payload, error_type=result.error_type, error_message=result.error_message,
-                error_traceback=result.error_traceback)
+            record = supervise(job, workers / f"{index:04d}", timeout_s=timeout_s, service_retries=service_retries,
+                               backoff_s=backoff_s, max_backoff_s=max_backoff_s, import_modules=import_modules,
+                               cwd=cwd, sleep=sleep)
             sink.write(record.model_dump_json() + "\n")
             sink.flush()
             os.fsync(sink.fileno())  # a crashed parent loses at most the attempt in flight
