@@ -508,7 +508,7 @@ These land in a tagged release, listed in the README under "updated during the s
 3. A correct `near_singularity_detection` threshold semantic.
 4. ASCII-safe import banner (the Windows cp1252 crash) [D14].
 
-Until the release, the hackathon code works around all four (§8) and pins 1.4.1.
+Until the release, the hackathon code works around all four (§8) and pins 1.4.1. *Released as 1.4.2 (D49): the pin is `==1.4.2`, and `robot.py` checks the chain's `joint_names` instead of slicing screw axes by position.*
 
 ## 18. Nebius usage and submission artifacts [D7, D19]
 

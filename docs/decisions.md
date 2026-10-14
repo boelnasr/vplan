@@ -1332,3 +1332,90 @@ The owner accepted the recommendations for the questions left open in D38 and D4
 - **Config 1 (D40).** The unverified ablation runs with k=0: one blind attempt, no retries, so it measures the planner without the gate rather than resampling luck. `run_task` still defaults to k=3; the W3 batch wiring passes k=0 for config 1.
 - **Impossible-task scoring (D40).** `repair._attempted_impossible` moves into `judge.judge` in W3, before the W3.3 freeze, so every scored predicate lives in the Judge. Behaviour is unchanged until then.
 - **Docker (R8, D37).** The local container work stays in W3, alongside W3.4; no Docker install in week 2.
+
+## D49. ManipulaPy 1.4.2 released and pinned; W2.7 closed (2026-10-13)
+
+**Release.** The owner released ManipulaPy 1.4.2 (tag `v1.4.2`, merge commit `6ccc202`; PyPI upload 2026-10-13). It carries the four spec §17 fixes plus the `extract_omega_list` fix (CR#15). The 2026-10-11 audit of 1.4.1 found none of them in that release.
+- Wheel `manipulapy-1.4.2-py3-none-any.whl`, sha256 `611c2aa0708cc965b2f681d7a324e97f74578a77cec6cef9bea47be3d376cb10`; sdist sha256 `9a3e5aa83c213bb1bd69a66665445739913bda950f708f5ce310207e72457a37`.
+- Every `.py` file in the wheel equals the tag. The wheel only leaves out mesh and source data that vplan does not use (it loads `pybullet_data`'s Panda).
+- Its dependencies are unchanged from 1.4.1, so `uv lock --upgrade-package manipulapy` changed only the ManipulaPy entry.
+
+**Changes in vplan.**
+- `pyproject.toml` and `uv.lock` pin `ManipulaPy[simulation]==1.4.2`.
+- `robot.load_panda` no longer slices the screw axes by position in `urdf.actuated_joints`; that worked only because the seven arm joints come first. It takes the chain-restricted `S_list`, `B_list` and `joint_limits` as returned, and raises `RuntimeError` unless the new `joint_names` key is exactly `panda_joint1..7`, because HOME_Q, the velocity limits and the PyBullet joint order all assume that order. A test reorders `joint_names` and expects the refusal.
+- `omega_list=S[:3, :]` stays: it is the definition of the rotation axes, not a workaround.
+- vplan never called `near_singularity_detection` (it computes its own manipulability), so §17 item 3 needed no code change here.
+
+**Verification.**
+- Full suite against the PyPI wheel itself (extracted and placed first on `PYTHONPATH`, the import path checked before the run): **524 passed** (523 plus the new test), 278 s.
+- The editable checkout's `ManipulaPy/` tree equals the tag, so development and the pin now run the same code. `demo-once` succeeds on it.
+- The 1.4.2 import greeting is one ASCII line on stderr (`MANIPULAPY_QUIET=1` hides it), and `demo-once` runs on a cp1252 console without `PYTHONUTF8`. The dev commands keep `PYTHONUTF8=1` for UTF-8 default file I/O on Windows; the comments that blamed the banner are corrected.
+
+**Provenance note.** The ManipulaPy checkout reports about 716 modified files: 711 are executable-bit changes from the `/mnt/c` mount (`core.filemode=true`), not content. Run manifests record the checkout as dirty until the owner sets `core.filemode false` there or restores the modes. The W3 container and headline runs install the pinned PyPI wheel, as D26/D27 planned.
+
+## D50. A System One decision model as an intent check: no-go for Laya and Jev (2026-10-14)
+
+**Question.** Can a fast "System One" decision model, which gives typed answers (choice, yes/no, score) with probabilities and no text, serve as a veto-only intent check? It would confirm, before execution, that the planner's `target_id` is the object the instruction names. Nothing checks this today:
+- the verifier's grounding check only confirms that the target exists and the place pose is inside the bin;
+- the Judge scores the right object only after execution (S2 `wrong_object`);
+- the template resolver cannot fill the gap, because it defines the private oracle (spec §6).
+
+A learned intent check would follow the D47 rule: it can block or ask, never approve motion.
+
+**Candidates (all released in September 2026).**
+- **Jev** (TypeSafe): closed and hosted; on OpenRouter as `typesafe/jev-1.13`.
+- **Laya** (Convai Innovations): Apache-2.0, a 421M ModernBERT-large encoder with a decision head. `laya-serve` speaks Jev's `/v1/systemone` API.
+- **OpenJev** (razorback16): Apache-2.0, a Jev-compatible server. Its default model, DiffusionGemma 26B-A4B, needs at least 24 GB of GPU memory, so it cannot run on the 16 GB development GPU.
+
+The owner chose the intent check over a demo-only instruction screen and an offline "replace the verifier" study, with a free Laya spike first.
+
+**Spike (throwaway; scripts and outputs kept locally in `runs/intent-spike/`).**
+- **Data:** `generate.draft_task` without simulation, 1–3 distractors. 40 tasks per template (color, shape, nearest_bin, leftmost, next_to) plus 40 with an absent referent (impossible type 4). Dev seeds 0–783 and test seeds 1,000,000–1,000,557, 240 tasks each.
+- **Query:** the state gives the instruction, the frame convention (+y is the robot's left) and the bin center. One `choice` question asks: "Which object does the instruction ask the robot to pick? Answer none if no object matches the instruction." The options are each object as `<color> <shape> at x=…, y=…`, plus `none`.
+- **Model:** Laya 0.4.7 on CPU (torch 2.14.1+cpu, in a separate venv `~/venvs/laya`; nothing added to vplan), with the base and `typed-decisions` checkpoints. No input was truncated; the median was 0.28 s per question.
+- **Rule, fixed before any result:**
+  - On dev, pick the checkpoint and the smallest `answer_confidence` threshold that leaves at most 2% of answers confidently wrong.
+  - GO on test only if confidently wrong is at most 2% (false vetoes of correct plans) and confidently right is at least 70% (catch rate).
+
+**Result: NO-GO.**
+
+| Template (test, base checkpoint) | Accuracy | Chance |
+|---|---|---|
+| color ("the red cube") | 1.00 | 0.25 |
+| shape ("the cylinder") | 1.00 | 0.28 |
+| referent absent (`none`) | 0.82 | 0.26 |
+| leftmost | 0.38 | 0.28 |
+| nearest_bin | 0.23 | 0.30 |
+| next_to | 0.00 | 0.25 |
+
+- **At the dev threshold** (0.60, base checkpoint), on test: 5.0% of answers were confidently wrong and 38.8% confidently right. 9 of the 12 confident errors are `next_to`, so the check would block correct plans. The `typed-decisions` checkpoint at its own dev threshold: 1% wrong and 34% right.
+- **It matches words, not relations.**
+  - For "the object next to the <color> <shape>" it picks the named anchor itself: 59/80 with the base checkpoint, 71/80 with `typed-decisions`.
+  - For leftmost and nearest_bin it mostly falls back to the first option or `none`.
+- **Recalibration would not help.** The model card advises refitting temperatures, but that changes the confidences, not the chosen option, so the relational results stand.
+
+**Jev follow-up (same data, question and rule).** The aim was to tell Laya apart from the model class.
+- **Setup:** `typesafe/jev-1.13`, served as snapshot `jev-1.13-20260917` by TypeSafe, called through OpenRouter's Decisions API (`POST /api/alpha/decisions`). The identical text goes in as `state: {"text": …}`. The threshold applies to the chosen option's probability; Jev also returns its own `confidence`.
+- **Cost:** the owner approved the paid run. The key was read through `read_env_file` and never printed. 480 questions (about 440 input tokens each) cost 0.0093 USD in total, with a median round trip of 0.30 s.
+
+| Template (test) | Jev | Laya (base) | Chance |
+|---|---|---|---|
+| color | 1.00 | 1.00 | 0.25 |
+| shape | 1.00 | 1.00 | 0.28 |
+| referent absent (`none`) | 1.00 | 0.82 | 0.26 |
+| leftmost | 0.85 | 0.38 | 0.28 |
+| nearest_bin | 0.82 | 0.23 | 0.30 |
+| next_to | 0.35 | 0.00 | 0.25 |
+| all | 0.84 | 0.57 | 0.27 |
+
+- **At the dev threshold (0.70), on test:**
+  - confidently wrong: 0.8%, which passes;
+  - confidently right: 67.5%, which misses the 70% bar.
+
+  **NO-GO, narrowly.** The bar stays as fixed; moving it after seeing the result would defeat the rule.
+- **Coordinates and relations:** Jev reasons about coordinates far better than Laya, but `next_to` stays near chance, and 5% of the test `next_to` answers are confidently wrong.
+
+**Decision.**
+- **No decision model enters the pipeline or the demo.** Even a narrow pass would have put a closed third-party API in the loop, for a check that catches about two thirds of wrong-object plans.
+- **Both results are recorded as measured learned checks** next to Cosmos (D34, balanced accuracy 0.70), and the README cites them. Decision models match words reliably; spatial relations are where they fail.
+- **The intent gap stays as it is.** The Judge scores the right object after execution (S2), and the evaluation stays physics-only.
