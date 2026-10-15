@@ -230,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     rb.add_argument("--run", required=True, action="append",
                     help="a W3.1 run directory; repeat once per configuration (config 2 comes from config 3's run)")
     rb.add_argument("--output", required=True, help="the report directory: metrics.json and report.html")
-    rb.add_argument("--seed-dir", help="the runs' seed set (default: the directory the first run recorded)")
+    rb.add_argument("--seed-dir", help="the runs' seed set (default: the directory the first run recorded, as that "
+                    "OS wrote it; pass --seed-dir when building on another OS, e.g. in the Linux container)")
     args = parser.parse_args(argv)
     if args.cmd == "eval":
         return _eval(args)
