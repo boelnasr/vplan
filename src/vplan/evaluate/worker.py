@@ -3,7 +3,10 @@
 Usage (argument list, never a shell): python -m vplan.evaluate.worker --job NAME --attempt-id ID
     --params PARAMS.json --out RESULT.json [--import MODULE ...]
 stdout/stderr are only logs: ManipulaPy prints a banner on import, so the result travels via --out.
-A job is `fn(params: dict) -> dict` with WorkerResult's outcome/status_code/retry_after_s/payload keys.
+A job is `fn(params: dict) -> dict` with WorkerResult's outcome/status_code/retry_after_s/payload keys, and optionally
+an "after" step: a callable returning a dict that is merged into the payload. main() writes the result file before it
+runs the after step and rewrites it after, so a crash, an exception or a hang in the after step (the W3.1 key-frame
+export) can never lose the job's result; an exception is recorded under payload["after_error"].
 Built-in jobs: basic_attempt (W2.8) and run_task (one W3.1 evaluation attempt, D42).
 """
 from __future__ import annotations
@@ -22,6 +25,7 @@ from vplan.records import WorkerResult
 Job = Callable[[dict], dict]
 JOBS: dict[str, Job] = {}
 EXIT_UNKNOWN_JOB = 2
+AFTER = "after"  # job-return key of the optional after step
 
 
 def register(name: str) -> Callable[[Job], Job]:
@@ -60,16 +64,38 @@ def write_result(path: Path, result: WorkerResult) -> None:
     os.replace(tmp, path)
 
 
-def run(job: str, attempt_id: str, params: dict) -> WorkerResult:
+def _call(job: str, attempt_id: str, params: dict) -> tuple[WorkerResult, Callable[[], dict] | None]:
+    """The job's result and its after step (None without one, or when the job failed)."""
     fn = JOBS.get(job)
     if fn is None:
         return WorkerResult(attempt_id=attempt_id, job=job, outcome="sim_error", error_type="unknown_job",
-                            error_message=f"no job registered as {job!r}")
+                            error_message=f"no job registered as {job!r}"), None
     try:
-        return WorkerResult(attempt_id=attempt_id, job=job, **fn(params))
+        out = dict(fn(params))
+        after = out.pop(AFTER, None)
+        return WorkerResult(attempt_id=attempt_id, job=job, **out), after
     except Exception as exc:  # spec §16: every exception becomes an outcome with its traceback
         return WorkerResult(attempt_id=attempt_id, job=job, outcome="sim_error", error_type=type(exc).__name__,
-                            error_message=str(exc)[:2000], error_traceback=traceback.format_exc())
+                            error_message=str(exc)[:2000], error_traceback=traceback.format_exc()), None
+
+
+def _finish(result: WorkerResult, after: Callable[[], dict]) -> WorkerResult:
+    """The result with the after step's dict merged into its payload. The after step never changes the outcome: its
+    exception is recorded as payload["after_error"]."""
+    try:
+        extra = after()
+        if not isinstance(extra, dict):
+            raise TypeError(f"an after step must return a dict, not {type(extra).__name__}")
+        json.dumps(extra)  # the result file is JSON: refuse here rather than lose the result when writing it
+    except Exception as exc:
+        extra = {"after_error": {"error_type": type(exc).__name__, "error_message": str(exc)[:2000]}}
+    return WorkerResult.model_validate({**result.model_dump(), "payload": {**result.payload, **extra}})
+
+
+def run(job: str, attempt_id: str, params: dict) -> WorkerResult:
+    """The job's result, after step included (in-process callers; main() writes the result in between)."""
+    result, after = _call(job, attempt_id, params)
+    return result if after is None else _finish(result, after)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -83,8 +109,10 @@ def main(argv: list[str] | None = None) -> int:
     for module in args.imports:
         importlib.import_module(module)  # registers extra jobs (test fault jobs, later run_task)
     params = json.loads(args.params.read_text(encoding="utf-8"))
-    result = run(args.job, args.attempt_id, params)
-    write_result(args.out, result)
+    result, after = _call(args.job, args.attempt_id, params)
+    write_result(args.out, result)  # final before the after step: a crash or hang there cannot lose it
+    if after is not None:
+        write_result(args.out, _finish(result, after))
     return EXIT_UNKNOWN_JOB if result.error_type == "unknown_job" else 0
 
 

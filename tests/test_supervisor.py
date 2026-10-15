@@ -40,6 +40,27 @@ def test_batch_survives_crash_kill_hang_and_error(tmp_path):
     assert got["a:4"].outcome == "executed" and got["a:4"].payload == {"echo": "still alive"}
 
 
+def test_an_after_step_runs_once_the_result_is_written_and_can_never_lose_it(tmp_path):
+    # The result file is written before the after step (a key-frame export), so a crash or a hang there keeps the
+    # attempt's result; only the after step's own payload is missing.
+    jobs = [AttemptJob("f:0", "fault_after_ok"), AttemptJob("f:1", "fault_after_raise"),
+            AttemptJob("f:2", "fault_after_crash"), AttemptJob("f:3", "fault_after_hang")]
+    got = {a.attempt_id: a for a in batch(tmp_path, jobs, timeout_s=8.0).attempts}
+    assert all(a.outcome == "executed" and a.error_type is None for a in got.values())
+    assert got["f:0"].payload == {"echo": "base", "extra": True} and got["f:0"].exit_code == 0
+    assert got["f:1"].payload == {"echo": "base", "after_error": {"error_type": "RuntimeError",
+                                                                 "error_message": "renderer exploded"}}
+    assert got["f:2"].payload == {"echo": "base"} and got["f:2"].exit_code == 70
+    assert got["f:3"].payload == {"echo": "base"} and got["f:3"].exit_code is None and got["f:3"].wall_s >= 8.0
+
+
+def test_in_process_run_includes_the_after_step():
+    import tests.supervisor_jobs  # noqa: F401 (registers the fault jobs)
+    from vplan.evaluate import worker
+    assert worker.run("fault_after_ok", "f:0", {}).payload == {"echo": "base", "extra": True}
+    assert worker.run("fault_after_raise", "f:1", {}).payload["after_error"]["error_type"] == "RuntimeError"
+
+
 def test_garbage_stdout_never_reaches_results(tmp_path):
     out = batch(tmp_path, [AttemptJob("g", "fault_garbage_stdout")])
     (a,) = out.attempts

@@ -66,3 +66,26 @@ def garbage(params: dict) -> dict:
 @register("fault_bad_return")
 def bad_return(params: dict) -> dict:
     return {"outcome": "teleported"}
+
+
+# After steps (worker.AFTER): run only once the job's result file is written, e.g. the W3.1 key-frame export.
+@register("fault_after_ok")
+def after_ok(params: dict) -> dict:
+    return {"outcome": "executed", "payload": {"echo": "base"}, "after": lambda: {"extra": True}}
+
+
+@register("fault_after_raise")
+def after_raise(params: dict) -> dict:
+    def fail() -> dict:
+        raise RuntimeError("renderer exploded")
+    return {"outcome": "executed", "payload": {"echo": "base"}, "after": fail}
+
+
+@register("fault_after_crash")
+def after_crash(params: dict) -> dict:
+    return {"outcome": "executed", "payload": {"echo": "base"}, "after": lambda: os._exit(70)}
+
+
+@register("fault_after_hang")
+def after_hang(params: dict) -> dict:
+    return {"outcome": "executed", "payload": {"echo": "base"}, "after": lambda: time.sleep(3600)}
