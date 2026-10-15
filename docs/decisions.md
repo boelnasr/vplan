@@ -1507,3 +1507,24 @@ The owner chose the intent check over a demo-only instruction screen and an offl
 - `.dockerignore` is an allowlist; env files are dropped at any depth.
 - `docker/run-local.sh` runs both containers with `--network none` and never mounts or passes an env file. `VPLAN_IMAGE_DIGEST` is the local image ID, and the git revision is an image label. The image has no git, so manifests made inside it have a null git field.
 - **Not yet run:** Docker is not installed (D51). A Linux-native stand-in passed the full suite: uv's CPython 3.10.21 with the locked wheels, on a read-only copy of the build context. That stand-in included the supervisor's kill and timeout tests, which closes D42's "never tested on Linux-native Python". The same stand-in prepared 10/10 pilot tasks, byte-identical to Windows apart from line endings. R8 local stays open until `docker/run-local.sh` has run.
+
+## D56. `vplan report build` over W3.1 runs (W3.2 completed, 2026-10-15)
+
+- `vplan report build --run RUN_DIR [--run …] --output OUT_DIR [--seed-dir DIR]` (`src/vplan/evaluate/collect.py`). W3.1 writes one run directory per config, so `--run` repeats.
+  - It refuses runs over different seed sets and two runs of the same config.
+  - It loads the seed set from `--seed-dir` or the directory the first run recorded. Source drift is allowed; a config change is refused.
+  - It maps each `EvalAttempt` row to an `AttemptRow`.
+  - Exit codes: 0 built, 1 built from an incomplete run (titled INCOMPLETE), 2 refused.
+  - A Windows-made run records a Windows-style relative seed path, so on Linux pass `--seed-dir`.
+- **Run coverage:** metrics.json has a status block with INCOMPLETE and LIMITED title prefixes (D33). `provenance.seed_set` gives the seed set's real size next to the tasks present.
+- **Headline status** is per config (headline, dry_run, partial, not_run). A report is a headline report only if configs 2, 3 and 7 are all present, complete, unlimited and on Token Factory. A dry-run config 1 is named in the banner but does not demote the headline. Each chart's stamp names the dry-run configs it shows.
+- **Wording:** the feedback gain reads "the comparison that separates the effect of feedback from retrying at the same budget", and config 7 is the "equal-budget control". A test scans metrics.json and the HTML for claim phrases ("credits feedback", "beats", "outperform", …). This departs from spec §14's role column for config 7 ("credits feedback over retrying"); the spec text and the §1 headline wait for the owner (week3.md).
+- **Privacy:** `public_manifest` drops local paths (seed directory, resolved paths, the ManipulaPy checkout location) and any absolute path before a manifest reaches metrics.json or the HTML. Hashes, versions and git SHAs stay.
+- **Guards:** `AttemptRow` checks its distractor and obstacle counts against the scene. A 12-case test pins `first_round` (config 2) to `run_task(k=0)` on the same scripted planner. Mistyped run-manifest fields are refused.
+- **Checked from the main checkout:** a 10-task dev seed set, a config-5 run (10/10) and `report build` produced a self-contained report with no URLs or local paths, with the git SHA recorded. Suite: 832 passed.
+- **Open, before the final runs:**
+  - Spec §14 runs on the held-out `test` seeds, but a complete Token Factory run on `dev` still gets headline status.
+  - Each row keeps the full replay streams, about 1.2 MB per executed row, so a 400-task report needs 1.5–2 GB of RAM.
+  - D33's "DEGRADED: n service failures" prefix is missing.
+  - An `--output` that names an existing file ends in a traceback.
+  - A configuration change after W3.3 makes `report build` refuse older seed sets.

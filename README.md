@@ -4,7 +4,7 @@ A language model proposes a pick-and-place plan for a Franka Panda arm. Determin
 
 Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron 3 Ultra**. Final runs use **Nebius Token Factory** and **Nebius Serverless Jobs**.
 
-> **Status: weeks 1–2 of 4 done.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron 3 Ultra. Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a supervised pilot runner, and a demo-only Cosmos visual gate. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Week 3 covers the Nebius Token Factory runs, batch evaluation, report and Gradio UI (see [`docs/plan.md`](docs/plan.md)).
+> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron 3 Ultra. Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come: calibration and freeze, the Gradio UI, and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
 
 ## How it works
 
@@ -115,6 +115,38 @@ python -m vplan pilot show --run runs/pilot-dev/runs/<run_id> --task <task_id> -
 
 After the [D36 validation fixes](docs/decisions.md#d36-close-approval-dwell-and-input-validation-gaps-2026-10-10), prepare a fresh cohort before collecting new results: source hashes have changed. Existing records still load, but rejudging an execution without the new per-step dwell pose history cannot establish S1 success. Saved historical verdicts remain readable.
 
+## Evaluation
+
+The held-out evaluation compares the configurations in spec §14 on the same frozen seed set. No model call happens before the seed set is frozen.
+
+| Config | Planner | Gate | Budget |
+|---|---|---|---|
+| 1 | Nemotron | none (only an unknown target is blocked) | 1 attempt |
+| 2 | Nemotron | verifier | round 1 of config 3 (not run separately) |
+| 3 | Nemotron | verifier, with repair from its findings | up to 4 attempts |
+| 5 | rule-based heuristic | verifier | up to 4 attempts |
+| 6 | a frontier model (optional, paid) | none | 1 attempt |
+| 7 | Nemotron | verifier, independent resamples, no feedback | up to 4 attempts |
+
+```powershell
+# 1. Freeze a seed set: local simulation only. dev = 75 feasible + 25 impossible tasks (D51);
+#    test is generated only after the W3.3 freeze and needs --allow-test-split.
+python -m vplan eval prepare --seeds dev
+
+# 2. One run per config. Config 5 needs no keys; LLM configs read credentials only from --env-file.
+python -m vplan eval run --config 5 --seeds dev
+python -m vplan eval run --config 3 --seeds dev --env-file .env
+python -m vplan eval run --config 3 --seeds dev --env-file .env --resume runs/<run_dir>   # continue a stopped run
+
+# 3. Build metrics.json and a single self-contained report.html from several runs over one seed set.
+python -m vplan report build --run runs/<c3_run> --run runs/<c7_run> --run runs/<c5_run> --output runs/report
+```
+
+- Each run directory holds `manifest.json` (code, config and seed-set hashes, versions, provider and model), `sessions.jsonl` and `attempts.jsonl`, written only by the supervising parent. The API key never reaches any of them.
+- **Resume** counts every recorded attempt, including provider failures, so failures stay in the denominator. It refuses a changed config, model or seed set.
+- **The report labels its own status:** INCOMPLETE and LIMITED runs, and a "dry run, not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.
+- **Container (R8):** `docker/run-local.sh` builds the locked Linux image and runs the test suite and 10 tasks inside it, with no network and no env file.
+
 ## Repository layout
 
 | Path | Contents |
@@ -132,7 +164,8 @@ After the [D36 validation fixes](docs/decisions.md#d36-close-approval-dwell-and-
 | `src/vplan/tasks/` | Scenes, the task generator (feasible and provably impossible tasks), instruction resolution |
 | `src/vplan/visual/` | Cosmos client, key-frame rendering and the demo-only visual gate |
 | `src/vplan/sim/` | PyBullet scene building and self-collision exclusions |
-| `src/vplan/evaluate/` | Feedback pilot preparation, supervised runs and reports |
+| `src/vplan/evaluate/` | Seed sets, the supervised evaluation runner, the feedback pilot, statistics, metrics and the HTML report |
+| `docker/` | The locked Linux image and the R8 local check |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
 | `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [related work](docs/related-work.md), reviews |
 
