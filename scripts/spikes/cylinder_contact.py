@@ -12,17 +12,50 @@ reserved for evaluating the already-selected 16-sided shape.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+import hashlib
+import importlib.metadata
+import importlib.util
 import json
 import math
 from pathlib import Path
+import platform
 
 import numpy as np
 import pybullet as p
 
 import vplan.sim.scene as scene_module
 from scripts.spikes.r6_generation import feasible_row
-from vplan.config import config_snapshot
+from vplan.config import config_hash, config_snapshot
+from vplan.evaluate.pilot import ROOT, _git, _utc_now, source_digest, source_hashes
 from vplan.tasks import GenerationRejected, draft_task
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def benchmark_provenance(cfg: dict, seeds: list[int]) -> dict:
+    """What the run is about to use: configs, seeds, sources, packages, the editable upstream code and the physics
+    binary. The output is committed as evidence, so it holds hashes and versions but no local paths."""
+    hashes = source_hashes()
+    for path in (Path(__file__).resolve(), ROOT / "scripts/spikes/r6_generation.py", ROOT / "pyproject.toml"):
+        hashes[path.relative_to(ROOT).as_posix()] = _sha256(path)
+    packages = {}
+    for name in ("ManipulaPy", "pybullet", "numpy", "scipy", "pydantic", "openai"):
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    upstream = Path(importlib.util.find_spec("ManipulaPy").origin).parent
+    upstream_hashes = {path.relative_to(upstream).as_posix(): _sha256(path) for path in sorted(upstream.rglob("*.py"))}
+    return {"captured_utc": _utc_now(), "git": _git(), "python": platform.python_version(), "os": platform.platform(),
+            "packages": packages, "configs": deepcopy(cfg),
+            "config_hashes": {key: config_hash(value) for key, value in cfg.items()},
+            "seeds": list(seeds), "seed_set_sha256": hashlib.sha256(json.dumps(list(seeds)).encode()).hexdigest(),
+            "source_hashes": hashes, "source_digest": source_digest(hashes),
+            "manipulapy": {"source_digest": source_digest(upstream_hashes)},
+            "pybullet_binary_sha256": _sha256(Path(p.__file__))}
 
 
 def cylinder_seeds(seeds: range) -> list[int]:
@@ -69,7 +102,11 @@ def main() -> None:
     seeds = cylinder_seeds(seed_range)
     use_variant(args.variant)
     cfg = config_snapshot()
-    rows = [feasible_row(seed, cfg) for seed in seeds]
+    provenance = benchmark_provenance(cfg, seeds)
+    rows = []
+    for index, seed in enumerate(seeds, 1):
+        rows.append(feasible_row(seed, cfg))
+        print(f"{index}/{len(seeds)} seed {seed}: {rows[-1]['reason'] or 'accepted'}", flush=True)
     eligible = [r for r in rows if r["reason"] != "witness_blocked"]
     passed = sum(r["accepted"] for r in eligible)
     print(f"{args.variant} {args.cohort}: {passed}/{len(eligible)} accepted; "
@@ -78,8 +115,8 @@ def main() -> None:
         print(f"  seed {row['seed']}: {row['reason'] or 'accepted'} {row['violations']}")
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps({"variant": args.variant, "cohort": args.cohort, "rows": rows}, indent=2),
-                             encoding="utf-8")
+        args.json.write_text(json.dumps({"variant": args.variant, "cohort": args.cohort, "provenance": provenance,
+                                         "rows": rows}, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
