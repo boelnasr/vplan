@@ -43,13 +43,20 @@ def _cosmos_gate(url: str | None, subject: str | None):
         f"cosmos (learned check) {c.stage} [{', '.join(c.views)}]: {c.verdict.verdict} ({c.verdict.latency_s:.1f} s) - {c.verdict.reason}",
         flush=True))
     print(f"cosmos: learned visual check on the {subject} (not verification; D34 pilot balanced accuracy 0.70)")
-    return lambda plan, traj, scene: gate(plan, traj, scene, subject=subject)
+
+    def check(plan, traj, scene):
+        report = gate(plan, traj, scene, subject=subject)
+        # The banner must reach the user before motion starts (spec §11), and it cannot say "executed": the attempt
+        # may still end as stale_approval or sim_error.
+        if report.status == "unavailable":
+            print(f"*** COSMOS UNAVAILABLE - proceeding on the geometric checks only ({report.note}) ***", flush=True)
+        return report
+
+    return check
 
 
 def _print_result(res) -> None:
-    if res.visual is not None and res.visual.status == "unavailable":
-        print(f"*** COSMOS UNAVAILABLE - executed on the geometric checks only ({res.visual.note}) ***")
-    elif res.visual is not None:
+    if res.visual is not None:
         print("cosmos gate:", res.visual.status)
     print("outcome:", res.outcome)
     for f in res.findings:
