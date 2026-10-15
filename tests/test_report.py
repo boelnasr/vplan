@@ -156,7 +156,8 @@ def test_incomplete_and_limited_runs_title_the_page_and_raise_banners(tmp_path, 
     from tests.test_metrics import COVERAGE
     page = build_report(rows, tmp_path, manifests=COVERAGE, seed_set_size=9).html.read_text(encoding="utf-8")
     title = ("INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks — LIMITED: config 3 first 7 of 9 tasks; config 6 "
-             "first 7 of 9 tasks — DRY RUN: configs 1, 2, 3 and 7 — vplan evaluation report")
+             "first 7 of 9 tasks — DEGRADED: 1 service failure — DRY RUN: configs 1, 2, 3 and 7 — vplan evaluation "
+             "report")
     assert f"<title>{title}</title>" in page and f"<h1>{title}</h1>" in page
     assert ("<strong>Incomplete runs.</strong> Config 6 recorded 2 of its 7 planned tasks; config 7 recorded 7 of "
             "its 9 planned tasks.") in page
@@ -171,7 +172,9 @@ def test_a_complete_report_has_no_incomplete_or_limited_label(tmp_path, rows):
     page = build_report(full, tmp_path, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)],
                         seed_set_size=7).html.read_text(encoding="utf-8")
     assert "INCOMPLETE" not in page and "LIMITED" not in page and "Incomplete runs" not in page
-    assert "<title>DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
+    assert "<title>DEGRADED: 1 service failure — DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
+    assert ("<strong>Provider failures.</strong> 1 provider request failed (config 7: 1). Failures stay in the "
+            "denominators, so these rates partly measure provider availability, not planning.") in page
     assert "complete 7/7" in page
 
 

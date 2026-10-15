@@ -573,10 +573,19 @@ def _runs(manifests: Sequence[Mapping[str, Any]], by_config: Mapping[int, Sequen
     return [runs[c] for c in sorted(runs)]
 
 
-def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int]) -> dict[str, Any]:
+def _service_failures(rows: Sequence[AttemptRow]) -> int:
+    """Failed provider requests: every planner call that ended as a service failure, plus a row whose worker reported
+    a service failure without a record. Each request counts once."""
+    calls = sum(x.call.outcome == "service_failure" for r in rows if r.attempt is not None for x in r.attempt.rounds)
+    return calls + sum(r.attempt is None and r.outcome == "service_failure" for r in rows)
+
+
+def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int],
+            service_failures: Mapping[int, int]) -> dict[str, Any]:
     """The report's standing, as the pilot titles it (D33): INCOMPLETE when a run recorded fewer rows than it
-    planned, LIMITED when a run covered only an --n prefix (never complete), and DRY RUN naming every configuration
-    that did not run on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
+    planned, LIMITED when a run covered only an --n prefix (never complete), DEGRADED: n service failures when any
+    provider request failed (they stay in the denominators), and DRY RUN naming every configuration that did not run
+    on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
     incomplete = [{"config": r["config"], "recorded": r["recorded"], "planned": r["planned"]}
                   for r in runs if r["incomplete"]]
     limited = [{"config": r["config"], "planned": r["planned"], "prepared": r["prepared"]}
@@ -588,10 +597,13 @@ def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int]) -
     if limited:
         prefixes.append("LIMITED: " + "; ".join(f"config {r['config']} first {r['planned']} of {r['prepared']} tasks"
                                                 for r in limited))
+    degraded = [{"config": c, "service_failures": n} for c, n in sorted(service_failures.items()) if n]
+    if degraded:
+        prefixes.append(f"DEGRADED: {_plural(sum(d['service_failures'] for d in degraded), 'service failure')}")
     if dry_run_configs:
         prefixes.append(f"DRY RUN: {config_list(dry_run_configs)}")
     return {"complete": (not incomplete and not limited) if runs else None, "incomplete": incomplete,
-            "limited": limited, "title_prefixes": prefixes}
+            "limited": limited, "degraded": degraded, "title_prefixes": prefixes}
 
 
 def public_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -679,7 +691,9 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
         "schema_version": SCHEMA_VERSION,
         "dry_run": bool(dry_run_configs),  # some configuration is a dry run; dry_run_configs says which
         "dry_run_configs": dry_run_configs,
-        "status": _status(list(runs.values()), dry_run_configs),
+        # config 2 is round 1 of config 3, so its requests are counted once, under config 3
+        "status": _status(list(runs.values()), dry_run_configs,
+                          {c: _service_failures(by_config[c]) for c in by_config if c != 2}),
         "headline": headline,
         "configurations": configurations,
         "configs": blocks,

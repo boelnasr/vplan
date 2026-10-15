@@ -436,6 +436,12 @@ def _banners(m: Mapping[str, Any]) -> str:
         out.append("<strong>Limited runs.</strong> " + _esc(_sentence_list(
             [f"config {r['config']} ran the first {r['planned']} of the seed set's {r['prepared']} tasks"
              for r in status["limited"]])) + ". A prefix (eval run --n) is a smoke test, never a complete result.")
+    if status["degraded"]:
+        total = sum(d["service_failures"] for d in status["degraded"])
+        out.append(f"<strong>Provider failures.</strong> {total} provider request{'' if total == 1 else 's'} failed ("
+                   + _esc("; ".join(f"config {d['config']}: {d['service_failures']}" for d in status["degraded"]))
+                   + "). Failures stay in the denominators, so these rates partly measure provider availability, not "
+                     "planning.")
     if m["dry_run_configs"]:
         named = [f"config {c} ({', '.join(blocks[str(c)]['provenance']['providers'])})" for c in m["dry_run_configs"]]
         listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
@@ -697,7 +703,7 @@ def _provenance(m: Mapping[str, Any]) -> str:
 
 def render_html(m: Mapping[str, Any], *, title: str = "vplan evaluation report") -> str:
     """The whole report page for one metrics dict (compute_metrics output). The title carries the pilot's prefixes
-    (D33): INCOMPLETE, LIMITED and DRY RUN."""
+    (D33): INCOMPLETE, LIMITED, DEGRADED and DRY RUN."""
     s = m["provenance"]["seed_set"]
     title = " — ".join(m["status"]["title_prefixes"] + [title])
     sections = {"headline": _headline, "configurations": _configurations, "success": _success,
