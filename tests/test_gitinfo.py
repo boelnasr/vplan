@@ -186,7 +186,8 @@ def test_this_checkout_resolves_a_sha_and_names_its_source():
         pytest.skip("no .git here (the container build context drops it)")
     got = pilot._git()
     assert got is not None and HEX.fullmatch(got["head"]) and got["source"] in ("git", "files")
-    assert (got["dirty"] is None) == (got["source"] == "files")
+    # The files source never knows dirty; git may not either (a failed or timed-out git status), so only one way.
+    assert got["dirty"] is None or got["source"] == "git"
 
 
 def test_the_repo_helper_reads_the_environment_but_other_checkouts_do_not(tmp_path, monkeypatch):
