@@ -157,6 +157,9 @@ FIRST_ROUNDS = {
                                [ev.blocked(ev.COLLISION), ev.judged()]),
     "false refusal": (ev.FEASIBLE, [ev.call(ev.refusal("other"))], []),
     "malformed, then a plan": (ev.FEASIBLE, [ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
+    # Config 3 reaches round 3 here (a protocol error breaks the malformed streak); round 1 alone is malformed_final.
+    "malformed, protocol error, malformed, then a plan": (
+        ev.FEASIBLE, [ev.call(), ev.call(outcome="protocol_error"), ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
     "protocol error, then a plan": (ev.FEASIBLE, [ev.call(outcome="protocol_error"), ev.call(ev.GOOD)],
                                     [ev.judged()]),
     "service failure": (ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None, status_code=503)], []),
@@ -568,7 +571,8 @@ def test_rows_reject_a_provider_or_model_the_calls_do_not_carry():
 @pytest.mark.parametrize("config, mode, k", [(7, "repair", 3), (3, "resample", 3), (3, "repair", 2),
                                              (1, "unverified", 3), (2, "repair", 3)])
 def test_rows_reject_a_mode_or_budget_that_is_not_the_configuration(config, mode, k):
-    rec = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], mode=mode, k=k)
+    rec = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], mode=mode, k=0 if mode == "unverified" else k)
+    rec = rec.model_copy(update={"k": k})  # run_task refuses unverified with k > 0 (D48); a row must refuse it too
     with pytest.raises(ValidationError):
         ev.row(config, 0, ev.FEASIBLE, rec, source=ev.OPENROUTER)
 

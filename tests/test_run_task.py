@@ -104,6 +104,42 @@ def test_k_outside_the_spec_budget_is_rejected(k):
         run(Scripted([]), lambda p: blocked(), k=k)
 
 
+@pytest.mark.parametrize("k", [True, False, 1.0, "1"])
+def test_non_integer_k_is_rejected_before_a_planner_call(k):
+    scripted = Scripted([call(generated().oracle.reference_plan)])
+    with pytest.raises(ValueError, match="integer"):
+        run(scripted, lambda p: executed(), k=k)
+    assert not scripted.seen
+
+
+@pytest.mark.parametrize("mode", ["repair", "resample"])
+def test_verified_modes_default_to_three_retries(mode):
+    plan = generated().oracle.reference_plan
+    result = run(Scripted([call(plan)] * 4), lambda p: blocked(), mode=mode)
+    assert result.k == 3 and result.call_count == 4 and result.outcome == "budget_exhausted"
+
+
+@pytest.mark.parametrize("outcome, expected", [("proposed", "budget_exhausted"),
+                                              ("malformed", "malformed_final"),
+                                              ("protocol_error", "budget_exhausted")])
+def test_unverified_defaults_to_one_blind_attempt_without_retries(outcome, expected):  # D48: config 1 is k = 0
+    plan = generated().oracle.reference_plan
+    first = call(plan) if outcome == "proposed" else call(outcome=outcome)
+    scripted = Scripted([first, call(plan), call(plan), call(plan)])
+    result = run(scripted, lambda p: blocked(), mode="unverified")
+    assert result.outcome == expected and result.k == 0 and result.call_count == 1
+    assert len(scripted.seen) == 1 and scripted.seen[0]["feedback"] is None
+    assert result.total_tokens == 10
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_unverified_rejects_an_explicit_retry_budget_before_calling_planner(k):
+    scripted = Scripted([call(generated().oracle.reference_plan)])
+    with pytest.raises(ValueError, match="unverified.*k=0"):
+        run(scripted, lambda p: executed(), mode="unverified", k=k)
+    assert not scripted.seen
+
+
 def test_malformed_retry_uses_up_a_round():
     plan = generated().oracle.reference_plan
     scripted = Scripted([call(plan), call(), call(plan), call(plan)])
@@ -121,6 +157,37 @@ def test_malformed_final_on_the_last_allowed_round():
 def test_two_consecutive_malformed_outputs_end_the_attempt_like_the_pilot():
     result = run(Scripted([call(), call(), call(), call()]), lambda p: pytest.fail("no simulation"))
     assert result.outcome == "malformed_final" and result.call_count == 2
+
+
+@pytest.mark.parametrize("mode", ["repair", "resample"])
+def test_protocol_error_breaks_the_consecutive_malformed_streak(mode):
+    plan = generated().oracle.reference_plan
+    scripted = Scripted([call(), call(outcome="protocol_error"), call(), call(plan)])
+    result = run(scripted, lambda p: executed(), mode=mode)
+    assert result.outcome == "executed" and result.call_count == 4
+    assert [r.call.outcome for r in result.rounds] == ["malformed", "protocol_error", "malformed", "proposed"]
+    assert result.total_tokens == 40
+
+
+# "Two malformed replies in a row" (D40/D48) counts consecutive rounds. Only a protocol error between two malformed
+# replies is affected (a service failure is terminal, a plan always broke the streak), and only when it fills round 1
+# of a k = 3 attempt: the old count ended M, P, M as malformed_final after three calls; now round 3 decides.
+M, P, S = "malformed", "protocol_error", "service_failure"
+
+
+@pytest.mark.parametrize("outcomes, k, expected, calls", [
+    ((M, P, M, M), 3, "malformed_final", 4),  # was malformed_final after 3 calls
+    ((M, P, M, P), 3, "budget_exhausted", 4),  # was malformed_final after 3 calls
+    ((M, P, M, S), 3, "service_failure", 4),  # was malformed_final after 3 calls
+    ((M, P, M), 2, "malformed_final", 3),  # unchanged: round 2 is the last allowed round
+    ((P, M, P, M), 3, "malformed_final", 4),  # unchanged: the last allowed round
+    ((P, M, M), 3, "malformed_final", 3),  # unchanged: consecutive
+    ((M, P, P, M), 3, "malformed_final", 4),  # unchanged: the last allowed round
+])
+def test_malformed_streak_outcomes_by_round_sequence(outcomes, k, expected, calls):
+    scripted = Scripted([call(outcome=o, status_code=503 if o == S else None) for o in outcomes])
+    result = run(scripted, lambda p: pytest.fail("no simulation"), k=k)
+    assert (result.outcome, result.call_count) == (expected, calls) and not scripted.calls
 
 
 def test_service_failure_is_terminal():

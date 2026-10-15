@@ -141,6 +141,21 @@ def test_only_one_schema_retry_per_consecutive_malformed_sequence():
     assert result.unique_call_count == 3
 
 
+def test_protocol_errors_break_malformed_streaks_in_both_paired_arms():
+    from vplan.repair import evaluate_pair
+    task = generated()
+    unsupported = RuntimeError("unsupported tools")
+    unsupported.status_code = 400
+    continuation = [unsupported, response(arguments="{}"), response(task.oracle.reference_plan)]
+    client = FakeClient([response(arguments="{}")] + continuation + continuation)
+    result = evaluate_pair(task, planner(client), evaluator=lambda p: executed())
+    assert result.repair.outcome == result.resample.outcome == "executed"
+    assert result.repair.call_count == result.resample.call_count == 4
+    assert result.unique_call_count == 7
+    for arm in (result.repair, result.resample):
+        assert [r.call.outcome for r in arm.rounds] == ["malformed", "protocol_error", "malformed", "proposed"]
+
+
 def test_pair_event_sink_failure_propagates_instead_of_becoming_sim_error():
     from vplan.repair import evaluate_pair
     task = generated()

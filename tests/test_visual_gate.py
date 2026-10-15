@@ -171,6 +171,44 @@ def test_prerelease_frame_carries_the_planned_object_at_the_release_pose(verifie
     assert np.linalg.norm(np.array(tcp[:2]) - np.array(obj[:2])) < 0.03
 
 
+@pytest.mark.parametrize("approach,yaw,size,half_width", [
+    ("top", 45.0, (0.04, 0.04, 0.04), 0.028284271247),
+    ("top", 0.0, (0.06, 0.04, 0.04), 0.03),
+    ("side_+x", 0.0, (0.04, 0.04, 0.06), 0.03),
+])
+def test_prerelease_fingers_fit_the_object_in_the_grasp_tcp_frame(monkeypatch, approach, yaw, size, half_width):
+    import pybullet as p
+    from vplan import config
+    from vplan.geometry import capture_check, pose_to_T
+    from vplan.motion.trajectory import build_trajectory
+    from vplan.planners.heuristic import heuristic_geometry
+    from vplan.robot import HOME_Q
+    from vplan.tasks.scenes import make_basic_scene
+    from vplan.visual.gate import _pose, _tcp, _with_client
+
+    scene = make_basic_scene()
+    obj = scene.objects[0].model_copy(update={"size": size,
+        "pose": records.Pose(position=(0.50, -0.15, 0.20))})
+    scene = scene.model_copy(update={"objects": (obj, scene.objects[1])})
+    plan = heuristic_geometry(scene, obj.id)
+    plan = plan.model_copy(update={"grasp": plan.grasp.model_copy(update={"approach": approach, "yaw_deg": yaw})})
+    cfg = config.config_snapshot()["verifier"]
+    traj = build_trajectory(plan, scene, HOME_Q, cfg=cfg)
+
+    def check_grasp(client):
+        h = _pose(client, plan, traj, scene, "grasp")
+        ok, _, why = capture_check(_tcp(h), pose_to_T(obj.pose.position, obj.pose.orientation), obj.size, cfg)
+        assert ok, why  # the requested width belongs to a valid capture geometry
+    _with_client(check_grasp)
+
+    monkeypatch.setattr(config, "load_config", lambda *a: pytest.fail("renderer reread attempt configuration"))
+
+    def read_fingers(client):
+        h = _pose(client, plan, traj, scene, "prerelease")
+        return [p.getJointState(h.robot, j, physicsClientId=client)[0] for j in h.finger_joints]
+    assert _with_client(read_fingers) == pytest.approx([half_width] * 2, abs=2e-5)
+
+
 # ---- run_attempt and run_task ---------------------------------------------------------------------
 
 def _attempt(gate_fn, monkeypatch=None, **kw):

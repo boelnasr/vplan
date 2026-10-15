@@ -109,7 +109,8 @@ def _continue(first: RoundRecord, run_round, *, k: int, feedback: bool) -> tuple
     """Up to k further rounds after `first` until a terminal outcome; returns (outcome, rounds).
 
     run_round(index, protocol, feedback, previous) -> RoundRecord. A malformed retry uses up a round, and a
-    second consecutive malformed reply ends the attempt (only one schema retry per malformed sequence).
+    second consecutive malformed reply ends the attempt (only one schema retry per malformed sequence). Consecutive
+    means adjacent rounds: a plan or a protocol error in between starts a new sequence.
     """
     rounds = [first]
     terminal = _terminal(first)
@@ -141,7 +142,9 @@ def _continue(first: RoundRecord, run_round, *, k: int, feedback: bool) -> tuple
         terminal = _terminal(record)
         if record.call.outcome == "malformed":
             malformed_count += 1
-        elif record.call.outcome == "proposed":
+        else:
+            # After a protocol error the next request uses another protocol and carries that round's errors, not
+            # the earlier schema errors, so it is not the schema retry of the earlier malformed reply.
             malformed_count = 0
         if malformed_count >= 2:
             terminal = "malformed_final"
@@ -230,7 +233,7 @@ def _contradicts_impossible(evaluation: object) -> bool:
     return evaluation.judge.success or evaluation.judge.predicates.get("R") is not False
 
 
-def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
+def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int | None = None,
              mode: Literal["repair", "resample", "unverified"] = "repair", *,
              evaluator: Callable[[PickPlacePlan], EvaluationResult] | None = None,
              config_snapshot: dict[str, dict] | None = None,
@@ -239,9 +242,9 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
     """One attempt (spec §10): at most k + 1 planner calls and exactly one outcome.
 
     repair: stateless feedback (latest plan, its findings, one summary per earlier round).
-    resample: identical blind requests (config 7). unverified: blind requests with the verify gate off
-    except target grounding (config 1, D29). The planner sees only `spec`; `oracle` is used only at the
-    Judge boundary.
+    resample: identical blind requests (config 7). Both default to k=3. unverified: one blind request
+    with the verify gate off except target grounding (config 1, D29/D48); k defaults to 0 and must be 0.
+    The planner sees only `spec`; `oracle` is used only at the Judge boundary.
 
     The Judge scores R (spec §13, D48): the default evaluator passes the oracle label to it. A custom `evaluator`
     owns its Judge call, so on an impossible task it must judge with feasible=False. A judged execution there that
@@ -257,8 +260,12 @@ def run_task(spec: TaskSpec, oracle: TaskOracle, planner, k: int = 3,
         raise TypeError("oracle must be a TaskOracle")
     if mode not in ("repair", "resample", "unverified"):
         raise ValueError(f"unknown mode {mode!r}")
-    if not 0 <= k <= 3:
-        raise ValueError("k must be 0..3 (spec §10 budget: at most four planner calls)")
+    if k is None:
+        k = 0 if mode == "unverified" else 3
+    if type(k) is not int or not 0 <= k <= 3:  # bool is an int subclass; True must not mean one retry
+        raise ValueError("k must be an integer in 0..3 (spec §10 budget: at most four planner calls)")
+    if mode == "unverified" and k != 0:
+        raise ValueError("unverified mode requires k=0 (D48: one blind attempt, no retries)")
     if visual_gate is not None and (mode == "unverified" or evaluator is not None):
         raise ValueError("the visual gate runs only in the verified default pipeline")
 
