@@ -62,8 +62,9 @@ def _write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _write_jsonl(path: Path, rows) -> None:
-    path.write_text("".join(row + "\n" for row in rows), encoding="utf-8")
+def _write_jsonl(path: Path, rows, newline: str | None = None) -> None:
+    # newline=None keeps the platform's line ending (the pilot's files); "\n" makes bytes, and hashes, OS-independent.
+    path.write_text("".join(row + "\n" for row in rows), encoding="utf-8", newline=newline)
 
 
 def source_hashes() -> dict[str, str]:
@@ -102,11 +103,11 @@ def check_path_arg(value: str) -> None:
         raise PilotError(f"{value} is a WSL path; pass a relative or Windows path (the interpreter is Windows Python)")
 
 
-def _git() -> dict | None:
+def _git(cwd: Path = ROOT) -> dict | None:
     try:
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True,
                               timeout=10, check=True).stdout.strip()
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True,
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True,
                                 timeout=10, check=True).stdout
     except (OSError, subprocess.SubprocessError):
         return None
@@ -236,22 +237,35 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
-def run_live(input_dir: Path, *, env_file: Path, model: str | None = None, temperature: float = .7,
-             limit: int | None = None, allow_source_drift: bool = False, allow_paid: bool = False,
-             run_id: str | None = None) -> Path:
-    """Credentials come only from env_file. Without allow_paid only free OpenRouter models run."""
+def llm_settings(env_file: Path, model: str | None = None) -> tuple[str, str, str]:
+    """(base_url, api_key, model) from an explicitly named env file; model overrides LLM_MODEL. The key is never
+    printed or persisted by callers."""
     env = read_env_file(env_file)
     base_url, api_key = env.get("LLM_BASE_URL", ""), env.get("LLM_API_KEY", "")
     model = model or env.get("LLM_MODEL", "")
     if not (base_url and api_key and model):
         raise PilotError(f"{env_file} must set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL (or pass --model)")
+    return base_url, api_key, model
+
+
+def provider_guard(base_url: str, model: str, *, allow_paid: bool) -> tuple[str, str]:
+    """The free-model guard (D33): without allow_paid only https://openrouter.ai 'nvidia/...:free' models run.
+    Returns (base URL host, provider name)."""
     parsed = urlparse(base_url)
     host = parsed.hostname or ""
     if not allow_paid and not (parsed.scheme == "https" and host == "openrouter.ai"
                                and model.startswith("nvidia/") and model.endswith(":free")):
         raise PilotError(f"refusing {host or base_url!r} / {model!r}: only https://openrouter.ai 'nvidia/...:free' "
                          "models run without --allow-paid (paid calls need explicit approval)")
-    provider = "openrouter" if host == "openrouter.ai" else host
+    return host, "openrouter" if host == "openrouter.ai" else host
+
+
+def run_live(input_dir: Path, *, env_file: Path, model: str | None = None, temperature: float = .7,
+             limit: int | None = None, allow_source_drift: bool = False, allow_paid: bool = False,
+             run_id: str | None = None) -> Path:
+    """Credentials come only from env_file. Without allow_paid only free OpenRouter models run."""
+    base_url, api_key, model = llm_settings(env_file, model)
+    host, provider = provider_guard(base_url, model, allow_paid=allow_paid)
     planner = NemotronPlanner(model=model, provider=provider, base_url=base_url, api_key=api_key,
                               temperature=temperature)
     return run_pilot(input_dir, planner, base_url_host=host, limit=limit,
