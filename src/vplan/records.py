@@ -652,6 +652,60 @@ class SeedSetExclusion(Frozen):
 EvalConfigNumber = Literal[1, 3, 5, 6, 7]
 
 
+class FrameEntry(Frozen):
+    """One PNG under RUN_DIR/frames/<attempt stem>/: one visual-gate stage and view of one executed round, posed from
+    the round's plan and its rebuilt trajectory (approval is the executed trajectory's token, which the rebuilt one
+    reproduced)."""
+    attempt_id: str
+    round_index: int = Field(ge=0, le=3)
+    stage: VisualStage
+    view: str
+    file: str = Field(pattern=r"^[A-Za-z0-9_.-]+\.png$")  # a plain file name: no ':' (Windows) and no directory
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scene_hash: str
+    plan_hash: str  # sha256 of the plan's canonical JSON (evaluate.frames.plan_hash)
+    approval: str
+
+
+class FrameIndex(Frozen):
+    """RUN_DIR/frames/<attempt stem>/index.json, written after its PNGs: what `vplan eval shadow` (spec §14) needs to
+    ask Cosmos about an attempt. subject is the instructed object as '<color> <shape>' (visual.gate.subject), None
+    when the instruction names no single object; gate_views are asked first, retry_views after `uncertain`."""
+    schema_version: Literal[1] = 1
+    attempt_id: str
+    subject: str | None
+    gate_views: tuple[str, ...] = Field(min_length=1)
+    retry_views: tuple[str, ...] = Field(min_length=1)
+    frames: tuple[FrameEntry, ...] = Field(min_length=1)
+
+
+class FrameExport(Frozen):
+    """EvalAttempt.frames: the worker's key-frame export for one attempt, made after its result was final.
+
+    written: every executed round's frames and the index (index is the run-directory-relative POSIX path); none: no
+    round was executed, so there is nothing to render; failed: nothing usable was written (error_type says why; the
+    attempt's outcome is unaffected). bytes is the disk use of the PNGs and index; render_s the export's wall time, s."""
+    status: Literal["written", "none", "failed"]
+    index: str | None = None
+    index_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    rounds: tuple[int, ...] = ()
+    files: int = Field(default=0, ge=0)
+    bytes: int = Field(default=0, ge=0)
+    render_s: float = Field(default=0.0, ge=0)
+    error_type: str | None = None
+    error_message: str | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "FrameExport":
+        if self.status == "written" and not (self.index and self.index_sha256 and self.rounds and self.files > 0):
+            raise ValueError("a written frame export needs its index, index_sha256, rounds and files")
+        if self.status == "failed" and not self.error_type:
+            raise ValueError("a failed frame export needs its error_type")
+        if self.status != "written" and (self.index is not None or self.rounds or self.files):
+            raise ValueError(f"a frame export with status {self.status} has no index, rounds or files")
+        return self
+
+
 class EvalAttempt(Frozen):
     """One runs/<run_id>/attempts.jsonl line (W3.1), written only by the parent process.
 
@@ -665,6 +719,8 @@ class EvalAttempt(Frozen):
     - session numbers the run session that recorded the row (0 is the first; sessions.jsonl holds each session's
       provenance). tries, wall_s and exit_code describe the supervised worker; status_code is the provider status of
       a failed request.
+    - frames is the key-frame export (FrameExport) when the run renders frames and the worker returned a record;
+      None otherwise. wall_s includes its rendering.
     """
     attempt_id: str
     config: EvalConfigNumber
@@ -681,6 +737,7 @@ class EvalAttempt(Frozen):
     error_message: str | None = None
     error_traceback: str | None = None
     record: AttemptRecord | None = None
+    frames: FrameExport | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "EvalAttempt":

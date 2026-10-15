@@ -55,6 +55,7 @@ from vplan.evaluate.pilot import (PilotError, _git, _manipulapy, _utc_now, _vers
                                   provider_guard, read_env_file, source_digest, source_hashes)
 from vplan.evaluate.seedsets import SPLITS, EvalError, SeedSet, default_seed_dir, load_seed_set
 from vplan.evaluate.supervisor import FATAL_STATUS, MAX_CONSECUTIVE_SERVICE_FAILURES, AttemptJob, supervise
+from vplan.evaluate.worker import AFTER
 from vplan.planners.heuristic import HeuristicPlanner
 from vplan.records import AttemptMode, AttemptRecord, EvalAttempt, SupervisedAttempt, TaskOracle, TaskSpec
 
@@ -204,7 +205,9 @@ def build_planner(params: dict, pacing: dict | None = None):
 
 
 def run_task_job(params: dict) -> dict:
-    """Worker side of one attempt (registered as the "run_task" job in vplan.evaluate.worker)."""
+    """Worker side of one attempt (registered as the "run_task" job in vplan.evaluate.worker). With params["frames"]
+    ({"dir", "rel"}), the key-frame export (evaluate.frames) is the job's after step: the worker runs it only once the
+    attempt's result is written, and it reads the finished record without changing it."""
     from vplan.repair import _simulation_error, run_task
     secret = None
     try:
@@ -219,7 +222,16 @@ def run_task_job(params: dict) -> dict:
         return {"outcome": "sim_error", "error_type": error.error_type, "error_message": error.error_message,
                 "error_traceback": error.error_traceback}
     failed = next((r.call.status_code for r in record.rounds if r.call.outcome == "service_failure"), None)
-    return {"outcome": record.outcome, "status_code": failed, "payload": {"record": record.model_dump(mode="json")}}
+    out = {"outcome": record.outcome, "status_code": failed, "payload": {"record": record.model_dump(mode="json")}}
+    frames = params.get("frames")
+    if frames is not None:
+        def export() -> dict:
+            from vplan.evaluate.frames import export_frames
+            result = export_frames(record, spec, seed=params["seed"], config_snapshot=params["config_snapshot"],
+                                   out_dir=Path(frames["dir"]), rel_dir=frames["rel"])
+            return {"frames": result.model_dump(mode="json")}
+        out[AFTER] = export
+    return out
 
 
 # ---- parent side ------------------------------------------------------------------------------------------
