@@ -81,10 +81,16 @@ def joint_limits(seg: Segment, m: PandaModel, cfg: dict) -> Finding | None:
     return None
 
 
+def sigma_min(q, m: PandaModel, L: float) -> float:
+    """sigma_min(J_s) at one joint sample: the quantity V-4 compares with sigma_min_threshold (spec §9 Jacobian
+    contract). The W3.3 calibration measures witnesses with this same function."""
+    return float(np.linalg.svd(m.jacobian_s(np.array(q), L), compute_uv=False)[-1])
+
+
 def singularity(seg: Segment, m: PandaModel, cfg: dict) -> Finding | None:
     L, thr = cfg["jacobian_char_length_m"], cfg["sigma_min_threshold"]
     for k, q in enumerate(seg.q):
-        s_min = float(np.linalg.svd(m.jacobian_s(np.array(q), L), compute_uv=False)[-1])
+        s_min = sigma_min(q, m, L)
         if s_min < thr:
             return Finding(stage=seg.label, check="singularity", plan_field=seg.source_field, measured=s_min,
                            threshold=thr, sample_index=k, direction="near-singular configuration (sigma_min below threshold)")
