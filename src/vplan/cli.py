@@ -1,5 +1,5 @@
 """Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show), the W3.1 evaluation
-(eval prepare / eval run) and the spec §15 report (report build)."""
+(eval prepare / eval run), the W3.3 sigma_thr calibration (eval calibrate) and the spec §15 report (report build)."""
 from __future__ import annotations
 
 import argparse
@@ -116,12 +116,25 @@ def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, un
 
 
 def _eval(args) -> int:
-    """eval prepare / eval run. Exit codes: 0 done, 1 an incomplete run (resume it), 2 refused, 130 interrupted."""
-    from vplan.evaluate import pilot, runner, seedsets
+    """eval prepare / run / calibrate. Exit codes: 0 done, 1 an incomplete run (resume it), 2 refused, 130
+    interrupted."""
+    from vplan.evaluate import calibrate, pilot, runner, seedsets
     try:
         for name in ("output", "seed_dir", "run_dir", "resume", "env_file"):
             if getattr(args, name, None):
                 pilot.check_path_arg(getattr(args, name))
+        if args.eval_cmd == "calibrate":
+            evidence = calibrate.run_calibration(
+                args.output, args.seeds, feasible=args.feasible, impossible=args.impossible,
+                max_candidates=args.max_candidates, apply=args.apply,
+                progress=lambda attempted, accepted, n: print(f"{accepted}/{n} slots filled; {attempted} attempted",
+                                                              flush=True))
+            new = evidence["thresholds"]["calibrated"]
+            where = ("applied to config/verifier.json and config/judge.json" if evidence["applied"]
+                     else "not applied (pass --apply)")
+            print(f"calibrated on {len(evidence['sample'])} witnesses: verifier {new['verifier']}, judge "
+                  f"{new['judge']}; {where}; evidence {args.output}")
+            return 0
         if args.eval_cmd == "prepare":
             output = args.output or seedsets.default_seed_dir(args.seeds)
             manifest = seedsets.prepare_seed_set(
@@ -218,6 +231,15 @@ def main(argv: list[str] | None = None) -> int:
     ep.add_argument("--max-candidates", type=int, help="candidate seeds to try in total (default 2n + 20)")
     ep.add_argument("--allow-test-split", action="store_true",
                     help="the held-out test split, generated only after the W3.3 freeze (spec §6)")
+    ec = esub.add_parser("calibrate", help="W3.3: sigma_min_threshold from dev witnesses generated with the "
+                         "singularity checks off (no model calls)")
+    ec.add_argument("--seeds", required=True, choices=("dev",), help="sigma_thr comes from the dev set (spec §9)")
+    ec.add_argument("--output", required=True, help="the evidence JSON file (never overwritten)")
+    ec.add_argument("--apply", action="store_true",
+                    help="write both thresholds to config/verifier.json and config/judge.json (full D51 mix only)")
+    ec.add_argument("--feasible", type=int, help="override the D51 mix for a trial run; pass with --impossible")
+    ec.add_argument("--impossible", type=int, help="impossible slots (they only advance the candidate seeds)")
+    ec.add_argument("--max-candidates", type=int, help="candidate seeds to try in total (default 2n + 20)")
     er = esub.add_parser("run", help="run one spec §14 config over a prepared seed set")
     er.add_argument("--config", required=True, type=int, help="1, 3, 5, 6 or 7 (config 2 is round 1 of 3)")
     er.add_argument("--seeds", required=True, choices=("dev", "test"))

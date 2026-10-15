@@ -649,6 +649,26 @@ class SeedSetExclusion(Frozen):
     witness: WitnessEvaluation | None = None
 
 
+class SigmaWitness(Frozen):
+    """One accepted witness of the W3.3 sigma_thr calibration sample (spec §9 "sigma_thr"): a feasible dev slot,
+    filled as `eval prepare --seeds dev` fills it but with both singularity thresholds at 0.
+
+    verifier_*: the minimum of sigma_min(J_s) over every trajectory sample V-4 checks, at its first occurrence
+    (segment index, that segment's label, sample index). judge_*: the minimum of ExecutionRecord.sigma_min_steps,
+    which V3 compares, and its 0-based physics step."""
+    task_id: str
+    index: int = Field(ge=0)  # the slot (task index) in the seed set
+    seed: int = Field(ge=0)
+    distractors: int = Field(ge=0, le=3)
+    obstacles: int = Field(ge=0, le=3)
+    verifier_sigma_min: float = Field(ge=0)
+    verifier_segment: int = Field(ge=0)
+    verifier_stage: SegmentLabel
+    verifier_sample: int = Field(ge=0)
+    judge_sigma_min: float = Field(ge=0)
+    judge_step: int = Field(ge=0)
+
+
 # Runnable spec §14 configs: 2 is round 1 of 3, and 4 is the Cosmos shadow study over config 3's frames.
 EvalConfigNumber = Literal[1, 3, 5, 6, 7]
 
