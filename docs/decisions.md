@@ -1583,3 +1583,28 @@ Prompted by the owner's review and the open items of D56:
   - report rows drop the replay streams that metrics never reads: peak working set 158 → 90 MB for 20 rows, with metrics.json byte-identical.
 - **Windows file lock.** On `report build`, `os.replace` failed in 2 of 5 back-to-back builds with WinError 32 (a scanner holding the new file). Replacing now retries five times (0.05–0.8 s apart) on `PermissionError` only. 8 of 8 back-to-back builds then succeeded.
 - **Still open:** `vplan eval shadow` (week 4); `report build` refuses seed sets prepared before a later configuration change (relevant after W3.3); the cosmetic R-in-violations asymmetry (D52).
+
+## D60. Lightning vs Ultra on OpenRouter (free variants, 2026-10-15)
+
+Measured before choosing the evaluation model under the $25 Token Factory budget (D57). No paid calls were made.
+
+**Hard pilot cohort** (`runs/pilot-hard-20a`, the same 20 feasible tasks as D46, temperature 0.7):
+
+| | Ultra (D46) | Lightning |
+|---|---|---|
+| First attempt | 9/20 | 0/20 |
+| Repair (≤ 4 calls) | 17/20 | 9/20 |
+| Resampling (≤ 4 calls) | 17/20 | 1/20 |
+| Repair only / resample only | 2 / 2 | 8 / 0 |
+| Calls (repair / resample) | 32 / 41 | 66 / 78 |
+| Repeated plans (repair / resample) | 0 / 3 | 3 / 8 |
+| Provider 503s | 3 | 0 |
+
+- Lightning's plans mostly collide during transport or release too high at the place; resampling hit the release check 23 times.
+- With Lightning, feedback separates clearly from resampling (9 vs 1); with Ultra it does not (17 vs 17). This is a 20-task development pilot: a hint for the model choice, not a result.
+
+**20 mixed dev tasks** (`runs/cmp-1015`, 12 feasible + 8 impossible, config 3):
+- Lightning: 12/20 judged successes. Feasible 7/12 (first try 3/12). Impossible: out of reach 2/2, bin out of reach 1/2, enclosed 0/2, absent referent 2/2. 50 proposed calls, 1 protocol error, no repeats. Median 2.4k completion tokens and 29 s per call.
+- Ultra: never completed. The free endpoint answered 503 to most calls across seven attempts over about an hour; the partial runs stay under `runs/cmp-1015/c3-ultra*`.
+
+**Open (owner):** the evaluation model (Lightning, Ultra, or Lightning for the evaluation and Ultra for the demo).
