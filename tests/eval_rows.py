@@ -244,6 +244,7 @@ def local_manifest() -> dict:
     """The shape runner._create writes, with absolute paths where a real run has them."""
     return {
         "schema_version": 1, "kind": "eval_run", "run_id": "c3-dev-20261015T120000Z", "config": 3,
+        "n": 7, "n_prepared": 7, "limited": False,
         "provider": "openrouter", "model": "nvidia/nemotron-3-ultra-550b-a55b:free", "split": "dev",
         "seed_set_hash": SEED_SET_HASH, "os": "Windows-10-10.0.26100-SP0", "image_digest": "sha256:feedface",
         "seed_set": {"dir": "runs/seeds/dev", "resolved": "C:\\Users\\someone\\repo\\runs\\seeds\\dev",
@@ -256,3 +257,9 @@ def local_manifest() -> dict:
         "extra": {"cache": "/home/someone/.cache/x", "unc": "\\\\server\\share\\x", "wsl": "/mnt/c/Users/x",
                   "forward": "C:/Users/someone/x", "note": "kept", "paths": ["/tmp/a", "kept too"]},
     }
+
+
+def run_manifest(config: int, n: int, prepared: int) -> dict:
+    """The run-coverage fields of a W3.1 manifest: n planned tasks (a prefix with --n) of the seed set's prepared."""
+    return {"schema_version": 1, "kind": "eval_run", "run_id": f"c{config}-test", "config": config, "n": n,
+            "n_prepared": prepared, "limited": n < prepared, "seed_set_hash": SEED_SET_HASH}

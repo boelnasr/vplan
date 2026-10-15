@@ -125,6 +125,29 @@ def test_html_and_metrics_carry_no_local_path_from_a_run_manifest(tmp_path, rows
         assert "e" * 40 in text and "1.4.2" in text  # the ManipulaPy checkout's SHA and version stay
 
 
+def test_incomplete_and_limited_runs_title_the_page_and_raise_banners(tmp_path, rows):
+    from tests.test_metrics import COVERAGE
+    page = build_report(rows, tmp_path, manifests=COVERAGE, seed_set_size=9).html.read_text(encoding="utf-8")
+    title = ("INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks — LIMITED: config 3 first 7 of 9 tasks; config 6 "
+             "first 7 of 9 tasks — DRY RUN: configs 1, 2, 3 and 7 — vplan evaluation report")
+    assert f"<title>{title}</title>" in page and f"<h1>{title}</h1>" in page
+    assert ("<strong>Incomplete runs.</strong> Config 6 recorded 2 of its 7 planned tasks; config 7 recorded 7 of "
+            "its 9 planned tasks.") in page
+    assert ("<strong>Limited runs.</strong> Config 3 ran the first 7 of the seed set&#x27;s 9 tasks; config 6 ran "
+            "the first 7 of the seed set&#x27;s 9 tasks.") in page
+    assert "9 tasks prepared, 7 in this report" in page
+    assert "INCOMPLETE 2/7" in page and "LIMITED: first 7 of 9" in page  # the configurations table
+
+
+def test_a_complete_report_has_no_incomplete_or_limited_label(tmp_path, rows):
+    full = [r for r in rows if r.config in (3, 7)]
+    page = build_report(full, tmp_path, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)],
+                        seed_set_size=7).html.read_text(encoding="utf-8")
+    assert "INCOMPLETE" not in page and "LIMITED" not in page and "Incomplete runs" not in page
+    assert "<title>DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
+    assert "complete 7/7" in page
+
+
 def test_files_are_replaced_atomically(tmp_path, rows, monkeypatch):
     replaced = []
     real_replace = os.replace

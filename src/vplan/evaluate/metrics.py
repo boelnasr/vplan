@@ -471,16 +471,68 @@ def _headline_status(blocks: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
             "label": TOKEN_FACTORY_LABEL if source else "not a headline result: " + "; ".join(reasons)}
 
 
-def _seed_set(rows: Sequence[AttemptRow], undetermined: int | None) -> dict[str, Any]:
-    """The seed set's tasks; undetermined is the count of excluded candidates (spec §6), None when not supplied."""
+def _seed_set(rows: Sequence[AttemptRow], undetermined: int | None, size: int | None) -> dict[str, Any]:
+    """The seed set: its prepared size (from its manifest, None when not supplied) next to the tasks in this report,
+    which an --n prefix or an unfinished run can leave fewer. undetermined is the count of excluded candidates
+    (spec §6), None when not supplied."""
     tasks: dict[int, AttemptRow] = {}
     for r in rows:
         tasks.setdefault(r.task_index, r)
     types = Counter(str(r.oracle.proof.type) for r in tasks.values() if r.oracle.proof is not None)
     feasible = sum(map(_feasible, tasks.values()))
-    return {"name": rows[0].seed_set, "hash": rows[0].seed_set_hash, "tasks": len(tasks), "feasible": feasible,
-            "impossible": len(tasks) - feasible, "impossible_by_type": dict(sorted(types.items())),
+    return {"name": rows[0].seed_set, "hash": rows[0].seed_set_hash, "size": size, "tasks": len(tasks),
+            "feasible": feasible, "impossible": len(tasks) - feasible, "impossible_by_type": dict(sorted(types.items())),
             "undetermined_excluded": undetermined}
+
+
+def _count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _runs(manifests: Sequence[Mapping[str, Any]], by_config: Mapping[int, Sequence[AttemptRow]],
+          size: int | None) -> list[dict[str, Any]]:
+    """Coverage of each W3.1 run (a manifest of kind eval_run): n planned tasks (an --n prefix when fewer than the
+    n_prepared of the seed set) against the rows present. Other manifests are provenance only."""
+    runs: dict[int, dict[str, Any]] = {}
+    for m in manifests:
+        if m.get("kind") != "eval_run":
+            continue
+        config, planned, prepared = m.get("config"), m.get("n"), m.get("n_prepared")
+        if not (_count(config) and _count(planned) and _count(prepared) and 1 <= planned <= prepared):
+            raise MetricsError(f"run manifest {m.get('run_id')!r} needs an integer config, n and n_prepared with "
+                               "1 <= n <= n_prepared")
+        if config in runs:
+            raise MetricsError(f"two runs of config {config}; build the report from one run per configuration")
+        recorded = len(by_config.get(config, ()))
+        if recorded > planned:
+            raise MetricsError(f"config {config} has more rows ({recorded}) than its run planned ({planned})")
+        runs[config] = {"config": config, "run_id": m.get("run_id"), "planned": planned, "prepared": prepared,
+                        "recorded": recorded, "incomplete": recorded < planned, "limited": planned < prepared}
+    prepared = sorted({r["prepared"] for r in runs.values()} | ({size} if size is not None else set()))
+    if len(prepared) > 1:
+        raise MetricsError(f"the runs and the seed set disagree on how many tasks were prepared: {prepared}")
+    return [runs[c] for c in sorted(runs)]
+
+
+def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int]) -> dict[str, Any]:
+    """The report's standing, as the pilot titles it (D33): INCOMPLETE when a run recorded fewer rows than it
+    planned, LIMITED when a run covered only an --n prefix (never complete), and DRY RUN naming every configuration
+    that did not run on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
+    incomplete = [{"config": r["config"], "recorded": r["recorded"], "planned": r["planned"]}
+                  for r in runs if r["incomplete"]]
+    limited = [{"config": r["config"], "planned": r["planned"], "prepared": r["prepared"]}
+               for r in runs if r["limited"]]
+    prefixes = []
+    if incomplete:
+        prefixes.append("INCOMPLETE: " + "; ".join(f"config {r['config']} {r['recorded']}/{r['planned']} tasks"
+                                                   for r in incomplete))
+    if limited:
+        prefixes.append("LIMITED: " + "; ".join(f"config {r['config']} first {r['planned']} of {r['prepared']} tasks"
+                                                for r in limited))
+    if dry_run_configs:
+        prefixes.append(f"DRY RUN: {config_list(dry_run_configs)}")
+    return {"complete": (not incomplete and not limited) if runs else None, "incomplete": incomplete,
+            "limited": limited, "title_prefixes": prefixes}
 
 
 def public_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -520,25 +572,32 @@ def _validate(rows: Sequence[AttemptRow]) -> None:
 
 def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: int = 0,
                     headline_providers: Collection[str] = TOKEN_FACTORY_PROVIDERS,
-                    manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None) -> dict[str, Any]:
+                    manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None,
+                    seed_set_size: int | None = None) -> dict[str, Any]:
     """Every spec §14 metric for the rows of one seed set, as plain JSON data (the report's metrics.json).
 
-    manifests are the run manifests, copied into provenance without local paths (public_manifest). undetermined is
-    the number of candidate seeds the seed set excluded for having neither a witness nor a proof (spec §6, the
-    seed-set manifest's "excluded"); they are counted, never scored."""
+    manifests are the run manifests, copied into provenance without local paths (public_manifest); a W3.1 run
+    manifest also gives its configuration's coverage (status, and run in each block). undetermined is the number of
+    candidate seeds the seed set excluded for having neither a witness nor a proof (spec §6, the seed-set manifest's
+    "excluded"); they are counted, never scored. seed_set_size is the seed set's task count from its manifest."""
     rows = list(rows)
     _validate(rows)
     if undetermined is not None and (isinstance(undetermined, bool) or not isinstance(undetermined, int)
                                      or undetermined < 0):
         raise MetricsError(f"undetermined must be a non-negative count of excluded candidates, got {undetermined!r}")
+    if seed_set_size is not None and not (_count(seed_set_size) and seed_set_size > max(r.task_index for r in rows)):
+        raise MetricsError(f"seed set size {seed_set_size!r} must be an integer above every task index in the rows")
     by_config: dict[int, list[AttemptRow]] = {}
     for r in sorted(rows, key=lambda r: (r.config, r.task_index)):
         by_config.setdefault(r.config, []).append(r)
     if 3 in by_config:
         by_config[2] = [first_round(r) for r in by_config[3]]
     tasks_in_report = len({r.task_index for r in rows})
+    runs = {r["config"]: r for r in _runs(manifests, by_config, seed_set_size)}
     blocks = {str(c): _config_block(c, by_config[c], tasks_in_report, headline_providers) for c in sorted(by_config)}
-    seed_set = _seed_set(rows, undetermined)
+    for c, block in blocks.items():
+        block["run"] = runs.get(3 if c == "2" else int(c))  # config 2 is round 1 of config 3's run
+    seed_set = _seed_set(rows, undetermined, seed_set_size)
 
     def success(config: int) -> dict[str, Any] | None:
         return {"config": config, **blocks[str(config)]["success"]} if str(config) in blocks else None
@@ -560,6 +619,7 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
         "schema_version": SCHEMA_VERSION,
         "dry_run": bool(dry_run_configs),  # some configuration is a dry run; dry_run_configs says which
         "dry_run_configs": dry_run_configs,
+        "status": _status(list(runs.values()), dry_run_configs),
         "headline": headline,
         "configurations": configurations,
         "configs": blocks,

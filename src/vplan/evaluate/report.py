@@ -92,11 +92,12 @@ class ReportFiles(NamedTuple):
 
 def build_report(rows: Iterable[AttemptRow], out_dir: Path, *, title: str = "vplan evaluation report",
                  n_boot: int = N_BOOT, seed: int = 0, headline_providers: Iterable[str] = TOKEN_FACTORY_PROVIDERS,
-                 manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None) -> ReportFiles:
+                 manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None,
+                 seed_set_size: int | None = None) -> ReportFiles:
     """Write OUT_DIR/metrics.json and OUT_DIR/report.html. Both are rendered in memory first, then each replaces its
     file atomically, so a failed build leaves the previous files whole. The keyword arguments are compute_metrics'."""
     metrics = compute_metrics(rows, n_boot=n_boot, seed=seed, headline_providers=frozenset(headline_providers),
-                              manifests=manifests, undetermined=undetermined)
+                              manifests=manifests, undetermined=undetermined, seed_set_size=seed_set_size)
     metrics_text = json.dumps(metrics, indent=2, allow_nan=False) + "\n"
     page = render_html(metrics, title=title)
     out_dir = Path(out_dir)
@@ -401,9 +402,40 @@ def _gain_tile(label: str, g: Mapping[str, Any]) -> str:
     return _tile(label, _pp(g["mean"]), f"95% CI {_ci(g['ci95'], signed=True)} · N = {g['n']} paired tasks")
 
 
+def _seed_text(s: Mapping[str, Any]) -> str:
+    """The seed set's size from its manifest, when known, next to the tasks in this report."""
+    present = f"{s['feasible']} feasible, {s['impossible']} impossible"
+    if s["size"] is None:
+        return f"{s['tasks']} tasks: {present}"
+    return f"{s['size']} tasks prepared, {s['tasks']} in this report: {present}"
+
+
+def _run_text(run: Mapping[str, Any] | None) -> str:
+    if run is None:
+        return "—"
+    parts = ([f"INCOMPLETE {run['recorded']}/{run['planned']}"] if run["incomplete"] else []) + (
+        [f"LIMITED: first {run['planned']} of {run['prepared']}"] if run["limited"] else [])
+    return "; ".join(parts) or f"complete {run['recorded']}/{run['planned']}"
+
+
+def _sentence_list(items: Sequence[str]) -> str:
+    text = "; ".join(items)
+    return text[:1].upper() + text[1:]
+
+
 def _banners(m: Mapping[str, Any]) -> str:
     out = []
     blocks = m["configs"]
+    status = m["status"]
+    if status["incomplete"]:
+        out.append("<strong>Incomplete runs.</strong> " + _esc(_sentence_list(
+            [f"config {r['config']} recorded {r['recorded']} of its {r['planned']} planned tasks"
+             for r in status["incomplete"]])) + ". Do not read their numbers as a result; eval run --resume "
+                   "continues a run.")
+    if status["limited"]:
+        out.append("<strong>Limited runs.</strong> " + _esc(_sentence_list(
+            [f"config {r['config']} ran the first {r['planned']} of the seed set's {r['prepared']} tasks"
+             for r in status["limited"]])) + ". A prefix (eval run --n) is a smoke test, never a complete result.")
     if m["dry_run_configs"]:
         named = [f"config {c} ({', '.join(blocks[str(c)]['provenance']['providers'])})" for c in m["dry_run_configs"]]
         listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
@@ -450,17 +482,18 @@ def _configurations(m: Mapping[str, Any]) -> str:
     for entry in m["configurations"]:
         block = m["configs"].get(str(entry["config"]))
         if block is None:
-            ran, tasks, coverage = "not run", "—", "—"
+            ran, tasks, coverage, run = "not run", "—", "—", "—"
         else:
             prov = block["provenance"]
             ran = f"{', '.join(prov['providers'])} · {', '.join(prov['models'])}"
             tasks = f"{block['tasks']} ({block['feasible']} / {block['impossible']})"
             coverage = f"{block['tasks']} of {block['coverage']['tasks_in_report']}"
-        body.append([entry["config"], entry["name"], entry["role"], entry["planner"], ran, tasks, coverage,
+            run = _run_text(block["run"])
+        body.append([entry["config"], entry["name"], entry["role"], entry["planner"], ran, tasks, coverage, run,
                      entry["label"]])
         classes.append("baseline" if entry["config"] == 5 else None)
     return _table(["Config", "Configuration", "Role", "Planner / provider (spec)", "Ran with (provider · model)",
-                   "Tasks (feasible / impossible)", "Coverage", "Label"], body, classes)
+                   "Tasks (feasible / impossible)", "Coverage", "Run (rows / planned)", "Label"], body, classes)
 
 
 def _success(m: Mapping[str, Any]) -> str:
@@ -647,9 +680,8 @@ def _provenance(m: Mapping[str, Any]) -> str:
               for c, b in _configs(m) for h in b["provenance"]["config_hashes"]]
     runs = "".join(f"<pre>{_esc(json.dumps(run, indent=2, sort_keys=True))}</pre>" for run in p["runs"])
     undetermined = s["undetermined_excluded"]
-    return (f"<p>Seed set <strong>{_esc(s['name'])}</strong>, sha256 <code>{_esc(s['hash'])}</code>: {s['tasks']} "
-            f"tasks, {s['feasible']} feasible and {s['impossible']} impossible (by type: "
-            f"{_esc(_counts(s['impossible_by_type']))}).</p>"
+    return (f"<p>Seed set <strong>{_esc(s['name'])}</strong>, sha256 <code>{_esc(s['hash'])}</code>: "
+            f"{_esc(_seed_text(s))} (impossible by type: {_esc(_counts(s['impossible_by_type']))}).</p>"
             "<p>Undetermined candidates excluded: "
             + ("not supplied." if undetermined is None else
                f"{undetermined} (neither a witness nor a proof; excluded from the seed set and never scored, "
@@ -662,8 +694,10 @@ def _provenance(m: Mapping[str, Any]) -> str:
 
 
 def render_html(m: Mapping[str, Any], *, title: str = "vplan evaluation report") -> str:
-    """The whole report page for one metrics dict (compute_metrics output)."""
+    """The whole report page for one metrics dict (compute_metrics output). The title carries the pilot's prefixes
+    (D33): INCOMPLETE, LIMITED and DRY RUN."""
     s = m["provenance"]["seed_set"]
+    title = " — ".join(m["status"]["title_prefixes"] + [title])
     sections = {"headline": _headline, "configurations": _configurations, "success": _success,
                 "outcomes": _outcomes, "refusals": _refusals, "safety": _safety, "blocked": _blocked,
                 "strata": _strata, "attribution": _attribution, "cost": _cost, "notes": _notes,
@@ -675,7 +709,7 @@ def render_html(m: Mapping[str, Any], *, title: str = "vplan evaluation report")
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
             '<meta name="color-scheme" content="light">'
             f"<title>{_esc(title)}</title><style>{CSS}</style></head><body><main>"
-            f"<header><h1>{_esc(title)}</h1><p class=\"muted\">Seed set {_esc(s['name'])} ({s['tasks']} tasks: "
-            f"{s['feasible']} feasible, {s['impossible']} impossible), sha256 <code>{_esc(s['hash'][:16])}</code>…; "
+            f"<header><h1>{_esc(title)}</h1><p class=\"muted\">Seed set {_esc(s['name'])} ({_esc(_seed_text(s))}), "
+            f"sha256 <code>{_esc(s['hash'][:16])}</code>…; "
             f"metrics schema v{m['schema_version']}. Every number here is also in metrics.json.</p></header>"
             f"{_banners(m)}<nav><ul>{nav}</ul></nav>{body}</main></body></html>\n")

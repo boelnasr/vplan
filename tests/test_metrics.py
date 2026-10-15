@@ -371,8 +371,8 @@ def test_one_openrouter_attempt_makes_a_config_a_dry_run():
 
 def test_provenance_records_the_seed_set_config_hashes_and_manifests(rows):
     m = compute_metrics(rows, manifests=[{"run_id": "r1", "git_sha": "abc"}])
-    assert m["provenance"]["seed_set"] == {"name": "test", "hash": ev.SEED_SET_HASH, "tasks": 7, "feasible": 5,
-                                           "impossible": 2, "impossible_by_type": {"1": 1, "4": 1},
+    assert m["provenance"]["seed_set"] == {"name": "test", "hash": ev.SEED_SET_HASH, "size": None, "tasks": 7,
+                                           "feasible": 5, "impossible": 2, "impossible_by_type": {"1": 1, "4": 1},
                                            "undetermined_excluded": None}
     assert m["provenance"]["config_hashes_consistent"] is True
     assert m["provenance"]["runs"] == [{"run_id": "r1", "git_sha": "abc"}]
@@ -396,6 +396,56 @@ def test_run_manifests_reach_metrics_without_local_paths(rows):
     text = json.dumps(m)
     assert not [needle for needle in ev.LOCAL_PATHS if needle in text]
     assert manifest == ev.local_manifest()  # the caller's manifest is not changed
+
+
+# Configs 3, 6 and 7 of the scenario have 7, 2 and 7 rows; the seed set has 9 tasks.
+COVERAGE = [ev.run_manifest(3, 7, 9), ev.run_manifest(6, 7, 9), ev.run_manifest(7, 9, 9)]
+
+
+def test_incomplete_and_limited_runs_are_labelled_as_the_pilot_titles_them(rows):
+    # D33: fewer rows than planned is INCOMPLETE: k/n, an --n prefix is LIMITED: first k of n, never complete.
+    m = compute_metrics(rows, manifests=COVERAGE, seed_set_size=9)
+    status = m["status"]
+    assert status["complete"] is False
+    assert status["incomplete"] == [{"config": 6, "recorded": 2, "planned": 7}, {"config": 7, "recorded": 7,
+                                                                                 "planned": 9}]
+    assert status["limited"] == [{"config": 3, "planned": 7, "prepared": 9}, {"config": 6, "planned": 7,
+                                                                              "prepared": 9}]
+    assert status["title_prefixes"] == ["INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks",
+                                        "LIMITED: config 3 first 7 of 9 tasks; config 6 first 7 of 9 tasks",
+                                        "DRY RUN: configs 1, 2, 3 and 7"]
+    run3 = {"config": 3, "run_id": "c3-test", "planned": 7, "prepared": 9, "recorded": 7, "incomplete": False,
+            "limited": True}
+    assert m["configs"]["3"]["run"] == run3 and m["configs"]["2"]["run"] == run3  # config 2 is round 1 of 3
+    assert m["configs"]["6"]["run"]["incomplete"] is True and m["configs"]["1"]["run"] is None
+
+
+def test_complete_runs_and_the_seed_set_size_from_its_manifest(rows):
+    full = [r for r in rows if r.config in (3, 7)]
+    m = compute_metrics(full, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    assert m["status"] == {"complete": True, "incomplete": [], "limited": [],
+                           "title_prefixes": ["DRY RUN: configs 2, 3 and 7"]}
+    assert m["provenance"]["seed_set"]["size"] == 7 and m["provenance"]["seed_set"]["tasks"] == 7
+    limited = compute_metrics(full[:3], seed_set_size=100)["provenance"]["seed_set"]
+    assert (limited["size"], limited["tasks"]) == (100, 3)  # the real size next to the tasks in the report
+
+
+def test_without_run_manifests_coverage_is_unknown(m):
+    assert m["status"]["complete"] is None and m["status"]["title_prefixes"] == ["DRY RUN: configs 1, 2, 3 and 7"]
+    assert m["configs"]["3"]["run"] is None and m["provenance"]["seed_set"]["size"] is None
+
+
+@pytest.mark.parametrize("manifests, size, message", [
+    ([ev.run_manifest(3, 7, 7), ev.run_manifest(3, 7, 7)], None, "two runs of config 3"),
+    ([ev.run_manifest(3, 7, 9), ev.run_manifest(7, 7, 7)], None, "prepared"),
+    ([ev.run_manifest(3, 7, 7)], 9, "prepared"),
+    ([ev.run_manifest(3, 5, 7)], None, "more rows"),
+    ([{**ev.run_manifest(3, 7, 7), "n": None}], None, "n_prepared"),
+    ([], 5, "seed set size"),
+    ([], 0, "seed set size")])
+def test_run_coverage_that_cannot_be_right_is_refused(rows, manifests, size, message):
+    with pytest.raises(MetricsError, match=message):
+        compute_metrics(rows, manifests=manifests, seed_set_size=size)
 
 
 def test_undetermined_candidates_are_counted_not_scored(rows):
