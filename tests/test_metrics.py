@@ -353,6 +353,20 @@ def test_rows_reject_a_mode_or_budget_that_is_not_the_configuration(config, mode
         ev.row(config, 0, ev.FEASIBLE, rec, source=ev.OPENROUTER)
 
 
+def test_rows_take_the_seed_set_scene_counts_so_enclosure_panels_count_as_obstacles():
+    # W3.1's tasks.jsonl counts scene facts: a type-3 enclosure's five panels are obstacles there, so an impossible
+    # row can exceed the 0-3 strata, which apply to feasible tasks only.
+    enclosed = ev.row(3, 0, ev.impossible(3), None, outcome="sim_error", distractors=3, obstacles=8)
+    assert enclosed.obstacles == 8
+    assert compute_metrics([enclosed])["configs"]["3"]["impossible"] == 1
+
+
+@pytest.mark.parametrize("distractors, obstacles", [(4, 0), (0, 4)])
+def test_feasible_rows_must_sit_in_a_stratum(distractors, obstacles):
+    with pytest.raises(ValidationError, match="strat"):
+        ev.row(3, 0, ev.FEASIBLE, None, outcome="sim_error", distractors=distractors, obstacles=obstacles)
+
+
 @pytest.mark.parametrize("outcome", ["executed", "refused"])
 def test_rows_without_a_record_cannot_claim_a_judged_outcome(outcome):
     with pytest.raises(ValidationError):

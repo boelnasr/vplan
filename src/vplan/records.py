@@ -528,7 +528,7 @@ EVAL_CONFIG_MODES: dict[int, tuple[str, int]] = {1: ("unverified", 0), 2: ("repa
 class AttemptRow(Frozen):
     """One evaluation attempt joined with its seed-set task: the input of vplan.evaluate.metrics.
 
-    Task side, from the seed set: the public TaskSpec, the private TaskOracle, the stratum counts, index and id.
+    Task side, from the seed set: the public TaskSpec, the private TaskOracle, the scene counts, index and id.
     Attempt side, from the runner: the AttemptRecord the worker returned (None when it returned none: a crash, hang
     or unreadable result), the supervisor's outcome and failure kind, and the run's provider and model."""
     config: EvalConfig
@@ -538,8 +538,10 @@ class AttemptRow(Frozen):
     task_id: str = Field(min_length=1)
     task: TaskSpec
     oracle: TaskOracle
-    distractors: int = Field(ge=0, le=3)
-    obstacles: int = Field(ge=0, le=3)  # sampled obstacles; a type-3 enclosure's panels are not counted (D38)
+    # Scene facts, as the seed set's tasks.jsonl counts them: objects besides one, and obstacle boxes, so a type-3
+    # enclosure's panels count as obstacles. The 0-3 x 0-3 strata (spec §6) apply to feasible tasks only.
+    distractors: int = Field(ge=0)
+    obstacles: int = Field(ge=0)
     outcome: AttemptOutcome  # the supervisor's outcome
     attempt: AttemptRecord | None = None
     provider: str = Field(min_length=1)
@@ -549,6 +551,8 @@ class AttemptRow(Frozen):
 
     @model_validator(mode="after")
     def _consistent(self) -> "AttemptRow":
+        if self.oracle.feasibility == "feasible" and not (self.distractors <= 3 and self.obstacles <= 3):
+            raise ValueError(f"a feasible task sits in a 0-3 x 0-3 stratum, not ({self.distractors}, {self.obstacles})")
         a = self.attempt
         if a is None:
             if self.outcome in ("executed", "refused"):
