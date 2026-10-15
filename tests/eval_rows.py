@@ -7,6 +7,7 @@ simulation, network or model calls.
 from __future__ import annotations
 
 import random
+from functools import lru_cache
 
 from vplan import records
 from vplan.config import config_snapshot
@@ -17,6 +18,24 @@ from vplan.tasks.scenes import make_basic_scene
 SCENE = make_basic_scene(with_obstacle=True)  # cube_red (the target), cube_green, obstacle wall_1
 SPEC = records.TaskSpec(instruction="put the red cube in the bin", scene=SCENE, robot_facts=records.RobotFacts(
     base_pose=SCENE.robot_base, reach_bound_m=0.9489, gripper_opening_m=0.08, table_height_m=0.0))
+_COLORS = ("blue", "yellow", "purple", "orange")
+
+
+@lru_cache(maxsize=None)
+def spec_for(distractors: int, obstacles: int) -> records.TaskSpec:
+    """SPEC with its scene cut or padded to the given counts (cube_red stays the target; cube_green and wall_1 come
+    first), so a row's scene counts are the scene's own, as AttemptRow requires. Nothing is simulated, so the extra
+    bodies only need distinct ids."""
+    red, green = SCENE.objects
+    extra = tuple(green.model_copy(update={"id": f"cube_{i}", "color": _COLORS[i % len(_COLORS)],
+                                           "pose": records.Pose(position=(0.35 + 0.05 * i, -0.30, 0.02))})
+                  for i in range(max(0, distractors - 1)))
+    walls = tuple(records.Obstacle(id=f"box_{i}", half_extents=(0.02, 0.02, 0.05),
+                                   pose=records.Pose(position=(0.30 + 0.05 * i, 0.45, 0.05)))
+                  for i in range(max(0, obstacles - 1)))
+    scene = SCENE.model_copy(update={"objects": ((red, green) + extra)[:1 + distractors],
+                                     "obstacles": (SCENE.obstacles + walls)[:obstacles]})
+    return SPEC.model_copy(update={"scene": records.Scene.model_validate(scene.model_dump())})
 GOOD = heuristic_geometry(SCENE, "cube_red")  # the canonical plan, which the feasible oracle's witness used
 FIXED = GOOD.model_copy(update={"transport_via": ((0.5, -0.15, 0.30), (0.45, 0.28, 0.30))})  # a changed repair
 WRONG = heuristic_geometry(SCENE, "cube_green")  # a plan for the wrong object
@@ -104,7 +123,8 @@ def row(config, index, oracle, rec=None, *, source=None, outcome=None, distracto
         error_type=None, wall_s=None, seed_set="test", seed_set_hash=SEED_SET_HASH) -> records.AttemptRow:
     provider, model = source or SOURCES[config]
     return records.AttemptRow(config=config, seed_set=seed_set, seed_set_hash=seed_set_hash, task_index=index,
-                              task_id=f"{seed_set}_{index:04d}", task=SPEC, oracle=oracle, distractors=distractors,
+                              task_id=f"{seed_set}_{index:04d}", task=spec_for(distractors, obstacles), oracle=oracle,
+                              distractors=distractors,
                               obstacles=obstacles, outcome=outcome or rec.outcome, attempt=rec, provider=provider,
                               model=model, error_type=error_type, wall_s=wall_s)
 
@@ -214,3 +234,32 @@ def random_rows(n_feasible: int = 48, n_impossible: int = 16, seed: int = 0,
             rows.append(scripted_row(config, index, oracle, calls, evaluations, distractors=d, obstacles=o,
                                      wall_s=rng.uniform(20, 120)))
     return rows
+
+
+# ---- a W3.1 run manifest with the local paths a real one carries ----------------------------------------
+LOCAL_PATHS = ("C:\\Users\\someone", "someone", "/home/", "/mnt/", "\\\\server", "runs/seeds", "Users")
+
+
+def local_manifest() -> dict:
+    """The shape runner._create writes, with absolute paths where a real run has them."""
+    return {
+        "schema_version": 1, "kind": "eval_run", "run_id": "c3-dev-20261015T120000Z", "config": 3,
+        "n": 7, "n_prepared": 7, "limited": False,
+        "provider": "openrouter", "model": "nvidia/nemotron-3-ultra-550b-a55b:free", "split": "dev",
+        "seed_set_hash": SEED_SET_HASH, "os": "Windows-10-10.0.26100-SP0", "image_digest": "sha256:feedface",
+        "seed_set": {"dir": "runs/seeds/dev", "resolved": "C:\\Users\\someone\\repo\\runs\\seeds\\dev",
+                     "manifest_sha256": "cd" * 32, "n_tasks": 7},
+        "git": {"head": "f" * 40, "dirty": False},
+        "manipulapy": {"version": "1.4.2", "location": "C:\\Users\\someone\\ManipulaPy\\ManipulaPy\\__init__.py",
+                       "git": {"head": "e" * 40, "dirty": True}},
+        "versions": {"numpy": "1.26.4", "ManipulaPy": "1.4.2"},
+        "source_hashes": {"src/vplan/cli.py": "12" * 32}, "source_drift": ["src/vplan/cli.py"],
+        "extra": {"cache": "/home/someone/.cache/x", "unc": "\\\\server\\share\\x", "wsl": "/mnt/c/Users/x",
+                  "forward": "C:/Users/someone/x", "note": "kept", "paths": ["/tmp/a", "kept too"]},
+    }
+
+
+def run_manifest(config: int, n: int, prepared: int) -> dict:
+    """The run-coverage fields of a W3.1 manifest: n planned tasks (a prefix with --n) of the seed set's prepared."""
+    return {"schema_version": 1, "kind": "eval_run", "run_id": f"c{config}-test", "config": config, "n": n,
+            "n_prepared": prepared, "limited": n < prepared, "seed_set_hash": SEED_SET_HASH}

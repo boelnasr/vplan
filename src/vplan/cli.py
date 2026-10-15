@@ -1,5 +1,5 @@
-"""Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show) and the W3.1 evaluation
-(eval prepare / eval run)."""
+"""Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show), the W3.1 evaluation
+(eval prepare / eval run) and the spec §15 report (report build)."""
 from __future__ import annotations
 
 import argparse
@@ -144,6 +144,28 @@ def _eval(args) -> int:
     return 1
 
 
+def _report(args) -> int:
+    """report build. Exit codes, as for eval run: 0 built, 1 built from an incomplete run (titled INCOMPLETE; resume
+    the run and rebuild), 2 refused."""
+    from vplan.evaluate import collect, pilot
+    from vplan.evaluate.metrics import MetricsError
+    try:
+        for value in [*args.run, args.output, args.seed_dir]:
+            if value:
+                pilot.check_path_arg(value)
+        files, status = collect.build(args.run, args.output, seed_dir=args.seed_dir)
+    except (pilot.PilotError, MetricsError) as exc:  # EvalError is a PilotError; messages never carry credentials
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    labels = " | ".join(status["title_prefixes"])  # ASCII: a Windows console without PYTHONUTF8 is cp1252
+    print(f"report: {files.html} and {files.metrics}" + (f" ({labels})" if labels else ""))
+    if status["incomplete"]:
+        print("INCOMPLETE: a run recorded fewer attempts than it planned; continue it with eval run --resume RUN_DIR "
+              "and build the report again", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vplan")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -202,9 +224,19 @@ def main(argv: list[str] | None = None) -> int:
     er.add_argument("--allow-source-drift", action="store_true", help="record source changes instead of refusing")
     er.add_argument("--timeout", type=float, default=600.0, help="per-attempt wall-clock limit, s")
     er.add_argument("--max-rpm", type=float, help="pace provider requests to at most this many per minute")
+    rep = sub.add_parser("report", help="spec §15 report: metrics.json and one static HTML file")
+    rsub = rep.add_subparsers(dest="report_cmd", required=True)
+    rb = rsub.add_parser("build", help="build the report from W3.1 run directories over one seed set")
+    rb.add_argument("--run", required=True, action="append",
+                    help="a W3.1 run directory; repeat once per configuration (config 2 comes from config 3's run)")
+    rb.add_argument("--output", required=True, help="the report directory: metrics.json and report.html")
+    rb.add_argument("--seed-dir", help="the runs' seed set (default: the directory the first run recorded, as that "
+                    "OS wrote it; pass --seed-dir when building on another OS, e.g. in the Linux container)")
     args = parser.parse_args(argv)
     if args.cmd == "eval":
         return _eval(args)
+    if args.cmd == "report":
+        return _report(args)
     if args.cmd == "pilot":
         from vplan.evaluate import pilot
         from vplan.tasks import CohortPreparationError

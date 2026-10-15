@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 from tests import eval_rows as ev
 from vplan import records
-from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CHECK_CATEGORIES, DRY_RUN_LABEL, SPEC14_METRICS, MetricsError,
-                                    attribute, compute_metrics, first_round)
+from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CHECK_CATEGORIES, DRY_RUN_LABEL, SPEC14_METRICS,
+                                    TOKEN_FACTORY_LABEL, MetricsError, attribute, compute_metrics, first_round)
 from vplan.evaluate.stats import paired_bootstrap, wilson
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,10 +90,33 @@ def test_repair_and_feedback_gains_are_paired_bootstrap_differences(m):
     assert feedback["ci95"] == [expected.low, expected.high]
 
 
-def test_gain_wording_credits_feedback_only_against_resampling(m):
+# Fixed text must not claim what only a measured interval can show (docs/related-work.md, "Claims vplan must not
+# make", 6 and 7): neither that feedback or repair beats resampling, nor that config 7 credits feedback.
+CLAIMS = ("credits feedback", "credit feedback over", "feedback over retrying", "beats", "outperform", "better than",
+          "superior to")
+
+
+def strings(data):
+    if isinstance(data, str):
+        yield data
+    elif isinstance(data, dict):
+        for value in data.values():
+            yield from strings(value)
+    elif isinstance(data, list):
+        for value in data:
+            yield from strings(value)
+
+
+def test_gain_wording_is_neutral_about_feedback_versus_resampling(m):
     repair, feedback = m["headline"]["repair_gain"]["reading"], m["headline"]["feedback_gain"]["reading"]
     assert "does not by itself credit the feedback" in repair
-    assert "equal-budget resampling" in feedback and "credits feedback over retrying" in feedback
+    assert repair.endswith("the feedback gain (3 - 7) addresses that question at equal budget.")
+    assert feedback == ("Repair with verifier findings (config 3) minus equal-budget resampling without feedback "
+                        "(config 7), on the same tasks: the comparison that separates the effect of feedback from "
+                        "retrying at the same budget.")
+    assert "separates the effect of feedback from retrying" in m["configs"]["7"]["role"]
+    for text in strings(m):
+        assert not any(claim in text.lower() for claim in CLAIMS), text
 
 
 def test_gains_pair_only_tasks_present_in_both_configs(rows):
@@ -124,6 +147,37 @@ def test_config_2_outcomes_replay_run_task_with_k_zero(rows):
     view = first_round(tasks[1])
     assert view.config == 2 and view.attempt.k == 0 and view.attempt.call_count == 1
     assert view.attempt.rounds == tasks[1].attempt.rounds[:1] and view.attempt.known_total_tokens == 100
+
+
+# Config-3 attempts whose first round ends every way a round can; (oracle, scripted calls, scripted evaluations).
+FIRST_ROUNDS = {
+    "success": (ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()]),
+    "judge failure": (ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged("S1")]),
+    "blocked, then repaired": (ev.FEASIBLE, [ev.call(ev.GOOD), ev.call(ev.FIXED)],
+                               [ev.blocked(ev.COLLISION), ev.judged()]),
+    "false refusal": (ev.FEASIBLE, [ev.call(ev.refusal("other"))], []),
+    "malformed, then a plan": (ev.FEASIBLE, [ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
+    "protocol error, then a plan": (ev.FEASIBLE, [ev.call(outcome="protocol_error"), ev.call(ev.GOOD)],
+                                    [ev.judged()]),
+    "service failure": (ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None, status_code=503)], []),
+    "stale approval": (ev.FEASIBLE, [ev.call(ev.GOOD)], [records.EvaluationResult(outcome="stale_approval")]),
+    "simulation error": (ev.FEASIBLE, [ev.call(ev.GOOD)],
+                         [records.EvaluationResult(outcome="sim_error", error_type="RuntimeError")]),
+    "visual uncertain": (ev.FEASIBLE, [ev.call(ev.GOOD)], [records.EvaluationResult(outcome="visual_uncertain")]),
+    "impossible, attempted": (ev.impossible(1), [ev.call(ev.GOOD)], [ev.judged()]),
+    "impossible, refused": (ev.impossible(1), [ev.call(ev.refusal())], []),
+}
+
+
+@pytest.mark.parametrize("name", FIRST_ROUNDS)
+def test_first_round_is_what_run_task_returns_with_k_zero_on_the_same_planner(name):
+    # first_round reuses repair._terminal; this pins it to run_task itself so the two cannot drift apart silently.
+    oracle, calls, evaluations = FIRST_ROUNDS[name]
+    full = ev.scripted_row(3, 0, oracle, calls, evaluations)
+    alone = ev.attempt(oracle, calls[:1], evaluations[:1], k=0, attempt_id=full.attempt.attempt_id)
+    derived = first_round(full)
+    assert derived.attempt == alone and derived.outcome == alone.outcome
+    assert derived.attempt.success == alone.success
 
 
 # ---- per-config tables ----------------------------------------------------------------------------
@@ -258,13 +312,21 @@ def test_cost_and_latency_per_config(m):
 # ---- provenance and labels -------------------------------------------------------------------------
 
 def test_openrouter_runs_are_labelled_dry_runs(m):
-    assert m["dry_run"] is True and m["headline"]["label"] == DRY_RUN_LABEL
+    assert m["dry_run"] is True and m["dry_run_configs"] == [1, 2, 3, 7]
     for config in ("1", "2", "3", "7"):
         provenance = m["configs"][config]["provenance"]
         assert provenance["label"] == DRY_RUN_LABEL and provenance["headline_source"] is False
+        assert provenance["dry_run"] is True
         assert provenance["providers"] == ["openrouter"]
         assert provenance["models"] == ["nvidia/nemotron-3-ultra-550b-a55b:free"]
+    assert m["configs"]["5"]["provenance"]["dry_run"] is False and m["configs"]["6"]["provenance"]["dry_run"] is False
+    headline = m["headline"]
+    assert headline["headline_source"] is False and headline["status"] == "dry_run"
+    assert headline["dry_run_configs"] == [2, 3, 7] and headline["missing_configs"] == []
+    assert headline["label"] == ("not a headline result: configs 2, 3 and 7 are dry runs (not on Nebius Token "
+                                 "Factory)")
     assert m["headline"]["repair_gain"]["label"] == DRY_RUN_LABEL
+    assert m["headline"]["repair_gain"]["dry_run_configs"] == [3, 2]
     assert "baseline" in m["configs"]["5"]["provenance"]["label"]
     assert "excluded from the headline" in m["configs"]["6"]["provenance"]["label"]
     assert m["configs"]["6"]["coverage"] == {"tasks_in_report": 7, "missing": 5}
@@ -277,8 +339,89 @@ def test_token_factory_runs_are_headline_sources(rows):
     assert m["configs"]["2"]["provenance"]["headline_source"] is True
     assert m["headline"]["repair_gain"]["headline_source"] is True
     assert m["headline"]["feedback_gain"]["headline_source"] is True
-    assert m["headline"]["label"] != DRY_RUN_LABEL and m["headline"]["headline_source"] is True
+    assert m["headline"]["feedback_gain"]["dry_run_configs"] == []
+    assert m["headline"]["label"] == TOKEN_FACTORY_LABEL and m["headline"]["headline_source"] is True
+    assert m["headline"]["status"] == "headline" and m["headline"]["dry_run_configs"] == []
+    # Config 1 is an ablation outside the headline: it stays a labelled dry run without demoting the headline.
     assert m["configs"]["1"]["provenance"]["label"] == DRY_RUN_LABEL and m["dry_run"] is True
+    assert m["dry_run_configs"] == [1]
+
+
+@pytest.mark.parametrize("override, drop, dry, missing, label", [
+    ({3: ev.TOKEN_FACTORY}, (), [7], [],
+     "not a headline result: config 7 is a dry run (not on Nebius Token Factory)"),
+    ({3: ev.TOKEN_FACTORY}, (7,), [], [7], "not a headline result: config 7 not run"),
+    ({}, (7,), [2, 3], [7],
+     "not a headline result: configs 2 and 3 are dry runs (not on Nebius Token Factory); config 7 not run"),
+    ({7: ev.TOKEN_FACTORY}, (3,), [], [2, 3], "not a headline result: configs 2 and 3 not run")])
+def test_a_headline_report_needs_configs_2_3_and_7_all_on_token_factory(override, drop, dry, missing, label):
+    rows = [r for r in ev.scenario_rows(source_override=override) if r.config not in drop]
+    headline = compute_metrics(rows)["headline"]
+    assert headline["headline_source"] is False and headline["label"] == label
+    assert headline["dry_run_configs"] == dry and headline["missing_configs"] == missing
+    assert headline["status"] == ("not_run" if 3 in drop else "dry_run" if dry else "partial")
+
+
+TF = {3: ev.TOKEN_FACTORY, 7: ev.TOKEN_FACTORY}
+LIMITED_3 = "config 3 covers only the first 7 of 400 tasks"
+
+
+@pytest.mark.parametrize("manifests, size, drop, status, reasons, repair, feedback", [
+    # Config 3 ran an --n prefix (LIMITED) and config 7 stopped early (INCOMPLETE). D33 never calls either complete,
+    # so neither gives a headline number, whatever the provider.
+    ([ev.run_manifest(3, 7, 400), ev.run_manifest(7, 400, 400)], 400, (), "incomplete",
+     [LIMITED_3, "config 7 run is incomplete (7/400 tasks)"],
+     f"not a headline result: {LIMITED_3}",
+     f"not a headline result: {LIMITED_3}; config 7 run is incomplete (7/400 tasks)"),
+    ([ev.run_manifest(3, 7, 400), ev.run_manifest(7, 7, 400)], 400, (), "limited",
+     [LIMITED_3, "config 7 covers only the first 7 of 400 tasks"],
+     f"not a headline result: {LIMITED_3}",
+     f"not a headline result: {LIMITED_3}; config 7 covers only the first 7 of 400 tasks"),
+    # A run that recorded nothing is named once, by its count, not as "not run". Config 3's run is complete, so the
+    # repair gain (3 - 2) stays a headline source on its own.
+    ([ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], 7, (7,), "incomplete",
+     ["config 7 run is incomplete (0/7 tasks)"], TOKEN_FACTORY_LABEL, "not run")])
+def test_an_incomplete_or_limited_token_factory_run_is_not_a_headline(manifests, size, drop, status, reasons, repair,
+                                                                      feedback):
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config not in drop]
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=size)
+    headline = m["headline"]
+    assert m["status"]["complete"] is False
+    assert headline["headline_source"] is False and headline["status"] == status
+    assert headline["dry_run_configs"] == [] and headline["missing_configs"] == list(drop)
+    assert headline["reason"] == "; ".join(reasons)
+    assert headline["label"] == "not a headline result: " + "; ".join(reasons)
+    assert headline["repair_gain"]["label"] == repair and headline["feedback_gain"]["label"] == feedback
+    assert headline["repair_gain"]["headline_source"] is (repair == TOKEN_FACTORY_LABEL)
+    assert headline["feedback_gain"]["headline_source"] is False
+    # The configuration rows say the same: a Token Factory run that is not complete is not a headline source.
+    for c in ("2", "3", "7"):
+        if c in m["configs"]:
+            provenance, run = m["configs"][c]["provenance"], m["configs"][c]["run"]
+            short = run["incomplete"] or run["limited"]
+            assert provenance["dry_run"] is False and provenance["headline_source"] is not short
+            assert (provenance["label"] == TOKEN_FACTORY_LABEL) is not short
+            assert m["configs"][c]["label"] == provenance["label"]
+    labels = {c["config"]: c["label"] for c in m["configurations"]}
+    assert labels[3] == m["configs"]["3"]["label"] and labels[2] == m["configs"]["2"]["label"]
+
+
+def test_complete_token_factory_runs_stay_a_headline():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    assert m["status"]["complete"] is True and m["dry_run_configs"] == []
+    assert m["headline"]["status"] == "headline" and m["headline"]["headline_source"] is True
+    assert m["headline"]["reason"] is None and m["headline"]["label"] == TOKEN_FACTORY_LABEL
+    assert m["headline"]["feedback_gain"]["headline_source"] is True
+
+
+def test_a_token_factory_run_that_is_both_incomplete_and_limited_names_both():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 9, 400)], seed_set_size=400)
+    assert m["configs"]["7"]["label"] == "Nebius Token Factory run, not a headline result: incomplete and limited run"
+    assert m["configs"]["3"]["label"] == "Nebius Token Factory run, not a headline result: limited run"
+    assert m["headline"]["reason"] == (f"{LIMITED_3}; config 7 run is incomplete (7/9 tasks); config 7 covers only "
+                                       "the first 9 of 400 tasks")
 
 
 def test_one_openrouter_attempt_makes_a_config_a_dry_run():
@@ -291,8 +434,8 @@ def test_one_openrouter_attempt_makes_a_config_a_dry_run():
 
 def test_provenance_records_the_seed_set_config_hashes_and_manifests(rows):
     m = compute_metrics(rows, manifests=[{"run_id": "r1", "git_sha": "abc"}])
-    assert m["provenance"]["seed_set"] == {"name": "test", "hash": ev.SEED_SET_HASH, "tasks": 7, "feasible": 5,
-                                           "impossible": 2, "impossible_by_type": {"1": 1, "4": 1},
+    assert m["provenance"]["seed_set"] == {"name": "test", "hash": ev.SEED_SET_HASH, "size": None, "tasks": 7,
+                                           "feasible": 5, "impossible": 2, "impossible_by_type": {"1": 1, "4": 1},
                                            "undetermined_excluded": None}
     assert m["provenance"]["config_hashes_consistent"] is True
     assert m["provenance"]["runs"] == [{"run_id": "r1", "git_sha": "abc"}]
@@ -300,6 +443,72 @@ def test_provenance_records_the_seed_set_config_hashes_and_manifests(rows):
     assert [c["config"] for c in m["configurations"]] == [1, 2, 3, 4, 5, 6, 7]
     assert [c["config"] for c in m["configurations"] if not c["present"]] == [4]
     assert "shadow" in m["configurations"][3]["label"]
+
+
+def test_run_manifests_reach_metrics_without_local_paths(rows):
+    # Reports may go into the public repo: no local filesystem path, but every hash, version and git SHA.
+    manifest = ev.local_manifest()
+    m = compute_metrics(rows, manifests=[manifest])
+    (run,) = m["provenance"]["runs"]
+    assert run["seed_set"] == {"manifest_sha256": "cd" * 32, "n_tasks": 7}
+    assert run["manipulapy"] == {"version": "1.4.2", "git": {"head": "e" * 40, "dirty": True}}
+    assert run["git"] == {"head": "f" * 40, "dirty": False} and run["versions"] == manifest["versions"]
+    assert run["source_hashes"] == manifest["source_hashes"] and run["source_drift"] == ["src/vplan/cli.py"]
+    assert (run["os"], run["image_digest"], run["model"]) == (manifest["os"], "sha256:feedface", manifest["model"])
+    assert run["extra"] == {"note": "kept", "paths": ["kept too"]}
+    text = json.dumps(m)
+    assert not [needle for needle in ev.LOCAL_PATHS if needle in text]
+    assert manifest == ev.local_manifest()  # the caller's manifest is not changed
+
+
+# Configs 3, 6 and 7 of the scenario have 7, 2 and 7 rows; the seed set has 9 tasks.
+COVERAGE = [ev.run_manifest(3, 7, 9), ev.run_manifest(6, 7, 9), ev.run_manifest(7, 9, 9)]
+
+
+def test_incomplete_and_limited_runs_are_labelled_as_the_pilot_titles_them(rows):
+    # D33: fewer rows than planned is INCOMPLETE: k/n, an --n prefix is LIMITED: first k of n, never complete.
+    m = compute_metrics(rows, manifests=COVERAGE, seed_set_size=9)
+    status = m["status"]
+    assert status["complete"] is False
+    assert status["incomplete"] == [{"config": 6, "recorded": 2, "planned": 7}, {"config": 7, "recorded": 7,
+                                                                                 "planned": 9}]
+    assert status["limited"] == [{"config": 3, "planned": 7, "prepared": 9}, {"config": 6, "planned": 7,
+                                                                              "prepared": 9}]
+    assert status["title_prefixes"] == ["INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks",
+                                        "LIMITED: config 3 first 7 of 9 tasks; config 6 first 7 of 9 tasks",
+                                        "DRY RUN: configs 1, 2, 3 and 7"]
+    run3 = {"config": 3, "run_id": "c3-test", "planned": 7, "prepared": 9, "recorded": 7, "incomplete": False,
+            "limited": True}
+    assert m["configs"]["3"]["run"] == run3 and m["configs"]["2"]["run"] == run3  # config 2 is round 1 of 3
+    assert m["configs"]["6"]["run"]["incomplete"] is True and m["configs"]["1"]["run"] is None
+
+
+def test_complete_runs_and_the_seed_set_size_from_its_manifest(rows):
+    full = [r for r in rows if r.config in (3, 7)]
+    m = compute_metrics(full, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    assert m["status"] == {"complete": True, "incomplete": [], "limited": [],
+                           "title_prefixes": ["DRY RUN: configs 2, 3 and 7"]}
+    assert m["provenance"]["seed_set"]["size"] == 7 and m["provenance"]["seed_set"]["tasks"] == 7
+    limited = compute_metrics(full[:3], seed_set_size=100)["provenance"]["seed_set"]
+    assert (limited["size"], limited["tasks"]) == (100, 3)  # the real size next to the tasks in the report
+
+
+def test_without_run_manifests_coverage_is_unknown(m):
+    assert m["status"]["complete"] is None and m["status"]["title_prefixes"] == ["DRY RUN: configs 1, 2, 3 and 7"]
+    assert m["configs"]["3"]["run"] is None and m["provenance"]["seed_set"]["size"] is None
+
+
+@pytest.mark.parametrize("manifests, size, message", [
+    ([ev.run_manifest(3, 7, 7), ev.run_manifest(3, 7, 7)], None, "two runs of config 3"),
+    ([ev.run_manifest(3, 7, 9), ev.run_manifest(7, 7, 7)], None, "prepared"),
+    ([ev.run_manifest(3, 7, 7)], 9, "prepared"),
+    ([ev.run_manifest(3, 5, 7)], None, "more rows"),
+    ([{**ev.run_manifest(3, 7, 7), "n": None}], None, "n_prepared"),
+    ([], 5, "seed set size"),
+    ([], 0, "seed set size")])
+def test_run_coverage_that_cannot_be_right_is_refused(rows, manifests, size, message):
+    with pytest.raises(MetricsError, match=message):
+        compute_metrics(rows, manifests=manifests, seed_set_size=size)
 
 
 def test_undetermined_candidates_are_counted_not_scored(rows):
@@ -370,6 +579,15 @@ def test_rows_take_the_seed_set_scene_counts_so_enclosure_panels_count_as_obstac
     enclosed = ev.row(3, 0, ev.impossible(3), None, outcome="sim_error", distractors=3, obstacles=8)
     assert enclosed.obstacles == 8
     assert compute_metrics([enclosed])["configs"]["3"]["impossible"] == 1
+
+
+@pytest.mark.parametrize("field, value", [("distractors", 0), ("distractors", 2), ("obstacles", 0), ("obstacles", 2)])
+def test_rows_reject_scene_counts_that_differ_from_the_task_scene(field, value):
+    # As W3.1's SeedSetTask: the counts are the scene's objects besides one and its obstacle boxes, never free labels.
+    good = ev.row(3, 0, ev.FEASIBLE, None, outcome="sim_error", distractors=1, obstacles=1)
+    assert (len(good.task.scene.objects) - 1, len(good.task.scene.obstacles)) == (1, 1)
+    with pytest.raises(ValidationError, match="scene"):
+        records.AttemptRow.model_validate({**good.model_dump(), field: value})
 
 
 @pytest.mark.parametrize("distractors, obstacles", [(4, 0), (0, 4)])
