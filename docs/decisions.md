@@ -1541,3 +1541,8 @@ The owner chose the intent check over a demo-only instruction screen and an offl
   - Spec §14 says headline numbers come from Token Factory runs only, and D56 labels everything else a dry run. With the evaluation off Token Factory, either the headline source changes (for example, the same model on OpenRouter with the provider named), or the report carries no headline.
   - Spec §18 runs the final `test` batch on Serverless Jobs with Nemotron on Token Factory. The credit is for tokens; Jobs compute is unfunded, so the batch would run locally or in the R8 container.
   - The OpenRouter free variant's daily cap may not allow about 3,600 calls in one day (W3.6).
+
+**Addendum (2026-10-15): no Serverless Jobs.** The owner ruled that the final `test` batch runs locally or in the R8 container (D55), not on Nebius Serverless Jobs, because the credit covers tokens only.
+- The W3.4 Jobs smoke test and R8's "results return via Object Storage" are dropped. R8 local (the container run) stays: it is now the reproducible environment for the batch.
+- The hackathon requirement ("must run on Nebius Token Factory or Nebius AI Cloud") is met by Token Factory serving Nemotron for the live demo and the W3.0 smoke test. The rules suggest Serverless Jobs; they do not require them.
+- Spec §18's final-stage line is superseded by this entry.
