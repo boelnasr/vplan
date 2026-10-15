@@ -367,6 +367,16 @@ def test_feasible_rows_must_sit_in_a_stratum(distractors, obstacles):
         ev.row(3, 0, ev.FEASIBLE, None, outcome="sim_error", distractors=distractors, obstacles=obstacles)
 
 
+def test_scripted_executions_on_impossible_tasks_fail_r_as_the_d48_judge_scores_them():
+    # The fixtures mirror the Judge after D48 (an executed plan on an impossible task keeps its physics predicates
+    # and fails R), so these tests hold whether run_task or the Judge adds R.
+    rec = ev.attempt(ev.impossible(1), [ev.call(ev.GOOD)], [ev.judged()])
+    assert rec.outcome == "executed" and not rec.success
+    assert rec.judge.predicates["R"] is False and rec.judge.predicates["V1"] is True
+    feasible = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()])
+    assert "R" not in feasible.judge.predicates and feasible.success
+
+
 @pytest.mark.parametrize("outcome", ["executed", "refused"])
 def test_rows_without_a_record_cannot_claim_a_judged_outcome(outcome):
     with pytest.raises(ValidationError):

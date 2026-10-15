@@ -76,11 +76,24 @@ class Scripted:
         return self.calls.pop(0)
 
 
+def as_judged(oracle: records.TaskOracle, evaluation: records.EvaluationResult) -> records.EvaluationResult:
+    """The evaluation as the Judge scores it since D48: an executed plan on an impossible task keeps its physics
+    predicates and fails R. A custom run_task evaluator owns that Judge call once D48 lands, and run_task adds R itself
+    before it, so the scripted rows read the same either way."""
+    j = evaluation.judge
+    if oracle.feasibility == "feasible" or evaluation.outcome != "executed" or j is None or "R" in j.predicates:
+        return evaluation
+    return evaluation.model_copy(update={"judge": records.JudgeResult(
+        success=False, predicates={**j.predicates, "R": False}, violations=j.violations + ("R",),
+        details={**j.details, "refusal": "impossible task attempted"})})
+
+
 def attempt(oracle, calls, evaluations=(), *, mode="repair", k=3, attempt_id="attempt"):
     """A real AttemptRecord from run_task; `evaluations` answer the scripted plans in order."""
     pending = list(evaluations)
-    return run_task(SPEC, oracle, Scripted(calls), k=k, mode=mode, evaluator=lambda plan: pending.pop(0),
-                    attempt_id=attempt_id, config_snapshot=CFGS)
+    return run_task(SPEC, oracle, Scripted(calls), k=k, mode=mode,
+                    evaluator=lambda plan: as_judged(oracle, pending.pop(0)), attempt_id=attempt_id,
+                    config_snapshot=CFGS)
 
 
 MODES = {1: ("unverified", 0), 3: ("repair", 3), 5: ("repair", 3), 6: ("unverified", 0), 7: ("resample", 3)}
