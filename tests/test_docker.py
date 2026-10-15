@@ -238,3 +238,11 @@ def test_run_local_is_strict_bash_and_never_passes_credentials() -> None:
     mounts = re.findall(r"--(?:volume|mount)[ =](\S+)", text)  # the script spells docker flags out in full
     assert mounts and all(m.strip("\"'").endswith(":/out") for m in mounts), mounts
     assert "VPLAN_IMAGE_DIGEST=" in text
+
+
+def test_run_local_passes_the_host_git_sha_to_both_containers() -> None:
+    # The image has neither git nor .git, so manifests made inside it take the SHA from the environment (gitinfo).
+    text = (DOCKER / "run-local.sh").read_text(encoding="utf-8")
+    assert '"VPLAN_GIT_SHA=${sha}"' in text and '"VPLAN_GIT_DIRTY=${dirty}"' in text
+    runs = [line for line in text.splitlines() if line.lstrip().startswith("docker run ")]
+    assert len(runs) == 2 and all('${git_env[@]+"${git_env[@]}"}' in line for line in runs), runs

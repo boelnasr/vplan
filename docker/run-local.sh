@@ -19,9 +19,19 @@ if ! docker info > /dev/null 2>&1; then
 fi
 mkdir -p "${out}"
 
-revision="$(git -C "${root}" rev-parse HEAD 2> /dev/null || echo unknown)"
-if [[ "${revision}" != unknown && -n "$(git -C "${root}" status --porcelain 2> /dev/null)" ]]; then
-    revision="${revision}-dirty"
+sha="$(git -C "${root}" rev-parse HEAD 2> /dev/null || true)"
+revision=unknown
+git_env=()
+if [[ -n "${sha}" ]]; then
+    dirty=false
+    revision="${sha}"
+    if [[ -n "$(git -C "${root}" status --porcelain 2> /dev/null)" ]]; then
+        dirty=true
+        revision="${sha}-dirty"
+    fi
+    # The image has neither git nor .git, so manifests made inside it take the host checkout's SHA from these
+    # (vplan.evaluate.gitinfo, source "env"); eval run refuses to start without one unless --allow-no-git.
+    git_env=(--env "VPLAN_GIT_SHA=${sha}" --env "VPLAN_GIT_DIRTY=${dirty}")
 fi
 
 echo "== build ${image} (revision ${revision})"
@@ -36,14 +46,15 @@ digest="$(docker image inspect --format '{{.Id}}' "${image}")"
 
 status=0
 echo "== (a) full test suite in the container"
-docker run --rm --network none --env "VPLAN_IMAGE_DIGEST=${digest}" --entrypoint python "${image}" \
+docker run --rm --network none --env "VPLAN_IMAGE_DIGEST=${digest}" ${git_env[@]+"${git_env[@]}"} \
+    --entrypoint python "${image}" \
     -m pytest -q -p no:cacheprovider 2>&1 | tee "${out}/pytest.log" || status=1
 
 echo "== (b) 10 tasks through the real pipeline, no keys"
 # Runs as the caller's uid/gid: the output stays owned by the caller, and on a native Linux host the image's own
 # user could not write to the caller's directory.
-docker run --rm --network none --user "$(id -u):$(id -g)" --env "VPLAN_IMAGE_DIGEST=${digest}" \
-    --volume "${out}:/out" "${image}" \
+docker run --rm --network none ${git_env[@]+"${git_env[@]}"} --user "$(id -u):$(id -g)" \
+    --env "VPLAN_IMAGE_DIGEST=${digest}" --volume "${out}:/out" "${image}" \
     pilot prepare --output /out/cohort --n 10 --seed 0 --max-candidates 50 2>&1 | tee "${out}/prepare.log" \
     || status=1
 
