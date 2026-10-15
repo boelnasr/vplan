@@ -104,6 +104,42 @@ def test_k_outside_the_spec_budget_is_rejected(k):
         run(Scripted([]), lambda p: blocked(), k=k)
 
 
+@pytest.mark.parametrize("k", [True, False, 1.0, "1"])
+def test_non_integer_k_is_rejected_before_a_planner_call(k):
+    scripted = Scripted([call(generated().oracle.reference_plan)])
+    with pytest.raises(ValueError, match="integer"):
+        run(scripted, lambda p: executed(), k=k)
+    assert not scripted.seen
+
+
+@pytest.mark.parametrize("mode", ["repair", "resample"])
+def test_verified_modes_default_to_three_retries(mode):
+    plan = generated().oracle.reference_plan
+    result = run(Scripted([call(plan)] * 4), lambda p: blocked(), mode=mode)
+    assert result.k == 3 and result.call_count == 4 and result.outcome == "budget_exhausted"
+
+
+@pytest.mark.parametrize("outcome, expected", [("proposed", "budget_exhausted"),
+                                              ("malformed", "malformed_final"),
+                                              ("protocol_error", "budget_exhausted")])
+def test_unverified_defaults_to_one_blind_attempt_without_retries(outcome, expected):  # D48: config 1 is k = 0
+    plan = generated().oracle.reference_plan
+    first = call(plan) if outcome == "proposed" else call(outcome=outcome)
+    scripted = Scripted([first, call(plan), call(plan), call(plan)])
+    result = run(scripted, lambda p: blocked(), mode="unverified")
+    assert result.outcome == expected and result.k == 0 and result.call_count == 1
+    assert len(scripted.seen) == 1 and scripted.seen[0]["feedback"] is None
+    assert result.total_tokens == 10
+
+
+@pytest.mark.parametrize("k", [1, 2, 3])
+def test_unverified_rejects_an_explicit_retry_budget_before_calling_planner(k):
+    scripted = Scripted([call(generated().oracle.reference_plan)])
+    with pytest.raises(ValueError, match="unverified.*k=0"):
+        run(scripted, lambda p: executed(), mode="unverified", k=k)
+    assert not scripted.seen
+
+
 def test_malformed_retry_uses_up_a_round():
     plan = generated().oracle.reference_plan
     scripted = Scripted([call(plan), call(), call(plan), call(plan)])

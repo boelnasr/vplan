@@ -571,7 +571,8 @@ def test_rows_reject_a_provider_or_model_the_calls_do_not_carry():
 @pytest.mark.parametrize("config, mode, k", [(7, "repair", 3), (3, "resample", 3), (3, "repair", 2),
                                              (1, "unverified", 3), (2, "repair", 3)])
 def test_rows_reject_a_mode_or_budget_that_is_not_the_configuration(config, mode, k):
-    rec = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], mode=mode, k=k)
+    rec = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], mode=mode, k=0 if mode == "unverified" else k)
+    rec = rec.model_copy(update={"k": k})  # run_task refuses unverified with k > 0 (D48); a row must refuse it too
     with pytest.raises(ValidationError):
         ev.row(config, 0, ev.FEASIBLE, rec, source=ev.OPENROUTER)
 
