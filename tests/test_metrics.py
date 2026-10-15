@@ -90,10 +90,32 @@ def test_repair_and_feedback_gains_are_paired_bootstrap_differences(m):
     assert feedback["ci95"] == [expected.low, expected.high]
 
 
-def test_gain_wording_credits_feedback_only_against_resampling(m):
+# Fixed text must not claim what only a measured interval can show (docs/related-work.md, "Claims vplan must not
+# make", 6 and 7): neither that feedback or repair beats resampling, nor that config 7 credits feedback.
+CLAIMS = ("credits feedback", "credit feedback over", "feedback over retrying", "beats", "outperform", "better than",
+          "superior to")
+
+
+def strings(data):
+    if isinstance(data, str):
+        yield data
+    elif isinstance(data, dict):
+        for value in data.values():
+            yield from strings(value)
+    elif isinstance(data, list):
+        for value in data:
+            yield from strings(value)
+
+
+def test_gain_wording_is_neutral_about_feedback_versus_resampling(m):
     repair, feedback = m["headline"]["repair_gain"]["reading"], m["headline"]["feedback_gain"]["reading"]
     assert "does not by itself credit the feedback" in repair
-    assert "equal-budget resampling" in feedback and "credits feedback over retrying" in feedback
+    assert feedback == ("Repair with verifier findings (config 3) minus equal-budget resampling without feedback "
+                        "(config 7), on the same tasks: the comparison that separates the effect of feedback from "
+                        "retrying at the same budget.")
+    assert "separates the effect of feedback from retrying" in m["configs"]["7"]["role"]
+    for text in strings(m):
+        assert not any(claim in text.lower() for claim in CLAIMS), text
 
 
 def test_gains_pair_only_tasks_present_in_both_configs(rows):

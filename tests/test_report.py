@@ -61,6 +61,13 @@ def test_html_labels_dry_runs_the_baseline_and_the_reference_rows(html):
     assert "Zero observed violations in 3 executions." in html
 
 
+def test_html_makes_no_fixed_claim_that_feedback_beats_resampling(html):
+    from tests.test_metrics import CLAIMS
+    lowered = html.lower()
+    assert "separates the effect of feedback from retrying at the same budget" in html
+    assert not [claim for claim in CLAIMS if claim in lowered]
+
+
 def test_html_shows_the_headline_numbers(html):
     assert "1/5" in html and "2/5" in html  # first try (config 2) and with repair (config 3)
     assert "+20.0 pp" in html  # repair gain over the five feasible tasks

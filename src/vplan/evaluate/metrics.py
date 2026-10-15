@@ -5,7 +5,8 @@ config 3, rescored the way run_task scores a k = 0 attempt (first_round). Feasib
 refusals are separate results (D8), and every outcome stays in its denominator (spec §10). Headline sources are
 Nebius Token Factory runs only (spec §14): a Nemotron configuration that ran on any other provider is labelled a
 dry run. The repair gain (3 - 2) is reported without crediting feedback; only the feedback gain (3 - 7) compares
-feedback with retrying at the same budget (docs/related-work.md, "Claims vplan must not make").
+feedback with retrying at the same budget, and no fixed text says which way it went: only its interval can
+(docs/related-work.md, "Claims vplan must not make").
 
 Units: rates and their 95% intervals are fractions in [0, 1] and gains are differences of fractions in [-1, 1], never
 percent; every time is in seconds (keys ending in _s, or inside latency_s); tokens are provider-reported counts.
@@ -43,7 +44,10 @@ CONFIGURATIONS: dict[int, dict[str, str]] = {
     6: {"name": "Frontier, no verifier", "planner": "frontier / OpenRouter",
         "role": "optional reference; excluded from the headline"},
     7: {"name": "Equal-budget resampling (verify, up to 4 independent samples, no feedback)",
-        "planner": "Nemotron / Token Factory", "role": "credits feedback over retrying"},
+        "planner": "Nemotron / Token Factory",
+        # spec §14 words this role "credits feedback over retrying"; the report keeps it neutral until the interval
+        # says which way it went (docs/related-work.md, "Claims vplan must not make")
+        "role": "equal-budget control: separates the effect of feedback from retrying"},
 }
 NEMOTRON_CONFIGS = frozenset({1, 2, 3, 7})  # the configurations spec §14 runs on Token Factory
 # Provider names that count as Token Factory. pilot.run_live names a non-OpenRouter provider by its host, and
@@ -84,7 +88,7 @@ REPAIR_GAIN_READING = (
     "itself credit the feedback; the feedback gain (3 - 7) does that comparison.")
 FEEDBACK_GAIN_READING = (
     "Repair with verifier findings (config 3) minus equal-budget resampling without feedback (config 7), on the "
-    "same tasks: the comparison that credits feedback over retrying.")
+    "same tasks: the comparison that separates the effect of feedback from retrying at the same budget.")
 BOOTSTRAP_METHOD = "paired percentile bootstrap over tasks, 95% interval"
 
 # Every spec §14 metric (the bold names under "Metric definitions", plus "Headline sources") and the metrics.json
