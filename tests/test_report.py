@@ -224,6 +224,36 @@ def test_a_failed_replace_keeps_the_previous_files_and_leaves_no_temp_file(tmp_p
     assert sorted(p.name for p in tmp_path.iterdir()) == ["metrics.json", "report.html"]
 
 
+def test_a_briefly_locked_target_is_retried(tmp_path, rows, monkeypatch):
+    # Windows: a virus scanner or indexer can hold a just-written metrics.json (WinError 32) for a moment.
+    real_replace, calls, sleeps = os.replace, [], []
+
+    def flaky(src, dst):
+        calls.append(Path(dst).name)
+        if calls.count(Path(dst).name) <= 2:
+            raise PermissionError(13, "The process cannot access the file because it is being used")
+        real_replace(src, dst)
+    monkeypatch.setattr(report_module.os, "replace", flaky)
+    monkeypatch.setattr(report_module.time, "sleep", sleeps.append)
+    build_report(rows, tmp_path)
+    assert calls.count("metrics.json") == 3 and calls.count("report.html") == 3
+    assert len(sleeps) == 4 and all(0 < s <= 1.0 for s in sleeps)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["metrics.json", "report.html"]
+
+
+def test_a_target_that_stays_locked_fails_and_keeps_the_previous_files(tmp_path, rows, monkeypatch):
+    (tmp_path / "metrics.json").write_text("{}", encoding="utf-8")
+
+    def locked(src, dst):
+        raise PermissionError(13, "locked")
+    monkeypatch.setattr(report_module.os, "replace", locked)
+    monkeypatch.setattr(report_module.time, "sleep", lambda s: None)
+    with pytest.raises(PermissionError):
+        build_report(rows, tmp_path)
+    assert (tmp_path / "metrics.json").read_text(encoding="utf-8") == "{}"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["metrics.json"]
+
+
 def test_report_renders_one_configuration_and_a_larger_cohort(tmp_path):
     only_heuristic = build_report([r for r in ev.scenario_rows() if r.config == 5], tmp_path / "one")
     assert "not run" in only_heuristic.html.read_text(encoding="utf-8")

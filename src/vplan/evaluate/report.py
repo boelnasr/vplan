@@ -13,6 +13,7 @@ import json
 import math
 import os
 import re
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -108,6 +109,9 @@ def build_report(rows: Iterable[AttemptRow], out_dir: Path, *, title: str = "vpl
     return files
 
 
+REPLACE_RETRY_DELAYS_S = (0.05, 0.1, 0.2, 0.4, 0.8)
+
+
 def _write_atomic(path: Path, text: str) -> None:
     # Replace, never truncate in place (as pilot._write_json): readers never see a half-written file.
     tmp = path.with_name(path.name + ".tmp")
@@ -116,7 +120,15 @@ def _write_atomic(path: Path, text: str) -> None:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        for delay_s in (*REPLACE_RETRY_DELAYS_S, None):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                # Windows: a virus scanner or indexer briefly holds a file a previous build just wrote (WinError 32).
+                if delay_s is None:
+                    raise
+                time.sleep(delay_s)
     finally:
         tmp.unlink(missing_ok=True)
 
