@@ -187,7 +187,7 @@ def test_new_run_records_every_attempt_once_with_a_spec_manifest(seed_dir, tmp_p
     assert (m["n"], m["n_prepared"], m["limited"]) == (5, 5, False)
     assert m["config_hashes"] == {k: config_hash(v) for k, v in config_snapshot().items()}
     assert m["image_digest"] == "sha256:feedface" and m["timeout_s"] == 600.0
-    assert {"head", "dirty"} >= set(m["git"] or {}) and {"version", "location", "git"} <= set(m["manipulapy"])
+    assert {"head", "dirty", "source"} >= set(m["git"] or {}) and {"version", "location", "git"} <= set(m["manipulapy"])
     assert {"openai", "pybullet", "ManipulaPy", "numpy", "pydantic"} <= set(m["versions"])
     assert {"python", "os", "source_digest", "source_hashes", "created_utc"} <= set(m)
     start, end = sessions(run_dir)
