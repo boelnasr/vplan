@@ -61,6 +61,37 @@ def test_html_labels_dry_runs_the_baseline_and_the_reference_rows(html):
     assert "Zero observed violations in 3 executions." in html
 
 
+def test_html_names_every_dry_run_config_in_the_banner(html):
+    assert ("Dry run, not a headline result:</strong> config 1 (openrouter), config 2 (openrouter), config 3 "
+            "(openrouter) and config 7 (openrouter) did not run on Nebius Token Factory.") in html
+    assert "<strong>Not a headline report.</strong>" in html
+    assert "Status:</strong> not a headline result: configs 2, 3 and 7 are dry runs" in html
+
+
+def test_a_token_factory_headline_with_a_dry_config_1_says_exactly_that(tmp_path, monkeypatch):
+    stamps = []
+    real = report_module._stamp
+    monkeypatch.setattr(report_module, "_stamp", lambda configs: stamps.append(list(configs)) or real(configs))
+    rows = ev.scenario_rows(source_override={3: ev.TOKEN_FACTORY, 7: ev.TOKEN_FACTORY})
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    assert "Dry run, not a headline result:</strong> config 1 (openrouter) did not run" in page
+    assert "Not a headline report" not in page
+    assert "Status:</strong> Nebius Token Factory run (headline source)" in page
+    # Every chart stamps the dry-run configs it shows, and only those: config 1 is in the success, outcome and strata
+    # charts; the gain chart (configs 2, 3 and 7) carries no stamp.
+    assert len(stamps) == 5 and all(s in ([], [1]) for s in stamps) and stamps.count([1]) == 3
+    assert real([1]) == "\nDRY RUN (config 1): not a headline result" and real([]) == ""
+    assert real([2, 3, 7]) == "\nDRY RUN (configs 2, 3 and 7): not a headline result"
+
+
+def test_a_missing_config_7_is_named_in_the_not_headline_banner(tmp_path):
+    rows = [r for r in ev.scenario_rows(source_override={3: ev.TOKEN_FACTORY}) if r.config != 7]
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    assert "Dry run, not a headline result:</strong> config 1 (openrouter) did not run" in page
+    assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, all run on Nebius "
+            "Token Factory; here config 7 not run.") in page
+
+
 def test_html_makes_no_fixed_claim_that_feedback_beats_resampling(html):
     from tests.test_metrics import CLAIMS
     lowered = html.lower()

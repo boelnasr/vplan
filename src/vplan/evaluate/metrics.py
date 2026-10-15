@@ -50,6 +50,7 @@ CONFIGURATIONS: dict[int, dict[str, str]] = {
         "role": "equal-budget control: separates the effect of feedback from retrying"},
 }
 NEMOTRON_CONFIGS = frozenset({1, 2, 3, 7})  # the configurations spec §14 runs on Token Factory
+HEADLINE_CONFIGS = (2, 3, 7)  # a headline report needs all three, each run on Token Factory
 # Provider names that count as Token Factory. pilot.run_live names a non-OpenRouter provider by its host, and
 # docs/plan.md gives the Token Factory base URL https://api.tokenfactory.nebius.com/v1/.
 TOKEN_FACTORY_PROVIDERS = frozenset({"api.tokenfactory.nebius.com"})
@@ -114,7 +115,8 @@ SPEC14_METRICS: dict[str, tuple[str, ...]] = {
     "Breakdowns": ("configs/*/strata", "configs/*/attribution/feasible", "configs/*/attribution/observable",
                    "configs/*/cost/tokens", "configs/*/latency_s"),
     "Headline sources": ("configs/*/provenance/providers", "configs/*/provenance/models",
-                         "configs/*/provenance/headline_source", "headline/label"),
+                         "configs/*/provenance/headline_source", "configs/*/provenance/dry_run", "dry_run_configs",
+                         "headline/headline_source", "headline/label"),
 }
 
 
@@ -137,6 +139,14 @@ def _success(row: AttemptRow) -> bool:
 
 def _plural(count: int, noun: str) -> str:
     return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def config_list(configs: Sequence[int]) -> str:
+    """"config 7", "configs 2 and 3", "configs 1, 2, 3 and 7"."""
+    names = [str(c) for c in configs]
+    if len(names) < 2:
+        return "config " + "".join(names)
+    return f"configs {', '.join(names[:-1])} and {names[-1]}"
 
 
 def _median(values: Iterable[float]) -> float | None:
@@ -391,6 +401,8 @@ def _provenance(config: int, rows: Sequence[AttemptRow], headline_providers: Col
                                        for x in r.attempt.rounds if x.call.response_model}),
             "config_hashes": [json.loads(h) for h in hashes],
             "headline_source": config in NEMOTRON_CONFIGS and token_factory,
+            # Only the Nemotron configurations can be dry runs; 5 and 6 never run on Token Factory by design.
+            "dry_run": config in NEMOTRON_CONFIGS and not token_factory,
             "label": FIXED_LABELS.get(config) or (TOKEN_FACTORY_LABEL if token_factory else DRY_RUN_LABEL)}
 
 
@@ -434,8 +446,23 @@ def _gain(by_config: Mapping[int, Sequence[AttemptRow]], blocks: Mapping[str, Ma
     ran = str(x) in blocks and str(y) in blocks
     source = ran and bool(common) and all(blocks[str(c)]["provenance"]["headline_source"] for c in (x, y))
     result["headline_source"] = source
+    result["dry_run_configs"] = [c for c in (x, y) if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
     result["label"] = NOT_RUN if not ran else (TOKEN_FACTORY_LABEL if source else DRY_RUN_LABEL)
     return result
+
+
+def _headline_status(blocks: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """A headline report needs configs 2, 3 and 7, each run on Token Factory only; anything else says which of them
+    are dry runs and which are missing."""
+    dry = [c for c in HEADLINE_CONFIGS if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
+    missing = [c for c in HEADLINE_CONFIGS if str(c) not in blocks]
+    source = not dry and not missing
+    reasons = ([f"{config_list(dry)} {'is a dry run' if len(dry) == 1 else 'are dry runs'} (not on Nebius Token "
+                "Factory)"] if dry else []) + ([f"{config_list(missing)} not run"] if missing else [])
+    status = "headline" if source else "not_run" if "3" not in blocks else "dry_run" if dry else "partial"
+    return {"headline_source": source, "status": status, "dry_run_configs": dry, "missing_configs": missing,
+            "reason": "; ".join(reasons) or None,
+            "label": TOKEN_FACTORY_LABEL if source else "not a headline result: " + "; ".join(reasons)}
 
 
 def _seed_set(rows: Sequence[AttemptRow], undetermined: int | None) -> dict[str, Any]:
@@ -493,12 +520,9 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
     def success(config: int) -> dict[str, Any] | None:
         return {"config": config, **blocks[str(config)]["success"]} if str(config) in blocks else None
 
-    headline_configs = [c for c in (2, 3, 7) if str(c) in blocks]
-    source = "3" in blocks and all(blocks[str(c)]["provenance"]["headline_source"] for c in headline_configs)
     headline = {
         "seed_set": {"name": seed_set["name"], "hash": seed_set["hash"]},
-        "headline_source": source,
-        "label": NOT_RUN if "3" not in blocks else (TOKEN_FACTORY_LABEL if source else DRY_RUN_LABEL),
+        **_headline_status(blocks),
         "first_try_success": success(2), "success_with_repair": success(3),
         "repair_gain": _gain(by_config, blocks, 3, 2, REPAIR_GAIN_READING, n_boot, seed),
         "feedback_gain": _gain(by_config, blocks, 3, 7, FEEDBACK_GAIN_READING, n_boot, seed),
@@ -508,9 +532,11 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
                        "label": blocks[str(c)]["label"] if str(c) in blocks else FIXED_LABELS.get(c, NOT_RUN)}
                       for c in sorted(CONFIGURATIONS)]
     hashes = {json.dumps(r.attempt.config_hashes, sort_keys=True) for r in rows if r.attempt is not None}
+    dry_run_configs = [int(c) for c, block in blocks.items() if block["provenance"]["dry_run"]]
     return {
         "schema_version": SCHEMA_VERSION,
-        "dry_run": any(blocks[str(c)]["label"] == DRY_RUN_LABEL for c in NEMOTRON_CONFIGS if str(c) in blocks),
+        "dry_run": bool(dry_run_configs),  # some configuration is a dry run; dry_run_configs says which
+        "dry_run_configs": dry_run_configs,
         "headline": headline,
         "configurations": configurations,
         "configs": blocks,

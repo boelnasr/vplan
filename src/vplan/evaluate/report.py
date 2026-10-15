@@ -25,8 +25,8 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 from matplotlib.ticker import PercentFormatter
 
-from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CATEGORIES, CHECKS, DRY_RUN_LABEL, N_BOOT, OUTCOMES, SAFETY,
-                                    TOKEN_FACTORY_PROVIDERS, compute_metrics)
+from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CATEGORIES, CHECKS, DRY_RUN_LABEL, HEADLINE_CONFIGS, N_BOOT,
+                                    OUTCOMES, SAFETY, TOKEN_FACTORY_PROVIDERS, compute_metrics, config_list)
 from vplan.records import AttemptRow
 
 # Chart palette: the dataviz reference instance (categorical slots in fixed order, validated for adjacent pairs;
@@ -216,9 +216,18 @@ def _png(fig: Figure) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def _title(ax: Axes, text: str, dry_run: bool) -> None:
-    ax.set_title(text + ("\nDRY RUN — not a headline result" if dry_run else ""), loc="left", fontsize=11,
-                 color=INK)
+def _stamp(configs: Sequence[int]) -> str:
+    """The chart's dry-run stamp: exactly the dry-run configurations the chart shows, or nothing."""
+    return f"\nDRY RUN ({config_list(configs)}): not a headline result" if configs else ""
+
+
+def _dry(m: Mapping[str, Any], configs: Iterable[int]) -> list[int]:
+    shown = set(configs)
+    return [c for c in m["dry_run_configs"] if c in shown]
+
+
+def _title(ax: Axes, text: str, dry_configs: Sequence[int]) -> None:
+    ax.set_title(text + _stamp(dry_configs), loc="left", fontsize=11, color=INK)
 
 
 def _group(config: int) -> int:
@@ -247,7 +256,7 @@ def _success_chart(m: Mapping[str, Any]) -> str | None:
     if len(present) > 1:
         fig.legend(handles=[Patch(color=SERIES[g], label=GROUPS[g]) for g in present], loc="outside lower center",
                    ncol=len(present), frameon=False, fontsize=8)
-    _title(ax, "Feasible-task success by configuration, with 95% Wilson intervals", m["dry_run"])
+    _title(ax, "Feasible-task success by configuration, with 95% Wilson intervals", _dry(m, (c for c, _ in rows)))
     return _png(fig)
 
 
@@ -275,7 +284,7 @@ def _gain_chart(m: Mapping[str, Any]) -> str | None:
     ax.set_xlabel("difference in feasible success, percentage points", color=INK_2, fontsize=9)
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     _title(ax, "Paired differences on the same tasks, with 95% bootstrap intervals",
-           h["label"] == DRY_RUN_LABEL)
+           _dry(m, (c for _, g in gains for c in g["configs"])))
     return _png(fig)
 
 
@@ -306,7 +315,8 @@ def _outcome_chart(m: Mapping[str, Any]) -> str | None:
     ax.grid(axis="x", color=GRID, linewidth=0.8)
     fig.legend(handles=[Patch(color=SERIES[i], label=name) for i, name in enumerate(OUTCOME_SEGMENTS)],
                loc="outside lower center", ncol=4, frameon=False, fontsize=8)
-    _title(ax, "Final outcome of every feasible task (all outcomes stay in the denominator)", m["dry_run"])
+    _title(ax, "Final outcome of every feasible task (all outcomes stay in the denominator)",
+           _dry(m, (c for c, _ in rows)))
     return _png(fig)
 
 
@@ -327,7 +337,7 @@ def _check_chart(m: Mapping[str, Any]) -> str | None:
     ax.set_yticks(range(len(rows)), [SHORT_NAMES[c] for c, _ in rows])
     for side in ("left", "bottom"):
         ax.spines[side].set_visible(False)
-    _title(ax, "Verifier findings in blocked plans, by check", m["dry_run"])
+    _title(ax, "Verifier findings in blocked plans, by check", _dry(m, (c for c, _ in rows)))
     return _png(fig)
 
 
@@ -361,8 +371,7 @@ def _strata_chart(m: Mapping[str, Any]) -> str | None:
         ax.set_visible(False)
     fig.colorbar(image, ax=axes, shrink=0.8, format=PercentFormatter(1.0, decimals=0), label="feasible success")
     fig.suptitle("Feasible success by stratum (distractors × obstacles); grey cells have no tasks"
-                 + ("\nDRY RUN — not a headline result" if m["dry_run"] else ""), x=0.02, ha="left", fontsize=11,
-                 color=INK)
+                 + _stamp(_dry(m, (c for c, _ in blocks))), x=0.02, ha="left", fontsize=11, color=INK)
     return _png(fig)
 
 
@@ -394,12 +403,17 @@ def _gain_tile(label: str, g: Mapping[str, Any]) -> str:
 
 def _banners(m: Mapping[str, Any]) -> str:
     out = []
-    if m["dry_run"]:
-        providers = sorted({p for c, b in _configs(m) if b["label"] == DRY_RUN_LABEL
-                            for p in b["provenance"]["providers"]})
-        out.append(f"<strong>{_esc(DRY_RUN_LABEL.capitalize())}.</strong> Nemotron configurations ran on "
-                   f"{_esc(', '.join(providers))}, not Nebius Token Factory. Spec §14 takes headline numbers from "
-                   "Token Factory runs only.")
+    blocks = m["configs"]
+    if m["dry_run_configs"]:
+        named = [f"config {c} ({', '.join(blocks[str(c)]['provenance']['providers'])})" for c in m["dry_run_configs"]]
+        listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
+        out.append(f"<strong>{_esc(DRY_RUN_LABEL.capitalize())}:</strong> {_esc(listed)} did not run on Nebius "
+                   "Token Factory. Spec §14 takes headline numbers from Token Factory runs only.")
+    h = m["headline"]
+    if not h["headline_source"]:
+        out.append("<strong>Not a headline report.</strong> A headline report needs "
+                   f"{_esc(config_list(HEADLINE_CONFIGS))}, all run on Nebius Token Factory; here "
+                   f"{_esc(h['reason'])}.")
     short = [f"config {c}: {b['tasks']} of {b['coverage']['tasks_in_report']}" for c, b in _configs(m)
              if b["coverage"]["missing"]]
     if short:
@@ -620,7 +634,8 @@ def _notes(m: Mapping[str, Any]) -> str:
         "The Cosmos shadow study (config 4) is a separate pass over saved frames and never measures incremental "
         "success; it is not part of this report.",
         "Headline sources are Nebius Token Factory runs only (spec §14). Any Nemotron configuration that ran on "
-        f"another provider is labelled \"{DRY_RUN_LABEL}\".",
+        f"another provider is labelled \"{DRY_RUN_LABEL}\", and a report is a headline report only if "
+        f"{config_list(HEADLINE_CONFIGS)} all ran on Token Factory.",
     ]
     return "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in items) + "</ul>"
 

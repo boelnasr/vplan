@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 from tests import eval_rows as ev
 from vplan import records
-from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CHECK_CATEGORIES, DRY_RUN_LABEL, SPEC14_METRICS, MetricsError,
-                                    attribute, compute_metrics, first_round)
+from vplan.evaluate.metrics import (ATTRIBUTION_TAGS, CHECK_CATEGORIES, DRY_RUN_LABEL, SPEC14_METRICS,
+                                    TOKEN_FACTORY_LABEL, MetricsError, attribute, compute_metrics, first_round)
 from vplan.evaluate.stats import paired_bootstrap, wilson
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -311,13 +311,21 @@ def test_cost_and_latency_per_config(m):
 # ---- provenance and labels -------------------------------------------------------------------------
 
 def test_openrouter_runs_are_labelled_dry_runs(m):
-    assert m["dry_run"] is True and m["headline"]["label"] == DRY_RUN_LABEL
+    assert m["dry_run"] is True and m["dry_run_configs"] == [1, 2, 3, 7]
     for config in ("1", "2", "3", "7"):
         provenance = m["configs"][config]["provenance"]
         assert provenance["label"] == DRY_RUN_LABEL and provenance["headline_source"] is False
+        assert provenance["dry_run"] is True
         assert provenance["providers"] == ["openrouter"]
         assert provenance["models"] == ["nvidia/nemotron-3-ultra-550b-a55b:free"]
+    assert m["configs"]["5"]["provenance"]["dry_run"] is False and m["configs"]["6"]["provenance"]["dry_run"] is False
+    headline = m["headline"]
+    assert headline["headline_source"] is False and headline["status"] == "dry_run"
+    assert headline["dry_run_configs"] == [2, 3, 7] and headline["missing_configs"] == []
+    assert headline["label"] == ("not a headline result: configs 2, 3 and 7 are dry runs (not on Nebius Token "
+                                 "Factory)")
     assert m["headline"]["repair_gain"]["label"] == DRY_RUN_LABEL
+    assert m["headline"]["repair_gain"]["dry_run_configs"] == [3, 2]
     assert "baseline" in m["configs"]["5"]["provenance"]["label"]
     assert "excluded from the headline" in m["configs"]["6"]["provenance"]["label"]
     assert m["configs"]["6"]["coverage"] == {"tasks_in_report": 7, "missing": 5}
@@ -330,8 +338,27 @@ def test_token_factory_runs_are_headline_sources(rows):
     assert m["configs"]["2"]["provenance"]["headline_source"] is True
     assert m["headline"]["repair_gain"]["headline_source"] is True
     assert m["headline"]["feedback_gain"]["headline_source"] is True
-    assert m["headline"]["label"] != DRY_RUN_LABEL and m["headline"]["headline_source"] is True
+    assert m["headline"]["feedback_gain"]["dry_run_configs"] == []
+    assert m["headline"]["label"] == TOKEN_FACTORY_LABEL and m["headline"]["headline_source"] is True
+    assert m["headline"]["status"] == "headline" and m["headline"]["dry_run_configs"] == []
+    # Config 1 is an ablation outside the headline: it stays a labelled dry run without demoting the headline.
     assert m["configs"]["1"]["provenance"]["label"] == DRY_RUN_LABEL and m["dry_run"] is True
+    assert m["dry_run_configs"] == [1]
+
+
+@pytest.mark.parametrize("override, drop, dry, missing, label", [
+    ({3: ev.TOKEN_FACTORY}, (), [7], [],
+     "not a headline result: config 7 is a dry run (not on Nebius Token Factory)"),
+    ({3: ev.TOKEN_FACTORY}, (7,), [], [7], "not a headline result: config 7 not run"),
+    ({}, (7,), [2, 3], [7],
+     "not a headline result: configs 2 and 3 are dry runs (not on Nebius Token Factory); config 7 not run"),
+    ({7: ev.TOKEN_FACTORY}, (3,), [], [2, 3], "not a headline result: configs 2 and 3 not run")])
+def test_a_headline_report_needs_configs_2_3_and_7_all_on_token_factory(override, drop, dry, missing, label):
+    rows = [r for r in ev.scenario_rows(source_override=override) if r.config not in drop]
+    headline = compute_metrics(rows)["headline"]
+    assert headline["headline_source"] is False and headline["label"] == label
+    assert headline["dry_run_configs"] == dry and headline["missing_configs"] == missing
+    assert headline["status"] == ("not_run" if 3 in drop else "dry_run" if dry else "partial")
 
 
 def test_one_openrouter_attempt_makes_a_config_a_dry_run():
