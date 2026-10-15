@@ -1435,3 +1435,75 @@ The owner chose the intent check over a demo-only instruction screen and an offl
   - Feasible tasks are spread as evenly as possible over the 16 cells of distractor count × obstacle count (0–3 each).
   - `dev` candidate seeds start at 0; `test` candidate seeds start at 10,000,000, a range no earlier experiment used.
   - `test` is generated only after the W3.3 freeze (spec §6).
+
+## D52. The Judge scores attempted impossible tasks (D48 implemented, 2026-10-15)
+
+- **Judge.** With outcome "executed" and `feasible=False`, `judge.judge` keeps S1, S2 and V1–V4 and their details exactly as computed. It then appends R=False as the last predicate, adds "R" after the contact violations (still capped at 20) and sets `details["refusal"] = "impossible task attempted"`, so success is False. This matches the removed `repair._attempted_impossible` in content and key order.
+- **Evidence that behaviour is unchanged:**
+  - a 10-case test compares a copy of the old wrapper with the new Judge on the same `ExecutionRecord` (equality and identical JSON);
+  - an end-to-end test (feasible, type 1, absent referent) checks that `run_task` records what the old scoring gave;
+  - a scratch run of 32 identical inputs through the old and new code was byte-identical except for the pilot refusal below.
+- **Custom evaluators** passed to `run_task` own their Judge call and must pass `feasible=False` on an impossible task. `run_task` validates every evaluation on an impossible task: an executed result with success=True, or without R=False, raises inside the round and is recorded as `sim_error`, so it is never a success.
+- **Pilot refusal record.** `evaluate_pair` built its own refusal `JudgeResult`; it now calls the Judge's refusal branch. success=False and predicates {"R": False} are unchanged. Violations go from ("R",) to (), and details go from {"reason": …} to {"refusal": "false refusal on a feasible task"}. The pilot reads only `judge.success`, so pilot outcomes and reports are unchanged, and old saved results still load.
+- **Guard:** an AST test fails if any module outside `vplan/judge` builds a `JudgeResult`, next to the D21 independence test.
+- **Open (owner, before the W3.3 freeze):** the Judge lists "R" in violations for an attempted impossible task but not for a false refusal. The W3.2 metrics count refusal errors from outcome and `predicates["R"]`, so this is cosmetic. Making it consistent would change saved records.
+
+## D53. W3.1 seed sets and the evaluation runner (2026-10-15)
+
+**Seed sets** (`vplan eval prepare --seeds dev|test`, `src/vplan/evaluate/seedsets.py`):
+- New records instead of widening `TaskMetadata.split` (which stays `"dev"` for the pilot generator): `Split`, `SeedSetTask` (planner-visible, with a validator tying the distractor and obstacle counts to the scene), `SeedSetOracle` (private) and `SeedSetExclusion`.
+- The D51 mix. Feasible slots cycle through the 16 cells in diagonal order, `((d, (d+k) % 4) for k, then d)`, so every distractor and obstacle margin stays within one task. Impossible slots are spread over types 1–4, lower types first. Any prefix (`eval run --n`) is a stratified sample. `--feasible` and `--impossible` override the counts together.
+- Candidates are consumed one at a time from the D51 bases (dev 0, test 10,000,000). A failed candidate goes to `exclusions.jsonl` and the next seed fills the same slot; the default limit is 2n + 20. Hitting it writes no manifest, so the directory never loads. Task IDs are `{split}_{seed:08d}`.
+- `seed_set_hash = sha256("vplan-seed-set-v1:" + sha256(tasks.jsonl) + ":" + sha256(oracle.jsonl))`. Seed-set files are written with LF on every OS, so the hash is OS-independent. Pilot cohorts keep platform newlines, so their file hashes differ between Windows and Linux; the pilot is development-only, so this is left as is.
+- `--seeds test` refuses without `--allow-test-split` (spec §6: generated only after the W3.3 freeze). `--seeds S` defaults to `runs/seeds/S`.
+
+**Runner** (`vplan eval run --config N --seeds dev|test [--n N]`, `src/vplan/evaluate/runner.py`):
+- Configs: 1 = Nemotron, unverified, k=0; 3 = Nemotron, repair, k=3; 5 = heuristic, repair, k=3; 6 = frontier, unverified, k=0; 7 = Nemotron, resample, k=3. Configs 2 and 4 are refused with their reasons. Config 5 refuses LLM options. Config 6 needs `--model` and `--allow-paid`. The others use the D33 guard. Temperature defaults to 0.7.
+- The run directory is `runs/c<config>-<split>-<UTC stamp>/`:
+  - `manifest.json`, written once;
+  - `sessions.jsonl`, with start and end lines per session;
+  - `attempts.jsonl`, one `EvalAttempt` per finished attempt, written only by the parent and fsynced.
+  There is no `frames/` yet; replay renders frames from the recorded streams (D41).
+- **Key handling:** the parent reads only `LLM_BASE_URL` and `LLM_MODEL`. Each worker reads the key from the env-file path itself, so the key never reaches params, results, logs, manifest or rows.
+- **Worker files** are named by task index, plus `.sS` in resumed session S, so a resumed attempt never shares files with an orphaned worker. This is a change from D42's batch index.
+- **Resume:** every recorded row counts as completed, including service failures and `sim_error`, so they stay in the denominator (D33); resume never re-runs only the failures. It refuses a changed config, split, mode, k, planner, `--n`, seed-set hash, config hashes or source (unless `--allow-source-drift`).
+- **Stop rules** are counted per request, answering D42's open question: a 401/402/403/404 stops at once, and so do three consecutive service-failure requests.
+- **Timeouts and pacing:** the per-attempt timeout stays 600 s (four 60 s calls plus simulation). `--max-rpm` turns on a minimum spacing between requests and is off by default: at the R4 median of 34 s per call, a sequential run stays under 2 requests per minute. Exit codes: 0 complete, 1 incomplete, 2 refused, 130 interrupted.
+
+**Acceptance (R10 part 2, Windows Python):**
+- A 50-task dev set (38 feasible + 12 impossible) was prepared three times with byte-identical files.
+- A config-5 run finished 50/50 with no duplicate or missing IDs: 38 executed (all Judge successes), 9 correct refusals (types 1, 2, 4), and 3 `budget_exhausted` (type 3, repeat plans as D39 predicts).
+- A second run was killed after 21 rows and resumed to 50/50 with identical outcomes.
+
+**Known limits, to settle before the final runs:**
+- Git SHAs are null in manifests made in a git worktree (Windows git cannot follow the WSL gitdir), so final runs start from the main checkout.
+- Nothing stops a second parent from appending to `attempts.jsonl` during a resume.
+- A hard kill of the parent orphans the in-flight worker.
+- Worker result files duplicate each record: about 37 MB per 50 attempts.
+- The Windows interpreter's ManipulaPy metadata says 1.4.1 (stale editable install) against the 1.4.2 pin, and the run manifests record that.
+
+## D54. W3.2 statistics, metrics and report (2026-10-15)
+
+- `wilson(k, n)`: (0.397, 0.892) for k=7, n=10. `wilson(k, 0) = (0, 1)`, and metrics.json reports null rates and intervals when N = 0.
+- `paired_bootstrap(a, b, n_boot=10000, seed=0)`: NumPy PCG64, tasks resampled with replacement, 2.5th and 97.5th percentiles. Both gains pair only feasible tasks present in both configs and report the unpaired counts.
+- **Input contract:** `records.AttemptRow`, one frozen row per (config, task) of one seed set. Validators tie outcome to record, provider and model to every planner call, and configs 1, 2, 3 and 7 to their mode and k. Config 2 is never run: `first_round` derives it from round 1 of config 3, ending the attempt exactly as `run_task` does at k=0.
+- **Headline source:** a Nemotron config counts as Token Factory only when every row's provider host is Token Factory's. Otherwise it is labelled "dry run, not a headline result". Configs 4, 5 and 6 carry fixed limitation labels, and the heuristic (config 5) is highlighted.
+- **Wording:** the repair gain (3 − 2) is described as including the extra attempts, never as credit for feedback. Only the feedback gain (3 − 7) compares feedback with retrying.
+- **Refusals:** each task's final decision is refused, attempted or no_decision, giving a feasible/impossible × decision confusion matrix. Refusal reasons are scored against the proof's reason by impossibility type (D40).
+- **Safety:** counted over every executed attempt with a Judge result. Body pairs are grouped by kind; the Judge's 20-contact cap can undercount pairs but not V1–V4. "Zero observed violations in M executions" appears only when every counted execution carries all four predicates.
+- **Blocked plans:** `ik_accuracy` and `continuity` count as solver non-convergence, `visual` as learned visual, and the other checks as physical constraint. Grounding (unknown target, place not over the bin) therefore counts as physical constraint, although it is closer to plan semantics. Malformed output, protocol errors and service failures are counted apart from blocked rounds.
+- **Attribution** (spec §10), from the final round:
+  - `sim_error` is a verifier/sim issue;
+  - a service failure or a missing record is unknown;
+  - a false refusal, `malformed_final` or a plan that exhausted the budget is the LLM plan's;
+  - a Judge failure after a gate pass is a gate/execution discrepancy, unless a wrong target or an impossible task explains it.
+- `report.html` is a pure function of `metrics.json`: charts on an explicit Agg canvas as base64 PNGs, no external resources, "://" escaped, both files written atomically. Units: fractions, seconds, provider-reported tokens.
+
+## D55. R8 local container files; the image build waits for Docker (2026-10-15)
+
+- `docker/Dockerfile`: `python:3.10.22-slim-trixie`, pinned by index digest `sha256:6ff50646…e31d` (it was `python:3.10-slim` on 2026-10-15). linux/amd64 only, because pybullet 3.2.7 has no aarch64 cp310 wheel; it does have an x86_64 one, so no builder stage is needed.
+- Dependencies: `docker/requirements.txt` is `uv export --frozen --format requirements.txt --extra dev --no-emit-project` of `uv.lock`, with hashes. pip installs it with `--require-hashes --no-deps --only-binary=:all:`. `tests/test_docker.py` checks that the export equals `uv.lock` and honours every pin in `pyproject.toml`; it will fail when `gradio` lands until the export is redone, which is intended.
+- The package runs from `/app/src` via `PYTHONPATH`, so `config/` sits next to the sources as in development. The tree is root-owned, read-only to the non-root user `vplan` (uid 10001).
+- `.dockerignore` is an allowlist; env files are dropped at any depth.
+- `docker/run-local.sh` runs both containers with `--network none` and never mounts or passes an env file. `VPLAN_IMAGE_DIGEST` is the local image ID, and the git revision is an image label. The image has no git, so manifests made inside it have a null git field.
+- **Not yet run:** Docker is not installed (D51). A Linux-native stand-in passed the full suite: uv's CPython 3.10.21 with the locked wheels, on a read-only copy of the build context. That stand-in included the supervisor's kill and timeout tests, which closes D42's "never tested on Linux-native Python". The same stand-in prepared 10/10 pilot tasks, byte-identical to Windows apart from line endings. R8 local stays open until `docker/run-local.sh` has run.
