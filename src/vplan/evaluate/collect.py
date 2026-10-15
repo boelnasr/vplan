@@ -28,7 +28,10 @@ from vplan.evaluate.report import ReportFiles, build_report
 from vplan.evaluate.seedsets import EvalError, SeedSet, load_seed_set
 from vplan.records import AttemptRow, EvalAttempt
 
-MANIFEST_KEYS = ("config", "split", "seed_set_hash", "provider", "model", "n", "n_prepared")
+# The run-manifest fields the loader uses, with their types: a hand-edited manifest is refused here with a message,
+# not deeper in with a TypeError.
+MANIFEST_KEYS: dict[str, type] = {"config": int, "split": str, "seed_set_hash": str, "provider": str, "model": str,
+                                  "n": int, "n_prepared": int}
 
 __all__ = ["Collected", "EvalError", "build", "collect_runs", "read_run_manifest"]
 
@@ -56,6 +59,10 @@ def read_run_manifest(run_dir: Path) -> dict[str, Any]:
     missing = [key for key in MANIFEST_KEYS if key not in manifest]
     if missing:
         raise EvalError(f"{path} lacks required keys: {', '.join(missing)}")
+    for key, kind in MANIFEST_KEYS.items():
+        value = manifest[key]
+        if not isinstance(value, kind) or isinstance(value, bool):
+            raise EvalError(f"{path}: {key} must be {'an integer' if kind is int else 'a string'}, got {value!r}")
     return manifest
 
 
@@ -66,7 +73,8 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
     where = f"{run_dir.name}/attempts.jsonl"
     rows, seen = [], set()
     with open(path, "rb") as f:
-        for number, line in enumerate(f, 1):  # streamed: a test-split file holds hundreds of MB of records
+        # Read line by line, but every row keeps its whole AttemptRecord, replay streams included (D41).
+        for number, line in enumerate(f, 1):
             try:
                 attempt = EvalAttempt.model_validate_json(line)
             except ValidationError as exc:
@@ -124,8 +132,11 @@ def collect_runs(run_dirs: Sequence[str | Path], seed_dir: str | Path | None = N
     if seeds.seed_set_hash != run_hash:
         raise EvalError(f"the seed set in {seed_dir} has seed-set hash {seeds.seed_set_hash[:12]}, but the runs were "
                         f"made on {str(run_hash)[:12]}")
+    excluded = seeds.manifest.get("excluded")  # not among the W3.1 loader's required keys
+    if not isinstance(excluded, int) or isinstance(excluded, bool) or excluded < 0:
+        raise EvalError(f"the seed set in {seed_dir} does not record its excluded candidates as a count: {excluded!r}")
     rows = [row for d, m in zip(dirs, manifests) for row in _rows(d, m, seeds)]
-    return Collected(rows, manifests, seeds, seeds.manifest["excluded"], seeds.manifest["n"])
+    return Collected(rows, manifests, seeds, excluded, seeds.manifest["n"])
 
 
 def build(run_dirs: Sequence[str | Path], output: str | Path, seed_dir: str | Path | None = None

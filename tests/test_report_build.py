@@ -180,6 +180,31 @@ def test_a_run_directory_without_a_valid_manifest_is_refused(runs, tmp_path, dam
         collect.collect_runs([runs[5], bad])
 
 
+@pytest.mark.parametrize("key, value", [("n", "5"), ("n", True), ("n_prepared", None), ("config", 5.0),
+                                        ("seed_set_hash", ["ab"]), ("split", 1), ("provider", None),
+                                        ("model", {"name": "x"})])
+def test_a_manifest_field_of_the_wrong_type_is_refused_before_it_is_used(runs, tmp_path, key, value):
+    # A hand-edited manifest must give the exit-2 message, not a TypeError traceback from the loader.
+    from vplan.evaluate import collect
+    run_dir = _copy_run(runs[5], tmp_path / "c5")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    (run_dir / "manifest.json").write_text(json.dumps({**manifest, key: value}), encoding="utf-8")
+    with pytest.raises(collect.EvalError, match=f"{key} must be"):
+        collect.collect_runs([run_dir])
+
+
+def test_a_seed_set_without_an_excluded_count_is_refused(runs, seed_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import collect, seedsets
+    real = seedsets.load_seed_set
+
+    def without_excluded(path, **kw):
+        seeds = real(path, **kw)
+        return seeds._replace(manifest={k: v for k, v in seeds.manifest.items() if k != "excluded"})
+    monkeypatch.setattr(collect, "load_seed_set", without_excluded)
+    with pytest.raises(collect.EvalError, match="excluded"):
+        collect.collect_runs([runs[5]], seed_dir=seed_dir)
+
+
 def _copy_run(run_dir, dest):
     dest.mkdir()
     for name in ("manifest.json", "attempts.jsonl"):
