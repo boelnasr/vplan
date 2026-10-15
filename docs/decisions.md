@@ -1546,3 +1546,40 @@ The owner chose the intent check over a demo-only instruction screen and an offl
 - The W3.4 Jobs smoke test and R8's "results return via Object Storage" are dropped. R8 local (the container run) stays: it is now the reproducible environment for the batch.
 - The hackathon requirement ("must run on Nebius Token Factory or Nebius AI Cloud") is met by Token Factory serving Nemotron for the live demo and the W3.0 smoke test. The rules suggest Serverless Jobs; they do not require them.
 - Spec §18's final-stage line is superseded by this entry.
+
+## D58. The Codex close-week2-gaps fixes, ported (2026-10-15)
+
+The owner's Codex worktree held four uncommitted fixes written against `dcb5d7b`. They were exported with line endings normalised, ported onto `main`, and reviewed against the current code. The Codex worktree itself was not touched.
+1. **Cosmos outage warning (D47).** The CLI gate wrapper prints and flushes "COSMOS UNAVAILABLE - proceeding on the geometric checks only" as soon as the gate reports unavailable, before execution. The result block prints only "cosmos gate: unavailable" and never claims "executed" for an attempt that ended as `stale_approval` or `sim_error`.
+2. **Malformed streak (amends D40).** "Two malformed replies in a row" now means adjacent rounds: any non-malformed round, including a protocol error, resets the streak. After a protocol error, the next request uses another protocol and carries that round's errors, so it is not a schema retry of the earlier reply.
+   - Only one sequence changes outcome: a k=3 attempt whose rounds 0–2 are malformed, protocol error, malformed. It used to end as `malformed_final` after 3 calls; now round 3 decides.
+   - This applies to `run_task` and to both pilot arms (shared `_continue`), superseding D40's "pilot behaviour unchanged" for that sequence. None of the 256 saved pilot and W3.1 sequences contains a protocol error, so no saved result changes.
+   - `metrics.first_round` (config 2) is unaffected; a 13th case pins it to `run_task(k=0)`.
+3. **Config-1 budget (amends D48's "run_task still defaults to k=3").** `run_task`'s k defaults to 0 for unverified and 3 otherwise. Unverified with k ≠ 0, or a k that is not a real int, is refused before any planner call. The W3.1 runner already passed k explicitly.
+4. **Rotated-grasp rendering (amends D47's simplification).** In rendered pre-release frames, each finger opens to the object's half-extents projected on the TCP closing axis, which is `capture_check`'s half-width, instead of min(size x, size y)/2. This matters now that frames feed the shadow study (D59).
+5. **Benchmark provenance.** `scripts/spikes/cylinder_contact.py` output gains a provenance block: git, versions, config snapshot and hashes, seeds, source hashes and a ManipulaPy source digest. The absolute ManipulaPy path Codex recorded is dropped, because this output is committed under `docs/evidence` (D56: no local paths).
+
+## D59. Evaluation provenance hardening (2026-10-15)
+
+Prompted by the owner's review and the open items of D56:
+- **Headline split (spec §14).** A report gets headline status only if its seed set is `test`, on top of D56's rule (configs 2, 3 and 7 present, complete, unlimited, on Token Factory). Otherwise the reason "development seeds, not the held-out test set" is named. `report build` also refuses a run whose manifest split differs from the seed set's.
+- **Git provenance never silently null** (`gitinfo.git_provenance` → {head, dirty, source}). Sources in order:
+  1. the git command;
+  2. the repository files: the `.git` file's gitdir with `/mnt/<d>/` → `<D>:/` on Windows, commondir, loose refs, packed-refs; dirty is null;
+  3. `VPLAN_GIT_SHA` / `VPLAN_GIT_DIRTY`, for the vplan checkout only, set by `docker/run-local.sh` from the host.
+  - `eval run` refuses to start or resume without a SHA unless `--allow-no-git`, which is recorded.
+  - Seed-set preparation and the pilot record the same dict but do not refuse.
+  - This resolves D53's null SHAs in worktrees. In a worktree the dirty flag stays null, so final runs start from the main checkout.
+- **Frames for the shadow study (supersedes D53's "no frames/ yet").** Every executed round of config 3 (by default; `--frames`/`--no-frames` override, and resume refuses a change) gets 9 key frames: pre-grasp, grasp and pre-release × front-oblique, top and side, 512×512.
+  - They are rendered by the worker after the result is final, from the rebuilt trajectory. It must reproduce the recorded approval token, or the export fails.
+  - Files go to `frames/<attempt stem>/` with an `index.json` holding sha256s and the scene, plan and approval hashes.
+  - A failed export is recorded and never fatal. About 1.3 s and 0.18 MB per executed attempt.
+  - `vplan eval shadow` (week 4) reads these. Its state-predicate truth comes from the seed set's oracle at shadow time.
+- **Report wall time** excludes the frame export (`EvalAttempt.wall_s − render_s`), so config 3's latency is comparable with configs 5 and 7. `attempts.jsonl` keeps the supervisor's raw time.
+- **D42 amendment (owner to confirm).** A job may return an after-step that the worker runs once the result file is written. A try that times out after writing its result keeps that result instead of becoming `worker_timeout`.
+- **D56 items closed:**
+  - the D33 "DEGRADED: n service failures" title prefix, with failures by HTTP status;
+  - `report build` refuses (exit 2) an `--output` that is a file, and a run manifest whose n disagrees with the seed set;
+  - report rows drop the replay streams that metrics never reads: peak working set 158 → 90 MB for 20 rows, with metrics.json byte-identical.
+- **Windows file lock.** On `report build`, `os.replace` failed in 2 of 5 back-to-back builds with WinError 32 (a scanner holding the new file). Replacing now retries five times (0.05–0.8 s apart) on `PermissionError` only. 8 of 8 back-to-back builds then succeeded.
+- **Still open:** `vplan eval shadow` (week 4); `report build` refuses seed sets prepared before a later configuration change (relevant after W3.3); the cosmetic R-in-violations asymmetry (D52).

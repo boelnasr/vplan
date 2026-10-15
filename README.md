@@ -144,7 +144,9 @@ python -m vplan report build --run runs/<c3_run> --run runs/<c7_run> --run runs/
 
 - Each run directory holds `manifest.json` (code, config and seed-set hashes, versions, provider and model), `sessions.jsonl` and `attempts.jsonl`, written only by the supervising parent. The API key never reaches any of them.
 - **Resume** counts every recorded attempt, including provider failures, so failures stay in the denominator. It refuses a changed config, model or seed set.
-- **The report labels its own status:** INCOMPLETE and LIMITED runs, and a "dry run, not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.
+- **Provenance:** every manifest records the git commit (read from `.git` directly when the git command is unavailable); `eval run` refuses to start without one unless `--allow-no-git`.
+- **Frames:** config 3 saves 9 key frames per executed attempt under `frames/` for the Cosmos shadow study (`--frames`/`--no-frames` to change). Report wall times exclude the rendering.
+- **The report labels its own status:** INCOMPLETE, LIMITED and DEGRADED (provider failures) runs, and a "not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.
 - **Container (R8):** `docker/run-local.sh` builds the locked Linux image and runs the test suite and 10 tasks inside it, with no network and no env file.
 
 ## Repository layout
