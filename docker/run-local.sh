@@ -30,7 +30,8 @@ docker build --progress=plain --file "${root}/docker/Dockerfile" --build-arg "VP
     --tag "${image}" "${root}" 2>&1 | tee "${out}/build.log"
 build_s=$(( SECONDS - build_start ))
 docker image inspect "${image}" > "${out}/image.json"
-# The local image ID (sha256 of the image config). The W3.1 runner records it in its manifest (spec §14).
+# The local image ID, a content digest (an image built here has no registry digest until it is pushed).
+# The W3.1 runner records it in its manifest (spec §14).
 digest="$(docker image inspect --format '{{.Id}}' "${image}")"
 
 status=0
