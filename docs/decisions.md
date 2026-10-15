@@ -1528,3 +1528,16 @@ The owner chose the intent check over a demo-only instruction screen and an offl
   - D33's "DEGRADED: n service failures" prefix is missing.
   - An `--output` that names an existing file ends in a traceback.
   - A configuration change after W3.3 makes `report build` refuse older seed sets.
+
+## D57. Token Factory credit is reserved for the demo (2026-10-15)
+
+- **Owner's ruling.** The hackathon program accepted the owner's application and grants **$25** of Token Factory credit (one grant, not the "$25 + $25" D30 assumed). It is kept for the demo only.
+- **Estimated spend** at the listed $1.00 / $3.00 per 1M tokens (D30; confirm in the console). A plan uses about 1.1–1.8k completion tokens (D13) plus roughly 4k input tokens, so a call costs about one cent.
+  - W3.0 smoke test (about 20 calls): about $0.20.
+  - Demo: up to 4 calls per attempt, so even 50 recorded attempts stay around $1–2.
+  - One full `test` pass of configs 1, 3 and 7 (up to about 3,600 calls): roughly $15–30. It does not fit next to the demo.
+- **W3.0 is unblocked:** the smoke test now protects the demo (forced tool calls on Ultra are still unverified on Token Factory, D13). It runs only with the owner's OK and after the model ID is re-checked in the catalog (model churn).
+- **Conflicts to settle (owner):**
+  - Spec §14 says headline numbers come from Token Factory runs only, and D56 labels everything else a dry run. With the evaluation off Token Factory, either the headline source changes (for example, the same model on OpenRouter with the provider named), or the report carries no headline.
+  - Spec §18 runs the final `test` batch on Serverless Jobs with Nemotron on Token Factory. The credit is for tokens; Jobs compute is unfunded, so the batch would run locally or in the R8 container.
+  - The OpenRouter free variant's daily cap may not allow about 3,600 calls in one day (W3.6).
