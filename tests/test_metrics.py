@@ -372,6 +372,15 @@ def test_rows_take_the_seed_set_scene_counts_so_enclosure_panels_count_as_obstac
     assert compute_metrics([enclosed])["configs"]["3"]["impossible"] == 1
 
 
+@pytest.mark.parametrize("field, value", [("distractors", 0), ("distractors", 2), ("obstacles", 0), ("obstacles", 2)])
+def test_rows_reject_scene_counts_that_differ_from_the_task_scene(field, value):
+    # As W3.1's SeedSetTask: the counts are the scene's objects besides one and its obstacle boxes, never free labels.
+    good = ev.row(3, 0, ev.FEASIBLE, None, outcome="sim_error", distractors=1, obstacles=1)
+    assert (len(good.task.scene.objects) - 1, len(good.task.scene.obstacles)) == (1, 1)
+    with pytest.raises(ValidationError, match="scene"):
+        records.AttemptRow.model_validate({**good.model_dump(), field: value})
+
+
 @pytest.mark.parametrize("distractors, obstacles", [(4, 0), (0, 4)])
 def test_feasible_rows_must_sit_in_a_stratum(distractors, obstacles):
     with pytest.raises(ValidationError, match="strat"):

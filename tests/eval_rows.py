@@ -7,6 +7,7 @@ simulation, network or model calls.
 from __future__ import annotations
 
 import random
+from functools import lru_cache
 
 from vplan import records
 from vplan.config import config_snapshot
@@ -17,6 +18,24 @@ from vplan.tasks.scenes import make_basic_scene
 SCENE = make_basic_scene(with_obstacle=True)  # cube_red (the target), cube_green, obstacle wall_1
 SPEC = records.TaskSpec(instruction="put the red cube in the bin", scene=SCENE, robot_facts=records.RobotFacts(
     base_pose=SCENE.robot_base, reach_bound_m=0.9489, gripper_opening_m=0.08, table_height_m=0.0))
+_COLORS = ("blue", "yellow", "purple", "orange")
+
+
+@lru_cache(maxsize=None)
+def spec_for(distractors: int, obstacles: int) -> records.TaskSpec:
+    """SPEC with its scene cut or padded to the given counts (cube_red stays the target; cube_green and wall_1 come
+    first), so a row's scene counts are the scene's own, as AttemptRow requires. Nothing is simulated, so the extra
+    bodies only need distinct ids."""
+    red, green = SCENE.objects
+    extra = tuple(green.model_copy(update={"id": f"cube_{i}", "color": _COLORS[i % len(_COLORS)],
+                                           "pose": records.Pose(position=(0.35 + 0.05 * i, -0.30, 0.02))})
+                  for i in range(max(0, distractors - 1)))
+    walls = tuple(records.Obstacle(id=f"box_{i}", half_extents=(0.02, 0.02, 0.05),
+                                   pose=records.Pose(position=(0.30 + 0.05 * i, 0.45, 0.05)))
+                  for i in range(max(0, obstacles - 1)))
+    scene = SCENE.model_copy(update={"objects": ((red, green) + extra)[:1 + distractors],
+                                     "obstacles": (SCENE.obstacles + walls)[:obstacles]})
+    return SPEC.model_copy(update={"scene": records.Scene.model_validate(scene.model_dump())})
 GOOD = heuristic_geometry(SCENE, "cube_red")  # the canonical plan, which the feasible oracle's witness used
 FIXED = GOOD.model_copy(update={"transport_via": ((0.5, -0.15, 0.30), (0.45, 0.28, 0.30))})  # a changed repair
 WRONG = heuristic_geometry(SCENE, "cube_green")  # a plan for the wrong object
@@ -104,7 +123,8 @@ def row(config, index, oracle, rec=None, *, source=None, outcome=None, distracto
         error_type=None, wall_s=None, seed_set="test", seed_set_hash=SEED_SET_HASH) -> records.AttemptRow:
     provider, model = source or SOURCES[config]
     return records.AttemptRow(config=config, seed_set=seed_set, seed_set_hash=seed_set_hash, task_index=index,
-                              task_id=f"{seed_set}_{index:04d}", task=SPEC, oracle=oracle, distractors=distractors,
+                              task_id=f"{seed_set}_{index:04d}", task=spec_for(distractors, obstacles), oracle=oracle,
+                              distractors=distractors,
                               obstacles=obstacles, outcome=outcome or rec.outcome, attempt=rec, provider=provider,
                               model=model, error_type=error_type, wall_s=wall_s)
 

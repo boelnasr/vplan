@@ -553,6 +553,8 @@ class AttemptRow(Frozen):
     def _consistent(self) -> "AttemptRow":
         if self.oracle.feasibility == "feasible" and not (self.distractors <= 3 and self.obstacles <= 3):
             raise ValueError(f"a feasible task sits in a 0-3 x 0-3 stratum, not ({self.distractors}, {self.obstacles})")
+        if (self.distractors, self.obstacles) != (len(self.task.scene.objects) - 1, len(self.task.scene.obstacles)):
+            raise ValueError("distractor and obstacle counts must match the scene")  # as SeedSetTask checks them
         a = self.attempt
         if a is None:
             if self.outcome in ("executed", "refused"):
