@@ -590,7 +590,8 @@ def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int],
     """The report's standing, as the pilot titles it (D33): INCOMPLETE when a run recorded fewer rows than it
     planned, LIMITED when a run covered only an --n prefix (never complete), DEGRADED: n service failures when any
     provider request failed (they stay in the denominators; degraded counts them per configuration and by HTTP
-    status), and DRY RUN naming every configuration that did not run on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
+    status), and DRY RUN naming every configuration that did not run on Token Factory. complete is None when no run
+    manifest was supplied (coverage unknown)."""
     incomplete = [{"config": r["config"], "recorded": r["recorded"], "planned": r["planned"]}
                   for r in runs if r["incomplete"]]
     limited = [{"config": r["config"], "planned": r["planned"], "prepared": r["prepared"]}
