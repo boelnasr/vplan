@@ -503,6 +503,22 @@ def test_frames_that_were_not_exported_are_recorded_as_failed_and_the_attempt_st
     assert row.frames.render_s is None  # unknown: report rows then have no wall time (evaluate.collect)
 
 
+def test_the_frames_of_a_rejected_record_are_not_evidence(seed_dir, tmp_path):
+    # The row becomes sim_error/invalid_attempt_record, so frames on disk for it must not read as a written export.
+    class Tampered(FakeSupervise):
+        def __call__(self, job, stem, **kwargs):
+            out = super().__call__(job, stem, **kwargs)
+            record = {**out.payload["record"], "attempt_id": "5:dev:99"}
+            return records.SupervisedAttempt.model_validate({**out.model_dump(),
+                                                             "payload": {**out.payload, "record": record}})
+    run(seed_dir, tmp_path, fake=Tampered(extra={"frames": WRITTEN}), frames=True, n=1)
+    (row,) = rows(tmp_path / "run")
+    assert row.outcome == "sim_error" and row.error_type == "invalid_attempt_record" and row.record is None
+    assert (row.frames.status, row.frames.error_type, row.frames.index, row.frames.files) == (
+        "failed", "record_rejected", None, 0)
+    assert (row.frames.render_s, row.frames.bytes) == (WRITTEN["render_s"], WRITTEN["bytes"])  # still on disk
+
+
 def test_an_attempt_without_a_record_has_no_frame_export(seed_dir, tmp_path):
     run(seed_dir, tmp_path, fake=FakeSupervise(["crash"]), frames=True, n=1)
     (row,) = rows(tmp_path / "run")

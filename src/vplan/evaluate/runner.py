@@ -374,7 +374,8 @@ def _frames(supervised: SupervisedAttempt, requested: bool) -> FrameExport | Non
 
 def _row(supervised: SupervisedAttempt, config: EvalConfig, split: str, index: int, task_id: str, session: int,
          config_hashes: dict[str, str], frames: bool = False) -> EvalAttempt:
-    """The attempts.jsonl row; a record that does not belong to this attempt and run becomes sim_error."""
+    """The attempts.jsonl row; a record that does not belong to this attempt and run becomes sim_error, and its frame
+    export failed (record_rejected)."""
     common = dict(attempt_id=supervised.attempt_id, config=config.number, split=split, task_index=index,
                   task_id=task_id, session=session, tries=supervised.tries, wall_s=supervised.wall_s,
                   exit_code=supervised.exit_code, status_code=supervised.status_code,
@@ -395,6 +396,11 @@ def _row(supervised: SupervisedAttempt, config: EvalConfig, split: str, index: i
             if (record.mode, record.k) != (config.mode, config.k) else
             "config hashes differ from the run's snapshot" if record.config_hashes != config_hashes else None)
     if problem is not None:
+        exported = common["frames"]
+        if exported is not None and exported.status != "failed":  # frames of a rejected record are not evidence
+            common["frames"] = FrameExport(status="failed", bytes=exported.bytes, render_s=exported.render_s,
+                                           error_type="record_rejected", error_message="the attempt's record was "
+                                           "rejected (invalid_attempt_record), so its frames are not evidence")
         return EvalAttempt(**common, outcome="sim_error", error_type="invalid_attempt_record", error_message=problem)
     return EvalAttempt(**common, outcome=record.outcome, record=record)
 

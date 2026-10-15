@@ -685,7 +685,8 @@ class FrameExport(Frozen):
 
     written: every executed round's frames and the index (index is the run-directory-relative POSIX path); none: no
     round was executed, so there is nothing to render; failed: nothing usable was written (error_type says why; the
-    attempt's outcome is unaffected). bytes is the disk use of the PNGs and index; render_s is the export's wall
+    attempt's outcome is unaffected), or the runner rejected the attempt's record (record_rejected), so frames it
+    wrote are not evidence. bytes is the disk use of the PNGs and index; render_s is the export's wall
     time as the worker measured it, s, or None when the export did not report it (the worker crashed, hung or raised
     in its after step, or reported an invalid export). Report rows subtract it from the attempt's wall_s."""
     status: Literal["written", "none", "failed"]
