@@ -193,6 +193,8 @@ def test_this_checkout_resolves_a_sha_and_names_its_source():
 def test_the_repo_helper_reads_the_environment_but_other_checkouts_do_not(tmp_path, monkeypatch):
     from vplan.evaluate import pilot
     monkeypatch.setenv("VPLAN_GIT_SHA", SHA_C)
+    # docker/run-local.sh passes the host's dirty flag into the container; the test must not read it.
+    monkeypatch.delenv("VPLAN_GIT_DIRTY", raising=False)
     monkeypatch.setattr(gitinfo, "_from_git", lambda cwd, run: None)
     monkeypatch.setattr(gitinfo, "_from_files", lambda cwd, windows: None)
     assert pilot._git() == {"head": SHA_C, "dirty": None, "source": "env"}
