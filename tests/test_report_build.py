@@ -22,8 +22,8 @@ class ScriptedSupervise:
     """Stand-in for supervisor.supervise: feasible tasks get the canonical plan and a passing Judge, impossible tasks
     the proof's refusal; every call carries the job's provider and model, as the real planner's would."""
 
-    def __init__(self, interrupt_at=None):
-        self.interrupt_at, self.jobs = interrupt_at, []
+    def __init__(self, interrupt_at=None, execution=None):
+        self.interrupt_at, self.jobs, self.execution = interrupt_at, [], execution
 
     def __call__(self, job, stem, **kwargs):
         if self.interrupt_at is not None and len(self.jobs) == self.interrupt_at:
@@ -34,7 +34,7 @@ class ScriptedSupervise:
         source = (p["planner"]["provider"], p["planner"]["model"])
         if oracle.feasibility == "feasible":
             calls, evaluations = [ev.call(heuristic_geometry(task.scene, oracle.target_id), source=source)], [
-                ev.judged()]
+                ev.judged().model_copy(update={"record": self.execution})]
         else:
             calls, evaluations = [ev.call(ev.refusal(oracle.proof.refusal_reason), source=source)], []
         record = run_task(task, oracle, ev.Scripted(calls), k=p["k"], mode=p["mode"],
@@ -107,6 +107,35 @@ def test_every_attempt_becomes_a_report_row_joined_with_its_seed_set_task(runs, 
             assert (row.task, row.distractors, row.obstacles) == (task.task, task.distractors, task.obstacles)
             assert row.oracle == seeds.oracles[attempt.task_index]
     assert {(r.provider, r.model) for r in got.rows if r.config == 5} == {("heuristic", "template-heuristic")}
+
+
+STREAMS = ("q_replay", "finger_replay", "object_replay", "sigma_min_steps", "rest_lin_hist", "rest_ang_hist",
+           "rest_pose_hist")
+
+
+def test_report_rows_drop_the_per_step_streams_and_keep_every_metric(seed_dir, tmp_path):
+    # D56: each row kept about 1.2 MB of streams that no metric reads, so a 400-task report needed 1.5-2 GB of RAM.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    run_dir = tmp_path / "c3"
+    assert run(3, seed_dir, run_dir, fake=ScriptedSupervise(execution=ev.execution_record())).status == "complete"
+    got = collect.collect_runs([run_dir])
+    executed = [r.attempt.rounds[-1].evaluation.record for r in got.rows if r.outcome == "executed"]
+    assert len(executed) == 3 and all(rec.approval == "ab" * 32 and rec.events for rec in executed)
+    assert all(not getattr(rec, name) for rec in executed for name in STREAMS)
+    full = [r.model_copy(update={"attempt": a.record}) for r, a in zip(got.rows, attempts(run_dir), strict=True)]
+    assert all(getattr(r.attempt.rounds[-1].evaluation.record, name) for r in full if r.outcome == "executed"
+               for name in STREAMS)
+    assert [collect.without_streams(r.attempt) for r in full] == [r.attempt for r in got.rows]
+    kw = dict(manifests=got.manifests, undetermined=got.undetermined, seed_set_size=got.seed_set_size)
+    assert json.dumps(compute_metrics(got.rows, **kw)) == json.dumps(compute_metrics(full, **kw))
+
+
+def test_without_streams_keeps_records_without_an_execution_unchanged():
+    from vplan.evaluate import collect
+    assert collect.without_streams(None) is None
+    record = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.blocked(ev.COLLISION)], k=0)
+    assert collect.without_streams(record) is record
 
 
 def test_the_seed_set_defaults_to_the_one_the_runs_recorded(runs, seed_dir):

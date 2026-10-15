@@ -2,8 +2,9 @@
 
 One run directory per configuration (runner.run_eval). Each attempts.jsonl row (records.EvalAttempt) becomes one
 records.AttemptRow: config, task index and id, outcome, error type and wall time from the row; the seed-set name from
-its split; the AttemptRecord from its record; the seed-set hash, provider and model from the run's manifest.json; the
-TaskSpec and scene counts from the seed set's tasks[task_index], and the oracle from oracles[task_index].
+its split; the AttemptRecord from its record, without the per-step ExecutionRecord streams (without_streams); the
+seed-set hash, provider and model from the run's manifest.json; the TaskSpec and scene counts from the seed set's
+tasks[task_index], and the oracle from oracles[task_index].
 
 The seed set is loaded and validated with the W3.1 loader (seedsets.load_seed_set), from --seed-dir or from the
 directory the first run recorded, and its hash must match every run manifest. Reporting code is not evidence, so source
@@ -27,14 +28,35 @@ from pydantic import ValidationError
 from vplan.evaluate import runner
 from vplan.evaluate.report import ReportFiles, build_report
 from vplan.evaluate.seedsets import EvalError, SeedSet, load_seed_set
-from vplan.records import AttemptRow, EvalAttempt
+from vplan.records import AttemptRecord, AttemptRow, EvalAttempt, RoundRecord
 
 # The run-manifest fields the loader uses, with their types: a hand-edited manifest is refused here with a message,
 # not deeper in with a TypeError.
 MANIFEST_KEYS: dict[str, type] = {"config": int, "split": str, "seed_set_hash": str, "provider": str, "model": str,
                                   "n": int, "n_prepared": int}
 
-__all__ = ["Collected", "EvalError", "build", "collect_runs", "read_run_manifest"]
+# Per-step ExecutionRecord series that no metric reads: the 60 Hz replay streams (D41) and the 240 Hz Judge inputs
+# (sigma_min per step, the dwell histories), which the Judge has already scored. They are most of an executed record
+# (about 0.4 of 0.45 MB as JSON, far more as Python objects), so report rows replace them with empty values; the
+# per-execution summaries (events, contacts, joint margins, tracking errors, final poses) stay.
+STREAMS: dict[str, Any] = {"q_replay": (), "finger_replay": (), "object_replay": {}, "sigma_min_steps": (),
+                           "rest_lin_hist": {}, "rest_ang_hist": {}, "rest_pose_hist": {}}
+
+__all__ = ["Collected", "EvalError", "STREAMS", "build", "collect_runs", "read_run_manifest", "without_streams"]
+
+
+def without_streams(record: AttemptRecord | None) -> AttemptRecord | None:
+    """The record with every ExecutionRecord's per-step streams emptied (STREAMS); a record without an execution is
+    returned as it is. Replay needs attempts.jsonl itself, never a report row."""
+    def slim(r: RoundRecord) -> RoundRecord:
+        if r.evaluation is None or r.evaluation.record is None:
+            return r
+        return r.model_copy(update={"evaluation": r.evaluation.model_copy(
+            update={"record": r.evaluation.record.model_copy(update=STREAMS)})})
+
+    if record is None or all(r.evaluation is None or r.evaluation.record is None for r in record.rounds):
+        return record
+    return record.model_copy(update={"rounds": tuple(slim(r) for r in record.rounds)})
 
 
 class Collected(NamedTuple):
@@ -74,7 +96,7 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
     where = f"{run_dir.name}/attempts.jsonl"
     rows, seen = [], set()
     with open(path, "rb") as f:
-        # Read line by line, but every row keeps its whole AttemptRecord, replay streams included (D41).
+        # Line by line, and each row drops its streams once validated, so only one full record is in memory at a time.
         for number, line in enumerate(f, 1):
             try:
                 attempt = EvalAttempt.model_validate_json(line)
@@ -99,7 +121,7 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
                     config=attempt.config, seed_set=attempt.split, seed_set_hash=manifest["seed_set_hash"],
                     task_index=attempt.task_index, task_id=attempt.task_id, task=task.task,
                     oracle=seeds.oracles[attempt.task_index], distractors=task.distractors, obstacles=task.obstacles,
-                    outcome=attempt.outcome, attempt=attempt.record, provider=manifest["provider"],
+                    outcome=attempt.outcome, attempt=without_streams(attempt.record), provider=manifest["provider"],
                     model=manifest["model"], error_type=attempt.error_type, wall_s=attempt.wall_s))
             except ValidationError as exc:
                 first = exc.errors()[0]["msg"]

@@ -60,6 +60,19 @@ def test_metrics_are_plain_json_without_nan(m):
     assert json.loads(json.dumps(m, allow_nan=False)) == m
 
 
+def test_no_metric_reads_the_execution_record_streams(rows):
+    # The report drops them from its rows (collect.without_streams); every metric must stay identical.
+    from vplan.evaluate.collect import without_streams
+    full = ev.with_execution_records(rows)
+    assert sum(r.attempt is not None and r.attempt.rounds[-1].evaluation is not None
+               and r.attempt.rounds[-1].evaluation.record is not None for r in full) >= 10
+    slim = [r.model_copy(update={"attempt": without_streams(r.attempt)}) for r in full]
+    assert slim != full
+    for kw in ({}, {"manifests": COVERAGE, "seed_set_size": 9}):
+        assert json.dumps(compute_metrics(slim, **kw)) == json.dumps(compute_metrics(full, **kw)) == json.dumps(
+            compute_metrics(rows, **kw))
+
+
 def test_every_verifier_check_has_one_blocked_plan_category():
     assert set(CHECK_CATEGORIES) == set(records.CheckName.__args__)
     assert set(CHECK_CATEGORIES.values()) == {"physical_constraint", "solver_non_convergence", "learned_visual"}

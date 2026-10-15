@@ -530,7 +530,9 @@ class AttemptRow(Frozen):
 
     Task side, from the seed set: the public TaskSpec, the private TaskOracle, the scene counts, index and id.
     Attempt side, from the runner: the AttemptRecord the worker returned (None when it returned none: a crash, hang
-    or unreadable result), the supervisor's outcome and failure kind, and the run's provider and model."""
+    or unreadable result), the supervisor's outcome and failure kind, and the run's provider and model. Rows built
+    from run directories (evaluate.collect) carry ExecutionRecords without their per-step streams, which no metric
+    reads."""
     config: RowConfig
     seed_set: Literal["dev", "test"]
     seed_set_hash: str = Field(min_length=1)
