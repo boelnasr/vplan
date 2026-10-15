@@ -1620,3 +1620,21 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
   - the manifest records the host commit (source "env", clean), the image ID and Linux Python 3.10.22.
 - **Cross-platform determinism:** the container's seed set has the same hash (`3e0bb043…`) and outcomes as the same 10-task set prepared and run on Windows on Oct 15.
 - Windows suite on the merged code: 954 passed.
+
+## D61. σ_thr calibrated on unbiased dev witnesses: 0.11 (W3.3 steps 1–3, 2026-10-16)
+
+- **Rule** (spec §9 says only "1st percentile, rounded down"; this fixes the details):
+  - the sample is every accepted witness of the dev seed set's feasible slots, filled exactly as `vplan eval prepare --seeds dev` fills them (D51), with both `sigma_min_threshold` values set to 0 for generation and acceptance, so there is no selection bias;
+  - Verifier minimum: the minimum of `verify.checks.sigma_min` (the V-4 quantity) over every sample of the rebuilt trajectory, which must reproduce the executed approval token;
+  - Judge minimum: `min(ExecutionRecord.sigma_min_steps)` (the V3 quantity);
+  - σ_thr = `numpy.percentile(verifier minima, 1, method="linear")` floored to 0.001. The Judge threshold is min(σ_thr, the same statistic over the Judge minima), so the Judge never fails a witness the Verifier admits.
+  - With n = 75, the floored P1 rejects at most the smallest witness.
+- **Result** (`vplan eval calibrate --seeds dev`, evidence in `docs/evidence/sigma-calibration-dev.json`): 75 witnesses, no exclusions.
+  - Verifier minima: min 0.0951, P1 0.1109, P5 0.1603, P50 0.2883. The Judge minima agree to within 1e-4.
+  - **σ_thr = 0.11 for both the Verifier and the Judge** (was the provisional 0.02, which filtered no dev witness).
+- **Re-validation:** dev prepared under 0.11 needed 103 candidates.
+  - 1 of 76 witnesses was rejected by V-4: seed 13, 0.10986 in descend.
+  - 2 draft rejections (`no_room_for_obstacle`) don't depend on the threshold.
+  - Because seeds are consumed in order (D53), that one rejection shifts every later slot: dev tasks 13–99 change content.
+  - The heuristic (config 5) then scored 100/100 attempts: 75/75 feasible executed with Judge success, 19/19 refusals of types 1, 2 and 4, and 6/6 type-3 tasks `budget_exhausted`. No singularity finding came up.
+- **Consequences:** every seed set, cohort and run prepared before this commit has stale config hashes and is refused by `eval run`/`report build`. The generator is not frozen and `test` is not generated (W3.3 steps 4–5, kept for last). Suite: 987 passed.
