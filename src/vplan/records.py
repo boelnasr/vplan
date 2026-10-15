@@ -516,6 +516,59 @@ class AttemptRecord(Frozen):
         return self.outcome in ("executed", "refused") and self.judge is not None and self.judge.success
 
 
+# ---- evaluation report input (W3.2, spec §14) ------------------------------------------------
+# Configurations with attempt rows. 2 is round 1 of 3 and only ever derived by the metrics; 4 is the Cosmos shadow
+# study, which has no attempts of its own. Named apart from the W3.1 runner's EvalConfig, which describes how to run.
+RowConfig = Literal[1, 2, 3, 5, 6, 7]
+# The spec §14 / D48 mode and budget of the configurations that fix them; 5 and 6 are whatever the runner chose.
+ROW_CONFIG_MODES: dict[int, tuple[str, int]] = {1: ("unverified", 0), 2: ("repair", 0), 3: ("repair", 3),
+                                                7: ("resample", 3)}
+
+
+class AttemptRow(Frozen):
+    """One evaluation attempt joined with its seed-set task: the input of vplan.evaluate.metrics.
+
+    Task side, from the seed set: the public TaskSpec, the private TaskOracle, the scene counts, index and id.
+    Attempt side, from the runner: the AttemptRecord the worker returned (None when it returned none: a crash, hang
+    or unreadable result), the supervisor's outcome and failure kind, and the run's provider and model."""
+    config: RowConfig
+    seed_set: Literal["dev", "test"]
+    seed_set_hash: str = Field(min_length=1)
+    task_index: int = Field(ge=0)
+    task_id: str = Field(min_length=1)
+    task: TaskSpec
+    oracle: TaskOracle
+    # Scene facts, as the seed set's tasks.jsonl counts them: objects besides one, and obstacle boxes, so a type-3
+    # enclosure's panels count as obstacles. The 0-3 x 0-3 strata (spec §6) apply to feasible tasks only.
+    distractors: int = Field(ge=0)
+    obstacles: int = Field(ge=0)
+    outcome: AttemptOutcome  # the supervisor's outcome
+    attempt: AttemptRecord | None = None
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    error_type: str | None = None  # supervisor or worker failure kind, e.g. worker_timeout
+    wall_s: float | None = Field(default=None, ge=0)  # supervisor wall-clock time for the whole attempt, s
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "AttemptRow":
+        if self.oracle.feasibility == "feasible" and not (self.distractors <= 3 and self.obstacles <= 3):
+            raise ValueError(f"a feasible task sits in a 0-3 x 0-3 stratum, not ({self.distractors}, {self.obstacles})")
+        a = self.attempt
+        if a is None:
+            if self.outcome in ("executed", "refused"):
+                raise ValueError("an executed or refused outcome needs the AttemptRecord that the Judge scored")
+            return self
+        if a.outcome != self.outcome:
+            raise ValueError(f"supervisor outcome {self.outcome!r} disagrees with the record's {a.outcome!r}")
+        if any(r.call.provider != self.provider or r.call.model != self.model for r in a.rounds):
+            raise ValueError("every planner call must carry the row's provider and model")
+        expected = ROW_CONFIG_MODES.get(self.config)
+        if expected is not None and (a.mode, a.k) != expected:
+            raise ValueError(f"config {self.config} runs mode={expected[0]!r}, k={expected[1]}; "
+                             f"the record has mode={a.mode!r}, k={a.k}")
+        return self
+
+
 # ---- R9 supervised worker (W2.8) -------------------------------------------------------------
 class WorkerResult(Frozen):
     """What one worker try writes to its result file; the parent never parses worker stdout."""
