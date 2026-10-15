@@ -126,6 +126,37 @@ def test_config_2_outcomes_replay_run_task_with_k_zero(rows):
     assert view.attempt.rounds == tasks[1].attempt.rounds[:1] and view.attempt.known_total_tokens == 100
 
 
+# Config-3 attempts whose first round ends every way a round can; (oracle, scripted calls, scripted evaluations).
+FIRST_ROUNDS = {
+    "success": (ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()]),
+    "judge failure": (ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged("S1")]),
+    "blocked, then repaired": (ev.FEASIBLE, [ev.call(ev.GOOD), ev.call(ev.FIXED)],
+                               [ev.blocked(ev.COLLISION), ev.judged()]),
+    "false refusal": (ev.FEASIBLE, [ev.call(ev.refusal("other"))], []),
+    "malformed, then a plan": (ev.FEASIBLE, [ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
+    "protocol error, then a plan": (ev.FEASIBLE, [ev.call(outcome="protocol_error"), ev.call(ev.GOOD)],
+                                    [ev.judged()]),
+    "service failure": (ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None, status_code=503)], []),
+    "stale approval": (ev.FEASIBLE, [ev.call(ev.GOOD)], [records.EvaluationResult(outcome="stale_approval")]),
+    "simulation error": (ev.FEASIBLE, [ev.call(ev.GOOD)],
+                         [records.EvaluationResult(outcome="sim_error", error_type="RuntimeError")]),
+    "visual uncertain": (ev.FEASIBLE, [ev.call(ev.GOOD)], [records.EvaluationResult(outcome="visual_uncertain")]),
+    "impossible, attempted": (ev.impossible(1), [ev.call(ev.GOOD)], [ev.judged()]),
+    "impossible, refused": (ev.impossible(1), [ev.call(ev.refusal())], []),
+}
+
+
+@pytest.mark.parametrize("name", FIRST_ROUNDS)
+def test_first_round_is_what_run_task_returns_with_k_zero_on_the_same_planner(name):
+    # first_round reuses repair._terminal; this pins it to run_task itself so the two cannot drift apart silently.
+    oracle, calls, evaluations = FIRST_ROUNDS[name]
+    full = ev.scripted_row(3, 0, oracle, calls, evaluations)
+    alone = ev.attempt(oracle, calls[:1], evaluations[:1], k=0, attempt_id=full.attempt.attempt_id)
+    derived = first_round(full)
+    assert derived.attempt == alone and derived.outcome == alone.outcome
+    assert derived.attempt.success == alone.success
+
+
 # ---- per-config tables ----------------------------------------------------------------------------
 
 def test_success_per_config(m):
