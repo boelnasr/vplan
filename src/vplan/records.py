@@ -684,7 +684,8 @@ class FrameExport(Frozen):
 
     written: every executed round's frames and the index (index is the run-directory-relative POSIX path); none: no
     round was executed, so there is nothing to render; failed: nothing usable was written (error_type says why; the
-    attempt's outcome is unaffected). bytes is the disk use of the PNGs and index; render_s the export's wall time, s."""
+    attempt's outcome is unaffected). bytes is the disk use of the PNGs and index; render_s is the export's wall
+    time, s."""
     status: Literal["written", "none", "failed"]
     index: str | None = None
     index_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")

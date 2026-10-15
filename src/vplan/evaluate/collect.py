@@ -13,8 +13,8 @@ drift since preparation is allowed; a configuration change is refused, as everyw
 Refused, with a message that is safe to print (EvalError, exit code 2 in the CLI): runs over different seed sets, two
 runs of one configuration, a run directory without a valid manifest, a manifest whose planned or prepared task count
 does not fit the seed set, any row that does not validate or does not belong to its run and seed set, and an --output
-that is, or lies under, an existing file. A run that recorded fewer rows than it planned, or that covered only an --n prefix,
-is reported with its INCOMPLETE or LIMITED label (D33), never refused.
+that is, or lies under, an existing file. A run that recorded fewer rows than it planned, or that covered only an --n
+prefix, is reported with its INCOMPLETE or LIMITED label (D33), never refused.
 """
 from __future__ import annotations
 
