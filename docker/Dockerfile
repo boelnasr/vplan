@@ -23,11 +23,13 @@ COPY docker/requirements.txt docker/requirements.txt
 RUN pip install --no-cache-dir --disable-pip-version-check \
         --no-deps --require-hashes --only-binary=:all: -r docker/requirements.txt
 
-# What the package and its tests read: tests import scripts/spikes, tests/test_docker.py reads .dockerignore,
-# uv.lock and docker/, and LICENSE carries the AGPL text with the image. config/ must sit next to src/, because
-# vplan.config resolves it from the source tree (so the package runs from /app/src rather than site-packages).
+# What the package and its tests read: tests import scripts/spikes, tests/test_metrics.py parses docs/spec.md,
+# tests/test_docker.py reads .dockerignore, uv.lock and docker/, and LICENSE carries the AGPL text with the image.
+# config/ must sit next to src/, because vplan.config resolves it from the source tree (so the package runs from
+# /app/src rather than site-packages).
 COPY .dockerignore LICENSE pyproject.toml uv.lock ./
 COPY config/ config/
+COPY docs/spec.md docs/spec.md
 COPY docker/ docker/
 COPY scripts/ scripts/
 COPY src/ src/
