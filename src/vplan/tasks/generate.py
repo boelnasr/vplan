@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -17,6 +17,9 @@ from vplan.records import (IMPOSSIBLE_REFUSALS, Bin, ImpossibilityProof, Obstacl
                            SceneObject, TaskOracle, TaskSpec, WitnessEvaluation)
 from vplan.tasks.reach import REACH_MARGIN_M, bin_clearance_m, reach_bound_m, target_clearance_m
 from vplan.tasks.referents import instruction, resolve_referent
+
+if TYPE_CHECKING:  # pipeline imports the verifier and the executor; generate imports it lazily
+    from vplan.pipeline import AttemptResult
 
 TaskKind = Literal["feasible", "impossible"]
 COLORS = ("red", "green", "blue", "yellow", "purple", "orange")
@@ -352,15 +355,27 @@ def _check_args(seed: int, kind: str, impossible_type: int | None) -> None:
         raise ValueError(f"unknown kind {kind!r}")
 
 
-def run_witness(task: TaskSpec, target_id: str, *, seed: int = 0,
-                config_snapshot: dict[str, dict] | None = None) -> WitnessEvaluation:
-    """The unchanged heuristic plan through run_attempt (verifier, physics, independent Judge)."""
+def witness_attempt(task: TaskSpec, target_id: str, *, seed: int = 0,
+                    config_snapshot: dict[str, dict] | None = None) -> AttemptResult:
+    """The unchanged heuristic plan through run_attempt (verifier, physics, independent Judge), with its execution
+    record (the sigma_thr calibration reads it)."""
     from vplan.pipeline import run_attempt
     from vplan.planners.heuristic import heuristic_geometry
 
     plan = heuristic_geometry(task.scene, target_id)
-    result = run_attempt(plan, task.scene, target_id, seed=seed % (2**32), config_snapshot=config_snapshot)
-    return WitnessEvaluation(plan=plan, outcome=result.outcome, findings=tuple(result.findings), result=result.judge)
+    return run_attempt(plan, task.scene, target_id, seed=seed % (2**32), config_snapshot=config_snapshot)
+
+
+def witness_evaluation(result: AttemptResult) -> WitnessEvaluation:
+    """The part of a witness attempt the generator keeps."""
+    return WitnessEvaluation(plan=result.plan, outcome=result.outcome, findings=tuple(result.findings),
+                             result=result.judge)
+
+
+def run_witness(task: TaskSpec, target_id: str, *, seed: int = 0,
+                config_snapshot: dict[str, dict] | None = None) -> WitnessEvaluation:
+    """The heuristic witness as the generator stores it."""
+    return witness_evaluation(witness_attempt(task, target_id, seed=seed, config_snapshot=config_snapshot))
 
 
 def witness_rejection(witness: WitnessEvaluation, target_id: str) -> str | None:

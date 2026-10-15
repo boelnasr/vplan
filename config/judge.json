@@ -4,7 +4,7 @@
   "rest_dwell_s": 0.5,
   "contact_penetration_tol_m": 0.001,
   "contact_force_tol_n": 1.0,
-  "sigma_min_threshold": 0.02,
+  "sigma_min_threshold": 0.11,
   "jacobian_char_length_m": 0.5,
   "bin_floor_tol_m": 0.002
 }
