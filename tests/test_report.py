@@ -66,6 +66,12 @@ def test_html_shows_the_headline_numbers(html):
     assert "+20.0 pp" in html  # repair gain over the five feasible tasks
 
 
+def test_html_counts_undetermined_candidates_only_when_supplied(html, rows, tmp_path):
+    assert "Undetermined candidates excluded: not supplied." in html
+    page = build_report(rows, tmp_path, undetermined=4).html.read_text(encoding="utf-8")
+    assert "Undetermined candidates excluded: 4" in page
+
+
 def test_html_never_carries_a_url_even_from_a_provider_name(tmp_path):
     source = ("https://llm.example.invalid/v1", "model-x")
     rows = [ev.scripted_row(3, 0, ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], source=source)]

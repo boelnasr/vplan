@@ -434,14 +434,16 @@ def _gain(by_config: Mapping[int, Sequence[AttemptRow]], blocks: Mapping[str, Ma
     return result
 
 
-def _seed_set(rows: Sequence[AttemptRow]) -> dict[str, Any]:
+def _seed_set(rows: Sequence[AttemptRow], undetermined: int | None) -> dict[str, Any]:
+    """The seed set's tasks; undetermined is the count of excluded candidates (spec §6), None when not supplied."""
     tasks: dict[int, AttemptRow] = {}
     for r in rows:
         tasks.setdefault(r.task_index, r)
     types = Counter(str(r.oracle.proof.type) for r in tasks.values() if r.oracle.proof is not None)
     feasible = sum(map(_feasible, tasks.values()))
     return {"name": rows[0].seed_set, "hash": rows[0].seed_set_hash, "tasks": len(tasks), "feasible": feasible,
-            "impossible": len(tasks) - feasible, "impossible_by_type": dict(sorted(types.items()))}
+            "impossible": len(tasks) - feasible, "impossible_by_type": dict(sorted(types.items())),
+            "undetermined_excluded": undetermined}
 
 
 def _validate(rows: Sequence[AttemptRow]) -> None:
@@ -464,12 +466,17 @@ def _validate(rows: Sequence[AttemptRow]) -> None:
 
 def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: int = 0,
                     headline_providers: Collection[str] = TOKEN_FACTORY_PROVIDERS,
-                    manifests: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+                    manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None) -> dict[str, Any]:
     """Every spec §14 metric for the rows of one seed set, as plain JSON data (the report's metrics.json).
 
-    manifests are the run manifests, copied into provenance as they are."""
+    manifests are the run manifests, copied into provenance as they are. undetermined is the number of candidate
+    seeds the seed set excluded for having neither a witness nor a proof (spec §6, the seed-set manifest's "excluded");
+    they are counted, never scored."""
     rows = list(rows)
     _validate(rows)
+    if undetermined is not None and (isinstance(undetermined, bool) or not isinstance(undetermined, int)
+                                     or undetermined < 0):
+        raise MetricsError(f"undetermined must be a non-negative count of excluded candidates, got {undetermined!r}")
     by_config: dict[int, list[AttemptRow]] = {}
     for r in sorted(rows, key=lambda r: (r.config, r.task_index)):
         by_config.setdefault(r.config, []).append(r)
@@ -477,7 +484,7 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
         by_config[2] = [first_round(r) for r in by_config[3]]
     tasks_in_report = len({r.task_index for r in rows})
     blocks = {str(c): _config_block(c, by_config[c], tasks_in_report, headline_providers) for c in sorted(by_config)}
-    seed_set = _seed_set(rows)
+    seed_set = _seed_set(rows, undetermined)
 
     def success(config: int) -> dict[str, Any] | None:
         return {"config": config, **blocks[str(config)]["success"]} if str(config) in blocks else None

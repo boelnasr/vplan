@@ -292,13 +292,24 @@ def test_one_openrouter_attempt_makes_a_config_a_dry_run():
 def test_provenance_records_the_seed_set_config_hashes_and_manifests(rows):
     m = compute_metrics(rows, manifests=[{"run_id": "r1", "git_sha": "abc"}])
     assert m["provenance"]["seed_set"] == {"name": "test", "hash": ev.SEED_SET_HASH, "tasks": 7, "feasible": 5,
-                                           "impossible": 2, "impossible_by_type": {"1": 1, "4": 1}}
+                                           "impossible": 2, "impossible_by_type": {"1": 1, "4": 1},
+                                           "undetermined_excluded": None}
     assert m["provenance"]["config_hashes_consistent"] is True
     assert m["provenance"]["runs"] == [{"run_id": "r1", "git_sha": "abc"}]
     assert m["configs"]["3"]["provenance"]["config_hashes"] == [rows[0].attempt.config_hashes]
     assert [c["config"] for c in m["configurations"]] == [1, 2, 3, 4, 5, 6, 7]
     assert [c["config"] for c in m["configurations"] if not c["present"]] == [4]
     assert "shadow" in m["configurations"][3]["label"]
+
+
+def test_undetermined_candidates_are_counted_not_scored(rows):
+    # Spec §6: a candidate with neither a witness nor a proof is excluded from the seed set and counted in the report.
+    m = compute_metrics(rows, undetermined=3)
+    assert m["provenance"]["seed_set"]["undetermined_excluded"] == 3
+    assert m["provenance"]["seed_set"]["tasks"] == 7 and m["configs"]["3"]["success"] == prop(2, 5)
+    for bad in (-1, 1.5, True):
+        with pytest.raises(MetricsError, match="undetermined"):
+            compute_metrics(rows, undetermined=bad)
 
 
 # ---- attribution rules --------------------------------------------------------------------------

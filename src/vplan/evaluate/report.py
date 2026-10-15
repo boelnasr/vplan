@@ -92,11 +92,11 @@ class ReportFiles(NamedTuple):
 
 def build_report(rows: Iterable[AttemptRow], out_dir: Path, *, title: str = "vplan evaluation report",
                  n_boot: int = N_BOOT, seed: int = 0, headline_providers: Iterable[str] = TOKEN_FACTORY_PROVIDERS,
-                 manifests: Sequence[Mapping[str, Any]] = ()) -> ReportFiles:
+                 manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None) -> ReportFiles:
     """Write OUT_DIR/metrics.json and OUT_DIR/report.html. Both are rendered in memory first, then each replaces its
-    file atomically, so a failed build leaves the previous files whole."""
+    file atomically, so a failed build leaves the previous files whole. The keyword arguments are compute_metrics'."""
     metrics = compute_metrics(rows, n_boot=n_boot, seed=seed, headline_providers=frozenset(headline_providers),
-                              manifests=manifests)
+                              manifests=manifests, undetermined=undetermined)
     metrics_text = json.dumps(metrics, indent=2, allow_nan=False) + "\n"
     page = render_html(metrics, title=title)
     out_dir = Path(out_dir)
@@ -631,9 +631,15 @@ def _provenance(m: Mapping[str, Any]) -> str:
     hashes = [[SHORT_NAMES[c], ", ".join(f"{k} {v[:12]}" for k, v in sorted(h.items()))]
               for c, b in _configs(m) for h in b["provenance"]["config_hashes"]]
     runs = "".join(f"<pre>{_esc(json.dumps(run, indent=2, sort_keys=True))}</pre>" for run in p["runs"])
+    undetermined = s["undetermined_excluded"]
     return (f"<p>Seed set <strong>{_esc(s['name'])}</strong>, sha256 <code>{_esc(s['hash'])}</code>: {s['tasks']} "
             f"tasks, {s['feasible']} feasible and {s['impossible']} impossible (by type: "
             f"{_esc(_counts(s['impossible_by_type']))}).</p>"
+            "<p>Undetermined candidates excluded: "
+            + ("not supplied." if undetermined is None else
+               f"{undetermined} (neither a witness nor a proof; excluded from the seed set and never scored, "
+               "spec §6).")
+            + "</p>"
             f"<p>Headline providers: {_esc(', '.join(p['headline_providers']))}. Config hashes consistent across "
             f"all attempts: {'yes' if p['config_hashes_consistent'] else 'no'}.</p>"
             + _table(["Config", "Config hashes (first 12 hex digits)"], hashes)
