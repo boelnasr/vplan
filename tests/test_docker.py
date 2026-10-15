@@ -109,6 +109,12 @@ def test_dockerignore_spares_the_env_example(rules) -> None:
     assert not excluded(".env.example", rules)
 
 
+def test_the_spec_the_metrics_test_reads_reaches_the_image(rules) -> None:
+    # tests/test_metrics.py parses docs/spec.md §14; the rest of docs/ stays out (see the list above).
+    assert not excluded("docs/spec.md", rules)
+    assert "docs/spec.md docs/spec.md" in _args("COPY")
+
+
 def test_package_tests_and_configs_reach_the_build_context(rules) -> None:
     files = [p for d in ("src", "tests", "scripts") for p in (ROOT / d).rglob("*.py")]
     files += list((ROOT / "config").glob("*.json"))
