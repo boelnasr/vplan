@@ -382,6 +382,22 @@ def test_provenance_records_the_seed_set_config_hashes_and_manifests(rows):
     assert "shadow" in m["configurations"][3]["label"]
 
 
+def test_run_manifests_reach_metrics_without_local_paths(rows):
+    # Reports may go into the public repo: no local filesystem path, but every hash, version and git SHA.
+    manifest = ev.local_manifest()
+    m = compute_metrics(rows, manifests=[manifest])
+    (run,) = m["provenance"]["runs"]
+    assert run["seed_set"] == {"manifest_sha256": "cd" * 32, "n_tasks": 7}
+    assert run["manipulapy"] == {"version": "1.4.2", "git": {"head": "e" * 40, "dirty": True}}
+    assert run["git"] == {"head": "f" * 40, "dirty": False} and run["versions"] == manifest["versions"]
+    assert run["source_hashes"] == manifest["source_hashes"] and run["source_drift"] == ["src/vplan/cli.py"]
+    assert (run["os"], run["image_digest"], run["model"]) == (manifest["os"], "sha256:feedface", manifest["model"])
+    assert run["extra"] == {"note": "kept", "paths": ["kept too"]}
+    text = json.dumps(m)
+    assert not [needle for needle in ev.LOCAL_PATHS if needle in text]
+    assert manifest == ev.local_manifest()  # the caller's manifest is not changed
+
+
 def test_undetermined_candidates_are_counted_not_scored(rows):
     # Spec §6: a candidate with neither a witness nor a proof is excluded from the seed set and counted in the report.
     m = compute_metrics(rows, undetermined=3)

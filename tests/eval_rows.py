@@ -234,3 +234,25 @@ def random_rows(n_feasible: int = 48, n_impossible: int = 16, seed: int = 0,
             rows.append(scripted_row(config, index, oracle, calls, evaluations, distractors=d, obstacles=o,
                                      wall_s=rng.uniform(20, 120)))
     return rows
+
+
+# ---- a W3.1 run manifest with the local paths a real one carries ----------------------------------------
+LOCAL_PATHS = ("C:\\Users\\someone", "someone", "/home/", "/mnt/", "\\\\server", "runs/seeds", "Users")
+
+
+def local_manifest() -> dict:
+    """The shape runner._create writes, with absolute paths where a real run has them."""
+    return {
+        "schema_version": 1, "kind": "eval_run", "run_id": "c3-dev-20261015T120000Z", "config": 3,
+        "provider": "openrouter", "model": "nvidia/nemotron-3-ultra-550b-a55b:free", "split": "dev",
+        "seed_set_hash": SEED_SET_HASH, "os": "Windows-10-10.0.26100-SP0", "image_digest": "sha256:feedface",
+        "seed_set": {"dir": "runs/seeds/dev", "resolved": "C:\\Users\\someone\\repo\\runs\\seeds\\dev",
+                     "manifest_sha256": "cd" * 32, "n_tasks": 7},
+        "git": {"head": "f" * 40, "dirty": False},
+        "manipulapy": {"version": "1.4.2", "location": "C:\\Users\\someone\\ManipulaPy\\ManipulaPy\\__init__.py",
+                       "git": {"head": "e" * 40, "dirty": True}},
+        "versions": {"numpy": "1.26.4", "ManipulaPy": "1.4.2"},
+        "source_hashes": {"src/vplan/cli.py": "12" * 32}, "source_drift": ["src/vplan/cli.py"],
+        "extra": {"cache": "/home/someone/.cache/x", "unc": "\\\\server\\share\\x", "wsl": "/mnt/c/Users/x",
+                  "forward": "C:/Users/someone/x", "note": "kept", "paths": ["/tmp/a", "kept too"]},
+    }

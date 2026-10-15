@@ -83,6 +83,12 @@ ATTRIBUTION_TAGS = (LLM_PLAN, MOTION_LAYER, GATE_EXECUTION, VERIFIER_SIM, MIXED,
 # The Judge's contact violation format: body_a:link_a<->body_b:link_b@stage (judge.judge).
 _CONTACT = re.compile(r"^(?P<a>[^:<>@]+):[^<>@]*<->(?P<b>[^:<>@]+):[^<>@]*@.+$")
 
+# Local filesystem paths in a W3.1 run manifest (runner._create): the seed-set directory as given and resolved, and
+# the ManipulaPy import location. Any other value that is or contains an absolute path (a drive letter, a UNC share or
+# a POSIX root) is dropped too, so a field added later cannot leak one into a public report.
+LOCAL_PATH_KEYS = frozenset({("seed_set", "dir"), ("seed_set", "resolved"), ("manipulapy", "location")})
+_LOCAL_PATH = re.compile(r"(?:^|[\s'\"(=,;])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|/[^/\s]+/)")
+
 REPAIR_GAIN_READING = (
     "Change in feasible success from the verified first attempt (config 2) to up to k = 3 further verified rounds "
     "with findings (config 3), on the same tasks. It includes the effect of the extra attempts, so it does not by "
@@ -477,6 +483,23 @@ def _seed_set(rows: Sequence[AttemptRow], undetermined: int | None) -> dict[str,
             "undetermined_excluded": undetermined}
 
 
+def public_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """A run manifest as reports carry it: every hash, version and git SHA, and no local filesystem path (reports may
+    go into the public repo). Path fields and values are dropped, not rewritten; the input is not changed."""
+    def local(value: Any) -> bool:
+        return isinstance(value, str) and _LOCAL_PATH.search(value) is not None
+
+    def clean(value: Any, at: tuple[str, ...]) -> Any:
+        if isinstance(value, Mapping):
+            return {k: clean(v, at + (k,)) for k, v in value.items()
+                    if at + (k,) not in LOCAL_PATH_KEYS and not local(k) and not local(v)}
+        if isinstance(value, (list, tuple)):
+            return [clean(v, at) for v in value if not local(v)]
+        return value
+
+    return json.loads(json.dumps(clean(manifest, ()), allow_nan=False))
+
+
 def _validate(rows: Sequence[AttemptRow]) -> None:
     if not rows:
         raise MetricsError("no attempt rows to score")
@@ -500,9 +523,9 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
                     manifests: Sequence[Mapping[str, Any]] = (), undetermined: int | None = None) -> dict[str, Any]:
     """Every spec §14 metric for the rows of one seed set, as plain JSON data (the report's metrics.json).
 
-    manifests are the run manifests, copied into provenance as they are. undetermined is the number of candidate
-    seeds the seed set excluded for having neither a witness nor a proof (spec §6, the seed-set manifest's "excluded");
-    they are counted, never scored."""
+    manifests are the run manifests, copied into provenance without local paths (public_manifest). undetermined is
+    the number of candidate seeds the seed set excluded for having neither a witness nor a proof (spec §6, the
+    seed-set manifest's "excluded"); they are counted, never scored."""
     rows = list(rows)
     _validate(rows)
     if undetermined is not None and (isinstance(undetermined, bool) or not isinstance(undetermined, int)
@@ -542,5 +565,5 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
         "configs": blocks,
         "provenance": {"seed_set": seed_set, "headline_providers": sorted(headline_providers),
                        "config_hashes_consistent": len(hashes) <= 1,
-                       "runs": [json.loads(json.dumps(dict(m), allow_nan=False)) for m in manifests]},
+                       "runs": [public_manifest(m) for m in manifests]},
     }

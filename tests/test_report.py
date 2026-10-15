@@ -117,6 +117,14 @@ def test_html_never_carries_a_url_even_from_a_provider_name(tmp_path):
     assert "https://" not in page and "http://" not in page and "llm.example.invalid/v1" in page
 
 
+def test_html_and_metrics_carry_no_local_path_from_a_run_manifest(tmp_path, rows):
+    files = build_report(rows, tmp_path, manifests=[ev.local_manifest()])
+    for path in (files.html, files.metrics):
+        text = path.read_text(encoding="utf-8")
+        assert not [needle for needle in ev.LOCAL_PATHS if needle in text], path.name
+        assert "e" * 40 in text and "1.4.2" in text  # the ManipulaPy checkout's SHA and version stay
+
+
 def test_files_are_replaced_atomically(tmp_path, rows, monkeypatch):
     replaced = []
     real_replace = os.replace
