@@ -180,9 +180,20 @@ def test_a_complete_report_has_no_incomplete_or_limited_label(tmp_path, rows):
                         seed_set_size=7).html.read_text(encoding="utf-8")
     assert "INCOMPLETE" not in page and "LIMITED" not in page and "Incomplete runs" not in page
     assert "<title>DEGRADED: 1 service failure — DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
-    assert ("<strong>Provider failures.</strong> 1 provider request failed (config 7: 1). Failures stay in the "
+    assert ("<strong>Provider failures.</strong> 1 provider request failed (config 7: 1, HTTP 503 ×1). Failures stay "
+            "in the "
             "denominators, so these rates partly measure provider availability, not planning.") in page
     assert "complete 7/7" in page
+
+
+def test_the_provider_failure_banner_counts_failures_by_status(tmp_path):
+    sf = ev.call(outcome="service_failure", tokens=None, status_code=429)
+    rows = [ev.scripted_row(3, 0, ev.FEASIBLE, [sf]), ev.scripted_row(3, 1, ev.FEASIBLE, [sf]),
+            ev.scripted_row(3, 2, ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None)]),
+            ev.row(7, 0, ev.FEASIBLE, None, outcome="service_failure", error_type="provider_error_body")]
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    assert ("<strong>Provider failures.</strong> 4 provider requests failed (config 3: 3, HTTP 429 ×2, no HTTP "
+            "status ×1; config 7: 1, status unknown ×1).") in page
 
 
 def test_files_are_replaced_atomically(tmp_path, rows, monkeypatch):

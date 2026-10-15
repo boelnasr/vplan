@@ -540,7 +540,7 @@ def test_complete_runs_and_the_seed_set_size_from_its_manifest(rows):
     full = [r for r in rows if r.config in (3, 7)]
     m = compute_metrics(full, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
     assert m["status"] == {"complete": True, "incomplete": [], "limited": [],
-                           "degraded": [{"config": 7, "service_failures": 1}],
+                           "degraded": [{"config": 7, "service_failures": 1, "by_status": {"503": 1}}],
                            "title_prefixes": ["DEGRADED: 1 service failure", "DRY RUN: configs 2, 3 and 7"]}
     assert m["provenance"]["seed_set"]["size"] == 7 and m["provenance"]["seed_set"]["tasks"] == 7
     limited = compute_metrics(full[:3], seed_set_size=100)["provenance"]["seed_set"]
@@ -554,16 +554,19 @@ def test_without_run_manifests_coverage_is_unknown(m):
 
 
 def test_service_failures_title_the_report_degraded_once_per_request():
-    # D33: any provider failure prefixes the title. Config 2 is round 1 of config 3, so its failures are not counted
-    # again; a row whose worker returned no record but a service failure counts once.
+    # D33: any provider failure prefixes the title, and failures are counted by HTTP status ("transport" for a call
+    # without one, "unknown" for a row without a record). Config 2 is round 1 of config 3, so its failures are not
+    # counted again; a row whose worker returned no record but a service failure counts once.
     sf = ev.call(outcome="service_failure", tokens=None, status_code=503)
     rows = [ev.scripted_row(3, 0, ev.FEASIBLE, [sf]),
             ev.scripted_row(3, 1, ev.FEASIBLE, [ev.call(ev.GOOD), sf], [ev.blocked(ev.COLLISION)]),
+            ev.scripted_row(3, 2, ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None)]),
             ev.scripted_row(7, 0, ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()]),
             ev.row(7, 1, ev.FEASIBLE, None, outcome="service_failure", error_type="provider_error_body")]
     status = compute_metrics(rows)["status"]
-    assert status["degraded"] == [{"config": 3, "service_failures": 2}, {"config": 7, "service_failures": 1}]
-    assert status["title_prefixes"] == ["DEGRADED: 3 service failures", "DRY RUN: configs 2, 3 and 7"]
+    assert status["degraded"] == [{"config": 3, "service_failures": 3, "by_status": {"503": 2, "transport": 1}},
+                                  {"config": 7, "service_failures": 1, "by_status": {"unknown": 1}}]
+    assert status["title_prefixes"] == ["DEGRADED: 4 service failures", "DRY RUN: configs 2, 3 and 7"]
     clean = compute_metrics([r for r in rows if r.config == 7 and r.attempt is not None])["status"]
     assert clean["degraded"] == [] and not [p for p in clean["title_prefixes"] if p.startswith("DEGRADED")]
 

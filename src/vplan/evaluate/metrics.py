@@ -573,19 +573,24 @@ def _runs(manifests: Sequence[Mapping[str, Any]], by_config: Mapping[int, Sequen
     return [runs[c] for c in sorted(runs)]
 
 
-def _service_failures(rows: Sequence[AttemptRow]) -> int:
-    """Failed provider requests: every planner call that ended as a service failure, plus a row whose worker reported
-    a service failure without a record. Each request counts once."""
-    calls = sum(x.call.outcome == "service_failure" for r in rows if r.attempt is not None for x in r.attempt.rounds)
-    return calls + sum(r.attempt is None and r.outcome == "service_failure" for r in rows)
+def _service_failures(rows: Sequence[AttemptRow]) -> Counter[str]:
+    """Failed provider requests by HTTP status, as D33 counts them: every planner call that ended as a service failure,
+    under its status code ("transport" when it had none), plus a row whose worker reported a service failure without a
+    record ("unknown": rows do not carry the status). Each request counts once."""
+    failed = Counter(str(x.call.status_code or "transport") for r in rows if r.attempt is not None
+                     for x in r.attempt.rounds if x.call.outcome == "service_failure")
+    unknown = sum(r.attempt is None and r.outcome == "service_failure" for r in rows)
+    if unknown:
+        failed["unknown"] = unknown
+    return failed
 
 
 def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int],
-            service_failures: Mapping[int, int]) -> dict[str, Any]:
+            service_failures: Mapping[int, Counter[str]]) -> dict[str, Any]:
     """The report's standing, as the pilot titles it (D33): INCOMPLETE when a run recorded fewer rows than it
     planned, LIMITED when a run covered only an --n prefix (never complete), DEGRADED: n service failures when any
-    provider request failed (they stay in the denominators), and DRY RUN naming every configuration that did not run
-    on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
+    provider request failed (they stay in the denominators; degraded counts them per configuration and by HTTP
+    status), and DRY RUN naming every configuration that did not run on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
     incomplete = [{"config": r["config"], "recorded": r["recorded"], "planned": r["planned"]}
                   for r in runs if r["incomplete"]]
     limited = [{"config": r["config"], "planned": r["planned"], "prepared": r["prepared"]}
@@ -597,7 +602,8 @@ def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int],
     if limited:
         prefixes.append("LIMITED: " + "; ".join(f"config {r['config']} first {r['planned']} of {r['prepared']} tasks"
                                                 for r in limited))
-    degraded = [{"config": c, "service_failures": n} for c, n in sorted(service_failures.items()) if n]
+    degraded = [{"config": c, "service_failures": sum(n.values()), "by_status": dict(sorted(n.items()))}
+                for c, n in sorted(service_failures.items()) if sum(n.values())]
     if degraded:
         prefixes.append(f"DEGRADED: {_plural(sum(d['service_failures'] for d in degraded), 'service failure')}")
     if dry_run_configs:

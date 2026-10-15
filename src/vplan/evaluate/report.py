@@ -122,6 +122,11 @@ def _write_atomic(path: Path, text: str) -> None:
 
 
 # ---- text helpers ----------------------------------------------------------------------------------
+def _status_label(code: str) -> str:
+    """A metrics status.degraded by_status key as the banner names it."""
+    return {"transport": "no HTTP status", "unknown": "status unknown"}.get(code, f"HTTP {code}")
+
+
 def _esc(value: Any) -> str:
     """Escaped text. '://' becomes an entity, so no provider or manifest string ever forms a URL in the file."""
     return html.escape(str(value), quote=True).replace("://", "&#58;//")
@@ -439,7 +444,9 @@ def _banners(m: Mapping[str, Any]) -> str:
     if status["degraded"]:
         total = sum(d["service_failures"] for d in status["degraded"])
         out.append(f"<strong>Provider failures.</strong> {total} provider request{'' if total == 1 else 's'} failed ("
-                   + _esc("; ".join(f"config {d['config']}: {d['service_failures']}" for d in status["degraded"]))
+                   + _esc("; ".join(f"config {d['config']}: {d['service_failures']}, " + ", ".join(
+                       f"{_status_label(code)} ×{n}" for code, n in d["by_status"].items())
+                       for d in status["degraded"]))
                    + "). Failures stay in the denominators, so these rates partly measure provider availability, not "
                      "planning.")
     if m["dry_run_configs"]:
