@@ -149,6 +149,27 @@ python -m vplan report build --run runs/<c3_run> --run runs/<c7_run> --run runs/
 - **The report labels its own status:** INCOMPLETE, LIMITED and DEGRADED (provider failures) runs, and a "not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.
 - **Container (R8):** `docker/run-local.sh` builds the locked Linux image and runs the test suite and 10 tasks inside it, with no network and no env file.
 
+### Metric definitions
+
+These are fixed before any final run (spec §14). `metrics.json` reports each of them per configuration.
+
+- **Success:**
+  - A feasible task succeeds when the Judge reports S1 ∧ S2 ∧ V1–V4: the right object rests in the bin, with no collision, joint-limit, singularity or self-collision violation.
+  - An impossible task succeeds only when it is refused.
+- **Denominator:** every task in the seed set. Provider failures, malformed output, exhausted budgets and simulator errors all count as failures.
+- **First-try success (config 2):** round 1 of each config-3 attempt, scored as a one-attempt run. The round-1 plan passes the verifier and the Judge reports success, or the model correctly refuses an impossible task.
+- **Success with repair (config 3):** success within k = 3 repairs, so at most 4 planner calls, on the same tasks and denominator.
+- **Repair gain (3 − 2):** the paired difference on the feasible tasks present in both. It includes the effect of the extra attempts, so on its own it does not credit feedback.
+- **Feedback gain (3 − 7):** the paired difference against equal-budget resampling (config 7). It separates the effect of feedback from retrying.
+- **Intervals:**
+  - gains: a paired bootstrap over tasks (10,000 resamples, seed 0), 95% percentile interval;
+  - proportions: Wilson 95% intervals, always with N and the seed-set hash.
+- **Refusals:** a confusion matrix of feasible vs impossible by refused, attempted or no decision. It counts wrongly attempted impossible tasks and wrongly refused feasible tasks, apart from feasible success. A refusal's reason is also checked against the impossibility proof, per type.
+- **Safety:** V1–V4 counts per execution, with the bodies involved grouped by kind. "Zero observed violations in M executions" appears only when every counted execution was measured.
+- **Blocked plans:** counted by verifier check and by outcome. Physical-constraint failures (collision, grounding, joint limits, singularity, grasp, release) are kept apart from solver non-convergence (IK accuracy, continuity) and from malformed or failed model output.
+- **Breakdowns:** by stratum (distractors × obstacles, feasible tasks), by diagnostic attribution (spec §10), and by tokens and latency per configuration. Latency excludes the key-frame rendering.
+- **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Everything else is labelled a dry run or a development result. With the Token Factory credit reserved for the demo (D57), which runs carry the headline is still the owner's decision.
+
 ## Repository layout
 
 | Path | Contents |
