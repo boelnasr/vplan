@@ -10,8 +10,9 @@ directory the first run recorded, and its hash must match every run manifest. Re
 drift since preparation is allowed; a configuration change is refused, as everywhere in W3.1.
 
 Refused, with a message that is safe to print (EvalError, exit code 2 in the CLI): runs over different seed sets, two
-runs of one configuration, a run directory without a valid manifest, and any row that does not validate or does not
-belong to its run and seed set. A run that recorded fewer rows than it planned, or that covered only an --n prefix,
+runs of one configuration, a run directory without a valid manifest, a manifest whose planned or prepared task count
+does not fit the seed set, any row that does not validate or does not belong to its run and seed set, and an --output
+that is, or lies under, an existing file. A run that recorded fewer rows than it planned, or that covered only an --n prefix,
 is reported with its INCOMPLETE or LIMITED label (D33), never refused.
 """
 from __future__ import annotations
@@ -132,17 +133,26 @@ def collect_runs(run_dirs: Sequence[str | Path], seed_dir: str | Path | None = N
     if seeds.seed_set_hash != run_hash:
         raise EvalError(f"the seed set in {seed_dir} has seed-set hash {seeds.seed_set_hash[:12]}, but the runs were "
                         f"made on {str(run_hash)[:12]}")
+    size = seeds.manifest["n"]
+    for d, m in zip(dirs, manifests):  # before any row is read: a row index is checked against n, then indexes tasks
+        if not (1 <= m["n"] <= m["n_prepared"] == size):
+            raise EvalError(f"{d / 'manifest.json'}: n {m['n']} and n_prepared {m['n_prepared']} do not fit the seed "
+                            f"set's {size} tasks (expected 1 <= n <= n_prepared = {size})")
     excluded = seeds.manifest.get("excluded")  # not among the W3.1 loader's required keys
     if not isinstance(excluded, int) or isinstance(excluded, bool) or excluded < 0:
         raise EvalError(f"the seed set in {seed_dir} does not record its excluded candidates as a count: {excluded!r}")
     rows = [row for d, m in zip(dirs, manifests) for row in _rows(d, m, seeds)]
-    return Collected(rows, manifests, seeds, excluded, seeds.manifest["n"])
+    return Collected(rows, manifests, seeds, excluded, size)
 
 
 def build(run_dirs: Sequence[str | Path], output: str | Path, seed_dir: str | Path | None = None
           ) -> tuple[ReportFiles, dict[str, Any]]:
     """Collect the runs and write OUTPUT/metrics.json and OUTPUT/report.html; returns the files and the report's
-    status (complete, incomplete, limited, title prefixes)."""
+    status (complete, incomplete, limited, degraded, title prefixes)."""
+    output = Path(output)
+    taken = next((p for p in (output, *output.parents) if p.exists() and not p.is_dir()), None)
+    if taken is not None:  # refused before any work, instead of a FileExistsError from mkdir at the end
+        raise EvalError(f"--output {output} names a report directory, but {taken} is an existing file")
     got = collect_runs(run_dirs, seed_dir)
     files = build_report(got.rows, Path(output), manifests=got.manifests, undetermined=got.undetermined,
                          seed_set_size=got.seed_set_size)

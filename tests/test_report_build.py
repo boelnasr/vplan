@@ -254,6 +254,24 @@ def test_rows_that_fail_validation_are_refused(runs, tmp_path, damage, message):
         collect.collect_runs([run_dir])
 
 
+@pytest.mark.parametrize("n, n_prepared, extra_row", [(6, 6, True), (6, 6, False), (5, 6, False), (3, 4, False)])
+def test_a_manifest_that_does_not_fit_the_seed_set_is_refused_before_rows_are_read(runs, tmp_path, n, n_prepared,
+                                                                                   extra_row):
+    # A hand-edited n beyond the seed set used to reach seeds.tasks[index] and end in an IndexError traceback.
+    from vplan.evaluate import collect
+    run_dir = _copy_run(runs[5], tmp_path / "c5")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    (run_dir / "manifest.json").write_text(json.dumps({**manifest, "n": n, "n_prepared": n_prepared}),
+                                           encoding="utf-8")
+    if extra_row:
+        row = json.loads((run_dir / "attempts.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        moved = {**row, "attempt_id": "5:dev:5", "task_index": 5, "record": {**row["record"], "attempt_id": "5:dev:5"}}
+        with open(run_dir / "attempts.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(moved) + "\n")
+    with pytest.raises(collect.EvalError, match="seed set's 5 tasks"):
+        collect.collect_runs([run_dir])
+
+
 def test_a_record_that_does_not_carry_the_runs_planner_is_refused(seed_dir, tmp_path):
     from vplan.evaluate import collect
     run(5, seed_dir, tmp_path / "c5", fake=FakeSupervise())  # its records name provider "fake", not "heuristic"
@@ -319,6 +337,18 @@ def test_cli_report_build_refusals_exit_2_with_a_clean_message(seed_dir, runs, t
     err = capsys.readouterr().err
     assert message in err and err.startswith("error: ") and "Traceback" not in err
     assert not (tmp_path / "report").exists()
+
+
+@pytest.mark.parametrize("where", ["file", "under_a_file"])
+def test_cli_report_build_refuses_an_output_that_is_a_file(runs, tmp_path, capsys, where):
+    from vplan.cli import main
+    taken = tmp_path / "taken"
+    taken.write_text("not a directory", encoding="utf-8")
+    out = taken if where == "file" else taken / "report"
+    assert main(["report", "build", "--run", str(runs[5]), "--output", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "--output" in err and "Traceback" not in err
+    assert taken.read_text(encoding="utf-8") == "not a directory"
 
 
 def test_cli_report_build_refuses_wsl_paths(monkeypatch, capsys):
