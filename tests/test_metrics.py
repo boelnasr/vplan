@@ -361,6 +361,68 @@ def test_a_headline_report_needs_configs_2_3_and_7_all_on_token_factory(override
     assert headline["status"] == ("not_run" if 3 in drop else "dry_run" if dry else "partial")
 
 
+TF = {3: ev.TOKEN_FACTORY, 7: ev.TOKEN_FACTORY}
+LIMITED_3 = "config 3 covers only the first 7 of 400 tasks"
+
+
+@pytest.mark.parametrize("manifests, size, drop, status, reasons, repair, feedback", [
+    # Config 3 ran an --n prefix (LIMITED) and config 7 stopped early (INCOMPLETE). D33 never calls either complete,
+    # so neither gives a headline number, whatever the provider.
+    ([ev.run_manifest(3, 7, 400), ev.run_manifest(7, 400, 400)], 400, (), "incomplete",
+     [LIMITED_3, "config 7 run is incomplete (7/400 tasks)"],
+     f"not a headline result: {LIMITED_3}",
+     f"not a headline result: {LIMITED_3}; config 7 run is incomplete (7/400 tasks)"),
+    ([ev.run_manifest(3, 7, 400), ev.run_manifest(7, 7, 400)], 400, (), "limited",
+     [LIMITED_3, "config 7 covers only the first 7 of 400 tasks"],
+     f"not a headline result: {LIMITED_3}",
+     f"not a headline result: {LIMITED_3}; config 7 covers only the first 7 of 400 tasks"),
+    # A run that recorded nothing is named once, by its count, not as "not run". Config 3's run is complete, so the
+    # repair gain (3 - 2) stays a headline source on its own.
+    ([ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], 7, (7,), "incomplete",
+     ["config 7 run is incomplete (0/7 tasks)"], TOKEN_FACTORY_LABEL, "not run")])
+def test_an_incomplete_or_limited_token_factory_run_is_not_a_headline(manifests, size, drop, status, reasons, repair,
+                                                                      feedback):
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config not in drop]
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=size)
+    headline = m["headline"]
+    assert m["status"]["complete"] is False
+    assert headline["headline_source"] is False and headline["status"] == status
+    assert headline["dry_run_configs"] == [] and headline["missing_configs"] == list(drop)
+    assert headline["reason"] == "; ".join(reasons)
+    assert headline["label"] == "not a headline result: " + "; ".join(reasons)
+    assert headline["repair_gain"]["label"] == repair and headline["feedback_gain"]["label"] == feedback
+    assert headline["repair_gain"]["headline_source"] is (repair == TOKEN_FACTORY_LABEL)
+    assert headline["feedback_gain"]["headline_source"] is False
+    # The configuration rows say the same: a Token Factory run that is not complete is not a headline source.
+    for c in ("2", "3", "7"):
+        if c in m["configs"]:
+            provenance, run = m["configs"][c]["provenance"], m["configs"][c]["run"]
+            short = run["incomplete"] or run["limited"]
+            assert provenance["dry_run"] is False and provenance["headline_source"] is not short
+            assert (provenance["label"] == TOKEN_FACTORY_LABEL) is not short
+            assert m["configs"][c]["label"] == provenance["label"]
+    labels = {c["config"]: c["label"] for c in m["configurations"]}
+    assert labels[3] == m["configs"]["3"]["label"] and labels[2] == m["configs"]["2"]["label"]
+
+
+def test_complete_token_factory_runs_stay_a_headline():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    assert m["status"]["complete"] is True and m["dry_run_configs"] == []
+    assert m["headline"]["status"] == "headline" and m["headline"]["headline_source"] is True
+    assert m["headline"]["reason"] is None and m["headline"]["label"] == TOKEN_FACTORY_LABEL
+    assert m["headline"]["feedback_gain"]["headline_source"] is True
+
+
+def test_a_token_factory_run_that_is_both_incomplete_and_limited_names_both():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 9, 400)], seed_set_size=400)
+    assert m["configs"]["7"]["label"] == "Nebius Token Factory run, not a headline result: incomplete and limited run"
+    assert m["configs"]["3"]["label"] == "Nebius Token Factory run, not a headline result: limited run"
+    assert m["headline"]["reason"] == (f"{LIMITED_3}; config 7 run is incomplete (7/9 tasks); config 7 covers only "
+                                       "the first 9 of 400 tasks")
+
+
 def test_one_openrouter_attempt_makes_a_config_a_dry_run():
     mixed = [ev.scripted_row(3, 0, ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], source=ev.TOKEN_FACTORY),
              ev.scripted_row(3, 1, ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()], source=ev.OPENROUTER)]
