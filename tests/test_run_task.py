@@ -35,6 +35,12 @@ def impossible():
         proof=records.ImpossibilityProof(type=1, refusal_reason="target_unreachable", params={"distance_m": 2.0}))
 
 
+def absent_referent():
+    task = generated()
+    return task.task, records.TaskOracle(target_id=None, feasibility="impossible", proof=records.ImpossibilityProof(
+        type=4, refusal_reason="no_matching_object"))
+
+
 def run(scripted, evaluate, mode="repair", **kwargs):
     from vplan.repair import run_task
     task = generated()
@@ -274,3 +280,58 @@ def test_executed_plan_on_an_absent_referent_task_is_judged_without_crashing():
         type=4, refusal_reason="no_matching_object"))
     result = run_task(task.task, oracle, Scripted([call(task.oracle.reference_plan)]))
     assert result.outcome == "executed" and not result.success and result.judge.predicates["R"] is False
+
+
+@pytest.mark.parametrize("kind", ["feasible", "impossible", "absent_referent"])
+def test_default_evaluator_records_the_old_scoring_of_the_same_execution(kind):  # D48
+    """The stored execution record, scored the pre-D48 way (physics Judge, then the old wrapper on an impossible task),
+    equals what run_task now records from the Judge alone."""
+    from tests.test_judge import legacy_attempted_impossible
+    from vplan.config import config_snapshot
+    from vplan.judge.judge import judge
+    from vplan.repair import run_task
+    task = generated()
+    spec, oracle = {"feasible": (task.task, task.oracle), "impossible": impossible(),
+                    "absent_referent": absent_referent()}[kind]
+    plan, cfgs = task.oracle.reference_plan, config_snapshot()
+    result = run_task(spec, oracle, Scripted([call(plan)]), config_snapshot=cfgs)
+    evaluation = result.rounds[0].evaluation
+    assert result.outcome == "executed" and evaluation.record is not None
+    physics = judge(evaluation.record, spec.scene, oracle.target_id or plan.target_id, "executed", True,
+                    planned_target=plan.target_id, cfg=cfgs["judge"])
+    assert physics.success  # the reference plan succeeds physically; only the label can fail it
+    expected = physics if kind == "feasible" else legacy_attempted_impossible(physics)
+    assert result.judge == evaluation.judge == expected
+    assert result.judge.model_dump_json() == expected.model_dump_json()
+    assert result.success == (kind == "feasible")
+
+
+# ---- custom evaluators on impossible tasks (D48: the Judge scores R) --------------------------------------------
+
+@pytest.mark.parametrize("judged", [True, False], ids=["judge_told_impossible", "no_judge_result"])
+def test_custom_evaluator_owns_its_judge_call_and_run_task_does_not_rescore(judged):
+    from tests.test_judge import S, rec
+    from vplan.judge.judge import judge
+    from vplan.repair import run_task
+    spec, oracle = impossible()
+    evaluation = records.EvaluationResult(
+        outcome="executed", judge=judge(rec(), S, "cube_red", feasible=False) if judged else None)
+    result = run_task(spec, oracle, Scripted([call(generated().oracle.reference_plan)]), evaluator=lambda p: evaluation)
+    assert result.outcome == "executed" and not result.success
+    assert result.rounds[0].evaluation == evaluation and result.judge == evaluation.judge
+
+
+@pytest.mark.parametrize("claimed", [
+    records.JudgeResult(success=True, predicates={"S1": True}, violations=(), details={}),
+    records.JudgeResult(success=False, predicates={"S1": False}, violations=("S1",), details={}),
+    records.JudgeResult(success=True, predicates={"S1": True, "R": True}, violations=(), details={}),
+], ids=["claims_success", "r_never_scored", "r_scored_as_correct"])
+def test_custom_evaluator_contradicting_the_impossible_label_ends_as_sim_error(claimed):
+    from vplan.repair import run_task
+    spec, oracle = impossible()
+    plan = generated().oracle.reference_plan
+    result = run_task(spec, oracle, Scripted([call(plan), call(plan)]),
+                      evaluator=lambda p: records.EvaluationResult(outcome="executed", judge=claimed))
+    assert result.outcome == "sim_error" and not result.success and result.call_count == 1
+    error = result.rounds[0].evaluation
+    assert error.error_type == "ValueError" and "feasible=False" in error.error_message

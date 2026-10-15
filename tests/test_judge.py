@@ -1,3 +1,4 @@
+import ast
 import math
 import os
 import subprocess
@@ -10,7 +11,7 @@ from tests.conftest import make_basic_scene
 from vplan.config import load_config
 from vplan.judge import judge as judge_mod
 from vplan.judge.judge import judge
-from vplan.records import ContactSummary, ExecEvent, ExecutionRecord, Pose
+from vplan.records import ContactSummary, ExecEvent, ExecutionRecord, JudgeResult, Pose
 from vplan.verify import checks as vchecks
 
 DT = 1 / 240
@@ -162,6 +163,19 @@ def test_judge_imports_neither_verify_nor_geometry() -> None:  # D21 independenc
     assert r.returncode == 0, r.stdout + r.stderr
 
 
+def test_only_the_judge_builds_judge_results() -> None:  # D48: every scored predicate lives in judge/
+    src = Path(__file__).resolve().parents[1] / "src" / "vplan"
+    builders = []
+    for path in sorted(src.rglob("*.py")):
+        if path.parent == src / "judge":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            func = node.func if isinstance(node, ast.Call) else None  # JudgeResult(...) or records.JudgeResult(...)
+            if getattr(func, "id", getattr(func, "attr", None)) == "JudgeResult":
+                builders.append(f"{path.relative_to(src).as_posix()}:{node.lineno}")
+    assert not builders, builders
+
+
 STAGES = ("approach", "descend", "lift", "transport", "descend_place", "retreat")  # Verifier segment labels
 ROBOT_LINKS = ("panda_link0", "panda_link3", "panda_link5", "panda_hand", "panda_leftfinger", "panda_rightfinger")
 OTHERS = ("table", "cube_red", "cube_green", "bin_floor", "bin_wall_0", "wall_1")
@@ -184,3 +198,67 @@ def test_every_verifier_allowance_is_a_judge_allowance() -> None:  # final revie
                 | {("robot", st, f, target) for st in ("descend", "retreat") for f in sorted(vchecks.FINGERS)}
                 | {("carried", "lift", "table"), ("carried", "descend_place", "bin_floor")})
     assert allowed == expected
+
+
+# ---- R on an executed plan (spec §13; D40, D48) ------------------------------------------------------------------
+
+def legacy_attempted_impossible(j: JudgeResult) -> JudgeResult:
+    """What repair._attempted_impossible built at 82e354c: the reference for its move into the Judge (D48)."""
+    return JudgeResult(success=False, predicates={**j.predicates, "R": False}, violations=j.violations + ("R",),
+                       details={**j.details, "refusal": "impossible task attempted"})
+
+
+def test_executed_plan_on_an_impossible_task_fails_r_and_keeps_its_physics_predicates() -> None:  # D48
+    physics = judge(rec(), S, "cube_red")
+    r = judge(rec(), S, "cube_red", feasible=False)
+    assert physics.success and not r.success  # physically clean, but the task should have been refused
+    assert r.predicates == {**physics.predicates, "R": False} and list(r.predicates)[-1] == "R"
+    assert r.violations == physics.violations + ("R",)
+    assert r.details == {**physics.details, "refusal": "impossible task attempted"}
+
+
+def test_executed_plan_on_a_feasible_task_has_no_r() -> None:
+    r = judge(rec(), S, "cube_red", feasible=True)
+    assert r.success and list(r.predicates) == ["S1", "S2", "V1", "V2", "V3", "V4"]
+    assert "R" not in r.violations and "refusal" not in r.details
+    assert r == judge(rec(), S, "cube_red")  # feasible is the default
+
+
+def test_refusal_records_are_unchanged() -> None:  # D48 moved only the executed branch
+    assert judge(None, S, "cube_red", "refused", feasible=False) == JudgeResult(
+        success=True, predicates={"R": True}, violations=(), details={"refusal": "correct"})
+    assert judge(None, S, "cube_red", "refused", feasible=True) == JudgeResult(
+        success=False, predicates={"R": False}, violations=(), details={"refusal": "false refusal on a feasible task"})
+
+
+# 28 forbidden robot-table contacts: more than the 20 contact violations the Judge lists before R is appended.
+MANY_CONTACTS = tuple(c("robot", f"panda_link{i}", "table", "base", stage) for i in range(1, 8)
+                      for stage in ("approach", "transport", "descend_place", "retreat"))
+WRONG_PICK = rec(cube=Pose(position=(0.50, -0.15, 0.02)), green=Pose(position=(0.45, 0.28, 0.02)), events=ATTACH,
+                 contacts=(c("robot", "panda_leftfinger", "cube_green", "base", "lift"),
+                           c("cube_green", "base", "robot", "panda_rightfinger", "transport")))
+EXECUTIONS = {  # id -> (execution record, oracle target, planned target)
+    "clean": (rec(), "cube_red", None),
+    "s1_outside_bin": (rec(cube=Pose(position=(0.30, 0.28, 0.02))), "cube_red", None),
+    "s2_wrong_object_in_bin": (rec(), "cube_green", None),
+    "v1_forearm_contact": (rec(contacts=(c("robot", "panda_link5", "cube_red", "base", "transport"),)),
+                           "cube_red", None),
+    "v1_capped_violations": (rec(contacts=MANY_CONTACTS), "cube_red", None),
+    "v2_joint_limit": (rec(violation=0.01), "cube_red", None),
+    "v3_no_sigma_evidence": (rec(sigmas=()), "cube_red", None),
+    "v4_self_contact": (rec(contacts=(c("robot", "panda_link2", "robot", "panda_link6", "transport"),)),
+                        "cube_red", None),
+    "short_dwell": (rec(lin=(0.0,) * (DWELL // 2), ang=(0.0,) * (DWELL // 2)), "cube_red", None),
+    "wrong_pick_planned_target": (WRONG_PICK, "cube_red", "cube_green"),
+}
+
+
+@pytest.mark.parametrize("record, oracle, planned", list(EXECUTIONS.values()), ids=list(EXECUTIONS))
+def test_judge_scores_an_attempted_impossible_task_exactly_like_the_old_wrapper(record, oracle, planned) -> None:
+    """Same execution input: the pre-D48 wrapper over the physics Judge equals the Judge told the task is impossible."""
+    cfg = load_config("judge")
+    old = legacy_attempted_impossible(judge(record, S, oracle, "executed", True, planned_target=planned, cfg=cfg))
+    new = judge(record, S, oracle, "executed", False, planned_target=planned, cfg=cfg)
+    assert new == old
+    assert new.model_dump_json() == old.model_dump_json()  # same key and violation order in saved records
+    assert new.violations.count("R") == 1 and not new.success
