@@ -1608,3 +1608,15 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - Ultra: never completed. The free endpoint answered 503 to most calls across seven attempts over about an hour; the partial runs stay under `runs/cmp-1015/c3-ultra*`.
 
 **Open (owner):** the evaluation model (Lightning, Ultra, or Lightning for the evaluation and Ultra for the demo).
+
+**Addendum to D55 (2026-10-16): R8 local done.** The owner installed Docker Desktop (29.8.2) with WSL integration, instead of the `docker.io` package D51 assumed; it is free for personal projects.
+- The first `docker/run-local.sh` run passed 950 tests and failed 2. Both failures were in test setup and packaging, not in the evaluation code:
+  - `test_gitinfo` read the host's `VPLAN_GIT_DIRTY=true`, which `run-local.sh` passes in; the test now clears it;
+  - `test_metrics` parses `docs/spec.md`, which the image did not ship; the image now copies that one file.
+- **After the fixes** (image `sha256:f52b395d059b…`, 1.34 GB, built from `d90e968`):
+  - in the container: 953 passed, 1 skipped (the test that needs `.git`);
+  - 10/10 pilot tasks prepared;
+  - `vplan eval prepare` (10 tasks) and `vplan eval run --config 5`: 10/10 attempts (6 executed, 3 refused, 1 budget exhausted, 9 judged successes), with no network and no env file;
+  - the manifest records the host commit (source "env", clean), the image ID and Linux Python 3.10.22.
+- **Cross-platform determinism:** the container's seed set has the same hash (`3e0bb043…`) and outcomes as the same 10-task set prepared and run on Windows on Oct 15.
+- Windows suite on the merged code: 954 passed.
