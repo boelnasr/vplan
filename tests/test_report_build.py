@@ -10,7 +10,7 @@ import os
 import pytest
 
 from tests import eval_rows as ev
-from tests.test_eval_runner import FakeSupervise
+from tests.test_eval_runner import FakeSupervise, known_git  # noqa: F401 (module-scoped autouse: a pinned git SHA)
 from tests.test_generate import _fake_witness
 from tests.test_pilot import env_file
 from vplan import records

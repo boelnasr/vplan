@@ -14,6 +14,18 @@ from vplan import records
 from vplan.config import config_hash, config_snapshot
 
 FREE = "nvidia/nemotron-3-ultra-550b-a55b:free"
+KNOWN_GIT = {"head": "c" * 40, "dirty": False, "source": "git"}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def known_git():
+    """eval run refuses to start without a git SHA, and the container stand-in has no .git, so runner tests pin the
+    repository's SHA (tests/test_gitinfo.py covers how it is resolved). Other checkouts (ManipulaPy) stay real."""
+    from vplan.evaluate import runner
+    real = runner._git
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(runner, "_git", lambda *args: dict(KNOWN_GIT) if not args else real(*args))
+        yield KNOWN_GIT
 
 
 @pytest.fixture(scope="module")
@@ -187,12 +199,44 @@ def test_new_run_records_every_attempt_once_with_a_spec_manifest(seed_dir, tmp_p
     assert (m["n"], m["n_prepared"], m["limited"]) == (5, 5, False)
     assert m["config_hashes"] == {k: config_hash(v) for k, v in config_snapshot().items()}
     assert m["image_digest"] == "sha256:feedface" and m["timeout_s"] == 600.0
-    assert {"head", "dirty", "source"} >= set(m["git"] or {}) and {"version", "location", "git"} <= set(m["manipulapy"])
+    assert m["git"] == KNOWN_GIT and m["allow_no_git"] is False
+    assert {"version", "location", "git"} <= set(m["manipulapy"])
     assert {"openai", "pybullet", "ManipulaPy", "numpy", "pydantic"} <= set(m["versions"])
     assert {"python", "os", "source_digest", "source_hashes", "created_utc"} <= set(m)
     start, end = sessions(run_dir)
     assert (start["event"], start["session"], start["pending"]) == ("start", 0, 5)
+    assert start["git"] == KNOWN_GIT and start["allow_no_git"] is False
     assert (end["event"], end["status"], end["recorded"]) == ("end", "complete", 5)
+
+
+def test_a_run_without_a_git_sha_is_refused_unless_allowed(seed_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import runner
+    real = runner._git
+    monkeypatch.setattr(runner, "_git", lambda *args: None if not args else real(*args))
+    fake = FakeSupervise()
+    with pytest.raises(runner.EvalError, match="--allow-no-git"):
+        run(seed_dir, tmp_path, fake=fake)
+    assert not (tmp_path / "run").exists() and fake.jobs == []
+    assert run(seed_dir, tmp_path, fake=fake, allow_no_git=True).status == "complete"
+    m = manifest(tmp_path / "run")
+    assert m["git"] is None and m["allow_no_git"] is True
+    assert sessions(tmp_path / "run")[0]["allow_no_git"] is True
+
+
+def test_resume_without_a_git_sha_is_refused_unless_allowed(seed_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import runner
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, fake=FakeSupervise(interrupt_at=1))
+    real = runner._git
+    monkeypatch.setattr(runner, "_git", lambda *args: None if not args else real(*args))
+    fake = FakeSupervise()
+    with pytest.raises(runner.EvalError, match="--allow-no-git"):
+        run(seed_dir, tmp_path, fake=fake, resume=tmp_path / "run")
+    assert fake.jobs == [] and len(sessions(tmp_path / "run")) == 2  # the first session's start and end only
+    assert run(seed_dir, tmp_path, fake=fake, resume=tmp_path / "run", allow_no_git=True).status == "complete"
+    resumed = [s for s in sessions(tmp_path / "run") if s["event"] == "start"][-1]
+    assert resumed["git"] is None and resumed["allow_no_git"] is True
+    assert manifest(tmp_path / "run")["git"] == KNOWN_GIT  # the manifest keeps the first session's provenance
 
 
 def test_image_digest_is_null_when_unset(seed_dir, tmp_path, monkeypatch):
@@ -567,13 +611,14 @@ def test_cli_eval_run_wiring_and_exit_codes(monkeypatch, tmp_path, capsys):
                  "--run-dir", "r"]) == 0
     assert seen[0] == (5, "dev", {"seed_dir": "s", "run_dir": "r", "resume": None, "n": 3, "env_file": None,
                                   "model": None, "temperature": None, "allow_paid": False,
-                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None})
+                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None,
+                                  "allow_no_git": False})
     status[0] = "incomplete"
     assert main(["eval", "run", "--config", "3", "--seeds", "dev", "--env-file", "e.env", "--resume", "r",
-                 "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid"]) == 1
+                 "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid", "--allow-no-git"]) == 1
     kw = seen[1][2]
-    assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"]) == (
-        "r", "e.env", 20.0, 300.0, 0.5, True)
+    assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"],
+            kw["allow_no_git"]) == ("r", "e.env", 20.0, 300.0, 0.5, True, True)
     assert "--resume" in capsys.readouterr().err
 
 

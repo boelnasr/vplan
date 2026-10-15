@@ -20,6 +20,9 @@ never in params, results, logs, the manifest or attempts.jsonl.
 Resume (--resume RUN_DIR) discards a partial final line, skips recorded attempt IDs and refuses a run whose config,
 mode, k, planner, seed-set hash, config hashes, task count or source (unless --allow-source-drift) differ.
 
+Git provenance (spec §14): a session starts only when the checkout's git SHA is known (pilot._git: the git command,
+then the repository files, then VPLAN_GIT_SHA), unless --allow-no-git, which the manifest and session line record.
+
 Stop rules (D33, D42): a 401/402/403/404 stops the run at once; three consecutive failed provider requests stop it.
 Requests are counted from each AttemptRecord's rounds, in order, as D33 counts them: run_task ends an attempt at its
 first service failure, and a request that reached the provider resets the count. A worker fault without a record
@@ -393,7 +396,7 @@ class _Session(NamedTuple):
 
 def _create(spec: EvalConfig, split: str, settings: PlannerSettings, *, seed_dir: str | Path | None,
             run_dir: str | Path | None, n: int | None, allow_source_drift: bool, timeout_s: float,
-            max_rpm: float | None) -> _Session:
+            max_rpm: float | None, provenance: dict, allow_no_git: bool) -> _Session:
     seed_dir = Path(seed_dir) if seed_dir is not None else default_seed_dir(split)
     seeds = load_seed_set(seed_dir, allow_source_drift=allow_source_drift)
     if seeds.split != split:
@@ -423,7 +426,7 @@ def _create(spec: EvalConfig, split: str, settings: PlannerSettings, *, seed_dir
         "n": n, "n_prepared": total, "limited": n < total,
         "config_hashes": {key: config_hash(value) for key, value in seeds.config.items()},
         "source_hashes": hashes, "source_digest": source_digest(hashes), "source_drift": drift,
-        "timeout_s": timeout_s, "max_rpm": max_rpm, **_provenance()}
+        "timeout_s": timeout_s, "max_rpm": max_rpm, "allow_no_git": allow_no_git, **provenance}
     _write_json(run_dir / "manifest.json", manifest)
     return _Session(run_dir, manifest, seeds, n, hashes, drift, 0, _Recorded(set(), Counter(), 0), 0)
 
@@ -474,10 +477,12 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
              resume: str | Path | None = None, n: int | None = None, env_file: str | Path | None = None,
              model: str | None = None, temperature: float | None = None, allow_paid: bool = False,
              allow_source_drift: bool = False, timeout_s: float = DEFAULT_TIMEOUT_S, max_rpm: float | None = None,
-             import_modules: Sequence[str] = (), supervise_attempt: Callable[..., SupervisedAttempt] = supervise,
+             allow_no_git: bool = False, import_modules: Sequence[str] = (),
+             supervise_attempt: Callable[..., SupervisedAttempt] = supervise,
              echo: Callable[[str], None] = lambda line: print(line, flush=True)) -> RunSummary:
     """Run (or with resume, continue) one config over a prepared seed set. Everything is validated before the first
-    worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set."""
+    worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set. Without a git SHA
+    for the checkout the run is refused unless allow_no_git."""
     spec = eval_config(config)
     if split not in SPLITS:
         raise EvalError(f"unknown split {split!r}; expected one of {', '.join(SPLITS)}")
@@ -489,9 +494,15 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
         raise EvalError("pass a new run directory or --resume RUN_DIR, not both")
     settings = planner_settings(spec, env_file=env_file, model=model, temperature=temperature,
                                 allow_paid=allow_paid)
+    provenance = _provenance()
+    if provenance["git"] is None and not allow_no_git:
+        raise EvalError("no git SHA for this checkout: the git command failed, HEAD could not be read from the "
+                        "repository files, and VPLAN_GIT_SHA is unset or not a SHA; pass --allow-no-git to run "
+                        "without one (the manifest records it)")
     if resume is None:
         state = _create(spec, split, settings, seed_dir=seed_dir, run_dir=run_dir, n=n,
-                        allow_source_drift=allow_source_drift, timeout_s=timeout_s, max_rpm=max_rpm)
+                        allow_source_drift=allow_source_drift, timeout_s=timeout_s, max_rpm=max_rpm,
+                        provenance=provenance, allow_no_git=allow_no_git)
     else:
         state = _resume(spec, split, settings, resume, seed_dir=seed_dir, n=n, allow_source_drift=allow_source_drift)
     run_dir, manifest, seeds, n, hashes, session, previous = (state.run_dir, state.manifest, state.seeds, state.n,
@@ -508,7 +519,8 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
     _append(run_dir / "sessions.jsonl", json.dumps({
         "event": "start", "session": session, "started_utc": _utc_now(), "resumed": resume is not None,
         "pending": len(pending), "discarded_partial_bytes": state.discarded, "source_digest": source_digest(hashes),
-        "source_drift": state.drift, "timeout_s": timeout_s, "max_rpm": max_rpm, **_provenance()}))
+        "source_drift": state.drift, "timeout_s": timeout_s, "max_rpm": max_rpm, "allow_no_git": allow_no_git,
+        **provenance}))
     echo(f"run {run_dir}: config {spec.number} ({spec.mode}, k={spec.k}, {settings.provider}/{settings.model}) on "
          f"{split} seed set {manifest['seed_set_hash'][:12]}; {len(pending)} of {n} attempts to run "
          f"(session {session}; resume with --resume {run_dir})")
