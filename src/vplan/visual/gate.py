@@ -56,7 +56,7 @@ def _pose(client: int, plan: PickPlacePlan, traj: CandidateTrajectory, scene: Sc
     obj = next(o for o in scene.objects if o.id == plan.target_id)
     attach = np.linalg.inv(_tcp(h)) @ pose_to_T(obj.pose.position, obj.pose.orientation)
     # TCP y is the closing axis: project all object half-extents on it, as capture_check does. The footprint's
-    # smaller half-size is wrong for a yawed top grasp or a side grasp, and the fingers would cut into the object.
+    # smaller half-size is wrong for a yawed top grasp or a side grasp: the fingers cut into the object or float off it.
     half_width = float(np.abs(attach[1, :3]) @ (np.asarray(obj.size) / 2))
     set_arm(h, np.array(traj.segments[SEGMENT["prerelease"]].q[-1]))
     pos, orn = T_to_pose(_tcp(h) @ attach)
