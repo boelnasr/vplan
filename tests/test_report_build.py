@@ -346,6 +346,24 @@ def test_a_manifest_that_does_not_fit_the_seed_set_is_refused_before_rows_are_re
         collect.collect_runs([run_dir])
 
 
+def test_a_run_labelled_with_another_split_than_its_seed_set_is_refused(runs, tmp_path):
+    # Headline status needs the test split (spec §14). The rows' split was only checked against the run manifest, so
+    # a run over dev seeds relabelled "test" throughout would have passed; the seed set's own split decides.
+    from vplan.evaluate import collect
+    run_dir = _copy_run(runs[5], tmp_path / "c5")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    (run_dir / "manifest.json").write_text(json.dumps({**manifest, "split": "test"}), encoding="utf-8")
+    lines = []
+    for line in (run_dir / "attempts.jsonl").read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        attempt_id = row["attempt_id"].replace(":dev:", ":test:")
+        lines.append(json.dumps({**row, "split": "test", "attempt_id": attempt_id,
+                                 "record": {**row["record"], "attempt_id": attempt_id}}))
+    (run_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(collect.EvalError, match="test split, but its seed set holds the dev split"):
+        collect.collect_runs([run_dir])
+
+
 def test_a_record_that_does_not_carry_the_runs_planner_is_refused(seed_dir, tmp_path):
     from vplan.evaluate import collect
     run(5, seed_dir, tmp_path / "c5", fake=FakeSupervise())  # its records name provider "fake", not "heuristic"

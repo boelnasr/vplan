@@ -11,8 +11,8 @@ directory the first run recorded, and its hash must match every run manifest. Re
 drift since preparation is allowed; a configuration change is refused, as everywhere in W3.1.
 
 Refused, with a message that is safe to print (EvalError, exit code 2 in the CLI): runs over different seed sets, two
-runs of one configuration, a run directory without a valid manifest, a manifest whose planned or prepared task count
-does not fit the seed set, any row that does not validate or does not belong to its run and seed set, and an --output
+runs of one configuration, a run directory without a valid manifest, a manifest whose split is not its seed set's or
+whose planned or prepared task count does not fit the seed set, any row that does not validate or does not belong to its run and seed set, and an --output
 that is, or lies under, an existing file. A run that recorded fewer rows than it planned, or that covered only an --n
 prefix, is reported with its INCOMPLETE or LIMITED label (D33), never refused.
 """
@@ -170,6 +170,9 @@ def collect_runs(run_dirs: Sequence[str | Path], seed_dir: str | Path | None = N
                         f"made on {str(run_hash)[:12]}")
     size = seeds.manifest["n"]
     for d, m in zip(dirs, manifests):  # before any row is read: a row index is checked against n, then indexes tasks
+        if m["split"] != seeds.split:  # rows are checked against the manifest; headline status needs the test split
+            raise EvalError(f"{d / 'manifest.json'} says the {m['split']} split, but its seed set holds the "
+                            f"{seeds.split} split")
         if not (1 <= m["n"] <= m["n_prepared"] == size):
             raise EvalError(f"{d / 'manifest.json'}: n {m['n']} and n_prepared {m['n_prepared']} do not fit the seed "
                             f"set's {size} tasks (expected 1 <= n <= n_prepared = {size})")
