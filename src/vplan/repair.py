@@ -109,7 +109,8 @@ def _continue(first: RoundRecord, run_round, *, k: int, feedback: bool) -> tuple
     """Up to k further rounds after `first` until a terminal outcome; returns (outcome, rounds).
 
     run_round(index, protocol, feedback, previous) -> RoundRecord. A malformed retry uses up a round, and a
-    second consecutive malformed reply ends the attempt (only one schema retry per malformed sequence).
+    second consecutive malformed reply ends the attempt (only one schema retry per malformed sequence). Consecutive
+    means adjacent rounds: a plan or a protocol error in between starts a new sequence.
     """
     rounds = [first]
     terminal = _terminal(first)
@@ -141,7 +142,9 @@ def _continue(first: RoundRecord, run_round, *, k: int, feedback: bool) -> tuple
         terminal = _terminal(record)
         if record.call.outcome == "malformed":
             malformed_count += 1
-        elif record.call.outcome == "proposed":
+        else:
+            # After a protocol error the next request uses another protocol and carries that round's errors, not
+            # the earlier schema errors, so it is not the schema retry of the earlier malformed reply.
             malformed_count = 0
         if malformed_count >= 2:
             terminal = "malformed_final"

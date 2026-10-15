@@ -123,6 +123,37 @@ def test_two_consecutive_malformed_outputs_end_the_attempt_like_the_pilot():
     assert result.outcome == "malformed_final" and result.call_count == 2
 
 
+@pytest.mark.parametrize("mode", ["repair", "resample"])
+def test_protocol_error_breaks_the_consecutive_malformed_streak(mode):
+    plan = generated().oracle.reference_plan
+    scripted = Scripted([call(), call(outcome="protocol_error"), call(), call(plan)])
+    result = run(scripted, lambda p: executed(), mode=mode)
+    assert result.outcome == "executed" and result.call_count == 4
+    assert [r.call.outcome for r in result.rounds] == ["malformed", "protocol_error", "malformed", "proposed"]
+    assert result.total_tokens == 40
+
+
+# "Two malformed replies in a row" (D40/D48) counts consecutive rounds. Only a protocol error between two malformed
+# replies is affected (a service failure is terminal, a plan always broke the streak), and only when it fills round 1
+# of a k = 3 attempt: the old count ended M, P, M as malformed_final after three calls; now round 3 decides.
+M, P, S = "malformed", "protocol_error", "service_failure"
+
+
+@pytest.mark.parametrize("outcomes, k, expected, calls", [
+    ((M, P, M, M), 3, "malformed_final", 4),  # was malformed_final after 3 calls
+    ((M, P, M, P), 3, "budget_exhausted", 4),  # was malformed_final after 3 calls
+    ((M, P, M, S), 3, "service_failure", 4),  # was malformed_final after 3 calls
+    ((M, P, M), 2, "malformed_final", 3),  # unchanged: round 2 is the last allowed round
+    ((P, M, P, M), 3, "malformed_final", 4),  # unchanged: the last allowed round
+    ((P, M, M), 3, "malformed_final", 3),  # unchanged: consecutive
+    ((M, P, P, M), 3, "malformed_final", 4),  # unchanged: the last allowed round
+])
+def test_malformed_streak_outcomes_by_round_sequence(outcomes, k, expected, calls):
+    scripted = Scripted([call(outcome=o, status_code=503 if o == S else None) for o in outcomes])
+    result = run(scripted, lambda p: pytest.fail("no simulation"), k=k)
+    assert (result.outcome, result.call_count) == (expected, calls) and not scripted.calls
+
+
 def test_service_failure_is_terminal():
     scripted = Scripted([call(outcome="service_failure", status_code=503), call()])
     result = run(scripted, lambda p: pytest.fail("no simulation"))

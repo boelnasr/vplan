@@ -157,6 +157,9 @@ FIRST_ROUNDS = {
                                [ev.blocked(ev.COLLISION), ev.judged()]),
     "false refusal": (ev.FEASIBLE, [ev.call(ev.refusal("other"))], []),
     "malformed, then a plan": (ev.FEASIBLE, [ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
+    # Config 3 reaches round 3 here (a protocol error breaks the malformed streak); round 1 alone is malformed_final.
+    "malformed, protocol error, malformed, then a plan": (
+        ev.FEASIBLE, [ev.call(), ev.call(outcome="protocol_error"), ev.call(), ev.call(ev.GOOD)], [ev.judged()]),
     "protocol error, then a plan": (ev.FEASIBLE, [ev.call(outcome="protocol_error"), ev.call(ev.GOOD)],
                                     [ev.judged()]),
     "service failure": (ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None, status_code=503)], []),
