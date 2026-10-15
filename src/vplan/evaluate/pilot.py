@@ -15,7 +15,6 @@ import os
 import platform
 import re
 import statistics
-import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +22,7 @@ from typing import NamedTuple
 from urllib.parse import urlparse
 
 from vplan.config import CONFIG_DIR, config_hash, config_snapshot
+from vplan.evaluate.gitinfo import git_provenance
 from vplan.planners.nemotron import NemotronPlanner
 from vplan.records import GeneratedTask, PairedResult, RoundRecord, TaskMetadata, TaskOracle, TaskSpec
 from vplan.repair import _terminal, evaluate_pair
@@ -104,14 +104,10 @@ def check_path_arg(value: str) -> None:
 
 
 def _git(cwd: Path = ROOT) -> dict | None:
-    try:
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True, text=True,
-                              timeout=10, check=True).stdout.strip()
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=cwd, capture_output=True, text=True,
-                                timeout=10, check=True).stdout
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return {"head": head, "dirty": bool(status.strip())}
+    """{"head", "dirty", "source"} of the checkout at cwd (gitinfo.git_provenance), or None. Only the vplan checkout
+    itself may take VPLAN_GIT_SHA from the environment (the container has no git)."""
+    own = Path(cwd).resolve() == ROOT.resolve()
+    return git_provenance(cwd, env=os.environ if own else None)
 
 
 def prepare(output: Path, *, n: int = 20, seed: int = 0, max_candidates: int = 100, progress=None,

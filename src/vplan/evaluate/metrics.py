@@ -5,7 +5,8 @@ config 3, rescored the way run_task scores a k = 0 attempt (first_round). Feasib
 refusals are separate results (D8), and every outcome stays in its denominator (spec §10). Headline sources are
 Nebius Token Factory runs only (spec §14): a Nemotron configuration that ran on any other provider is labelled a
 dry run. A Token Factory run that recorded fewer rows than it planned (INCOMPLETE) or covered only an --n prefix
-(LIMITED) is never complete (D33), so it is not a headline source either. The repair gain (3 - 2) is reported
+(LIMITED) is never complete (D33), so it is not a headline source either, and neither is any run on the development
+seeds: spec §14 runs every configuration on the same held-out test seeds. The repair gain (3 - 2) is reported
 without crediting feedback; only the feedback gain (3 - 7) compares feedback with retrying at the same budget, and no
 fixed text says which way it went: only its interval can (docs/related-work.md, "Claims vplan must not make").
 
@@ -52,12 +53,14 @@ CONFIGURATIONS: dict[int, dict[str, str]] = {
 }
 NEMOTRON_CONFIGS = frozenset({1, 2, 3, 7})  # the configurations spec §14 runs on Token Factory
 HEADLINE_CONFIGS = (2, 3, 7)  # a headline report needs all three, each from a complete run on Token Factory
+HEADLINE_SPLIT = "test"  # spec §14: the held-out seeds; a report on any other seed set is never a headline
 # Provider names that count as Token Factory. pilot.run_live names a non-OpenRouter provider by its host, and
 # docs/plan.md gives the Token Factory base URL https://api.tokenfactory.nebius.com/v1/.
 TOKEN_FACTORY_PROVIDERS = frozenset({"api.tokenfactory.nebius.com"})
 DRY_RUN_LABEL = "dry run, not a headline result"
 TOKEN_FACTORY_LABEL = "Nebius Token Factory run (headline source)"
-SHORT_RUN_LABEL = "Nebius Token Factory run, not a headline result: {} run"  # "incomplete", "limited" or both
+TOKEN_FACTORY_NOT_HEADLINE = "Nebius Token Factory run, not a headline result: {}"
+DEV_SPLIT_REASON = "development seeds, not the held-out test set"
 NOT_RUN = "not run"
 FIXED_LABELS = {
     4: "Cosmos shadow study: secondary and shadow only, a separate pass over saved frames (spec §11); it never "
@@ -438,8 +441,8 @@ def _config_block(config: int, rows: Sequence[AttemptRow], tasks_in_report: int,
 
 
 def _gain(by_config: Mapping[int, Sequence[AttemptRow]], blocks: Mapping[str, Mapping[str, Any]],
-          runs: Mapping[int, Mapping[str, Any]], x: int, y: int, reading: str, n_boot: int, seed: int
-          ) -> dict[str, Any]:
+          runs: Mapping[int, Mapping[str, Any]], x: int, y: int, reading: str, n_boot: int, seed: int,
+          split: str) -> dict[str, Any]:
     """Paired difference x - y in feasible success over the tasks both configurations attempted."""
     a = {r.task_index: r for r in by_config.get(x, ()) if _feasible(r)}
     b = {r.task_index: r for r in by_config.get(y, ()) if _feasible(r)}
@@ -453,13 +456,14 @@ def _gain(by_config: Mapping[int, Sequence[AttemptRow]], blocks: Mapping[str, Ma
                                 seed=seed)
         result.update(mean=diff.mean, ci95=[diff.low, diff.high])
     ran = str(x) in blocks and str(y) in blocks
-    # provenance.headline_source already needs a complete run (_mark_short_runs); config 2 shares config 3's run
+    # provenance.headline_source already needs a complete run on the test seeds (_mark_not_headline); config 2
+    # shares config 3's run
     source = ran and bool(common) and all(blocks[str(c)]["provenance"]["headline_source"] for c in (x, y))
-    short = _short_run_reasons(runs, (x, y))
+    reasons = _short_run_reasons(runs, (x, y)) + _split_reasons(split)
     result["headline_source"] = source
     result["dry_run_configs"] = [c for c in (x, y) if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
     result["label"] = (NOT_RUN if not ran else TOKEN_FACTORY_LABEL if source else
-                       "not a headline result: " + "; ".join(short) if short and not result["dry_run_configs"] else
+                       "not a headline result: " + "; ".join(reasons) if reasons and not result["dry_run_configs"] else
                        DRY_RUN_LABEL)
     return result
 
@@ -482,36 +486,45 @@ def _short_run_reasons(runs: Mapping[int, Mapping[str, Any]], configs: Iterable[
     return reasons
 
 
-def _mark_short_runs(block: dict[str, Any]) -> None:
-    """A Token Factory configuration whose run is incomplete or limited is not a headline source: its provenance
-    and label say so. dry_run stays about the provider alone."""
+def _split_reasons(split: str) -> list[str]:
+    """Spec §14 runs every configuration on the held-out test seeds; a report on any other seed set says so."""
+    return [] if split == HEADLINE_SPLIT else [DEV_SPLIT_REASON]
+
+
+def _mark_not_headline(block: dict[str, Any], split: str) -> None:
+    """A Token Factory configuration whose run is incomplete or limited, or that ran on the development seeds, is not
+    a headline source: its provenance and label say why. dry_run stays about the provider alone."""
     provenance, run = block["provenance"], block["run"]
     kinds = [kind for kind in ("incomplete", "limited") if run is not None and run[kind]]
-    if provenance["headline_source"] and kinds:
-        provenance.update(headline_source=False, label=SHORT_RUN_LABEL.format(" and ".join(kinds)))
+    reasons = ([f"{' and '.join(kinds)} run"] if kinds else []) + _split_reasons(split)
+    if provenance["headline_source"] and reasons:
+        provenance.update(headline_source=False, label=TOKEN_FACTORY_NOT_HEADLINE.format("; ".join(reasons)))
         block["label"] = provenance["label"]
 
 
-def _headline_status(blocks: Mapping[str, Mapping[str, Any]], runs: Mapping[int, Mapping[str, Any]]
+def _headline_status(blocks: Mapping[str, Mapping[str, Any]], runs: Mapping[int, Mapping[str, Any]], split: str
                      ) -> dict[str, Any]:
-    """A headline report needs configs 2, 3 and 7, each from a complete run on Token Factory; anything else says
-    which of them are dry runs, which are missing and which runs are incomplete or limited.
+    """A headline report needs configs 2, 3 and 7, each from a complete run on Token Factory over the held-out test
+    seeds; anything else says which of them are dry runs, which are missing, which runs are incomplete or limited,
+    and whether the seeds are the development set.
 
     status is "headline", or the first that applies of: "not_run" (no config 3 rows, so no headline numbers),
     "dry_run" (one of 2, 3 and 7 ran on another provider), "partial" (one of them was never run), "incomplete" (a
-    run of config 3 or 7 recorded fewer rows than it planned) and "limited" (a run of config 3 or 7 covered only an
-    --n prefix). reason lists every cause, not only the one status names."""
+    run of config 3 or 7 recorded fewer rows than it planned), "limited" (a run of config 3 or 7 covered only an
+    --n prefix) and "development" (the runs used the development seeds, not the held-out test set). reason lists
+    every cause, not only the one status names, and the seed split last."""
     dry = [c for c in HEADLINE_CONFIGS if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
     missing = [c for c in HEADLINE_CONFIGS if str(c) not in blocks]
     short = _short_run_reasons(runs, HEADLINE_CONFIGS)
     # A run that recorded nothing is missing from the rows but named by its count (0/n), not as "not run".
     unrun = [c for c in missing if _run_of(c) not in runs]
-    source = not dry and not missing and not short
+    off_split = _split_reasons(split)
+    source = not dry and not missing and not short and not off_split
     reasons = ([f"{config_list(dry)} {'is a dry run' if len(dry) == 1 else 'are dry runs'} (not on Nebius Token "
-                "Factory)"] if dry else []) + ([f"{config_list(unrun)} not run"] if unrun else []) + short
+                "Factory)"] if dry else []) + ([f"{config_list(unrun)} not run"] if unrun else []) + short + off_split
     incomplete = any(runs[c]["incomplete"] for c in (3, 7) if c in runs)
     status = ("headline" if source else "not_run" if "3" not in blocks else "dry_run" if dry else
-              "partial" if unrun else "incomplete" if incomplete else "limited")
+              "partial" if unrun else "incomplete" if incomplete else "limited" if short else "development")
     return {"headline_source": source, "status": status, "dry_run_configs": dry, "missing_configs": missing,
             "reason": "; ".join(reasons) or None,
             "label": TOKEN_FACTORY_LABEL if source else "not a headline result: " + "; ".join(reasons)}
@@ -560,10 +573,25 @@ def _runs(manifests: Sequence[Mapping[str, Any]], by_config: Mapping[int, Sequen
     return [runs[c] for c in sorted(runs)]
 
 
-def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int]) -> dict[str, Any]:
+def _service_failures(rows: Sequence[AttemptRow]) -> Counter[str]:
+    """Failed provider requests by HTTP status, as D33 counts them: every planner call that ended as a service failure,
+    under its status code ("transport" when it had none), plus a row whose worker reported a service failure without a
+    record ("unknown": rows do not carry the status). Each request counts once."""
+    failed = Counter(str(x.call.status_code or "transport") for r in rows if r.attempt is not None
+                     for x in r.attempt.rounds if x.call.outcome == "service_failure")
+    unknown = sum(r.attempt is None and r.outcome == "service_failure" for r in rows)
+    if unknown:
+        failed["unknown"] = unknown
+    return failed
+
+
+def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int],
+            service_failures: Mapping[int, Counter[str]]) -> dict[str, Any]:
     """The report's standing, as the pilot titles it (D33): INCOMPLETE when a run recorded fewer rows than it
-    planned, LIMITED when a run covered only an --n prefix (never complete), and DRY RUN naming every configuration
-    that did not run on Token Factory. complete is None when no run manifest was supplied (coverage unknown)."""
+    planned, LIMITED when a run covered only an --n prefix (never complete), DEGRADED: n service failures when any
+    provider request failed (they stay in the denominators; degraded counts them per configuration and by HTTP
+    status), and DRY RUN naming every configuration that did not run on Token Factory. complete is None when no run
+    manifest was supplied (coverage unknown)."""
     incomplete = [{"config": r["config"], "recorded": r["recorded"], "planned": r["planned"]}
                   for r in runs if r["incomplete"]]
     limited = [{"config": r["config"], "planned": r["planned"], "prepared": r["prepared"]}
@@ -575,10 +603,14 @@ def _status(runs: Sequence[Mapping[str, Any]], dry_run_configs: Sequence[int]) -
     if limited:
         prefixes.append("LIMITED: " + "; ".join(f"config {r['config']} first {r['planned']} of {r['prepared']} tasks"
                                                 for r in limited))
+    degraded = [{"config": c, "service_failures": sum(n.values()), "by_status": dict(sorted(n.items()))}
+                for c, n in sorted(service_failures.items()) if sum(n.values())]
+    if degraded:
+        prefixes.append(f"DEGRADED: {_plural(sum(d['service_failures'] for d in degraded), 'service failure')}")
     if dry_run_configs:
         prefixes.append(f"DRY RUN: {config_list(dry_run_configs)}")
     return {"complete": (not incomplete and not limited) if runs else None, "incomplete": incomplete,
-            "limited": limited, "title_prefixes": prefixes}
+            "limited": limited, "degraded": degraded, "title_prefixes": prefixes}
 
 
 def public_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -641,20 +673,20 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
     tasks_in_report = len({r.task_index for r in rows})
     runs = {r["config"]: r for r in _runs(manifests, by_config, seed_set_size)}
     blocks = {str(c): _config_block(c, by_config[c], tasks_in_report, headline_providers) for c in sorted(by_config)}
+    seed_set = _seed_set(rows, undetermined, seed_set_size)
     for c, block in blocks.items():
         block["run"] = runs.get(_run_of(int(c)))
-        _mark_short_runs(block)
-    seed_set = _seed_set(rows, undetermined, seed_set_size)
+        _mark_not_headline(block, seed_set["name"])
 
     def success(config: int) -> dict[str, Any] | None:
         return {"config": config, **blocks[str(config)]["success"]} if str(config) in blocks else None
 
     headline = {
         "seed_set": {"name": seed_set["name"], "hash": seed_set["hash"]},
-        **_headline_status(blocks, runs),
+        **_headline_status(blocks, runs, seed_set["name"]),
         "first_try_success": success(2), "success_with_repair": success(3),
-        "repair_gain": _gain(by_config, blocks, runs, 3, 2, REPAIR_GAIN_READING, n_boot, seed),
-        "feedback_gain": _gain(by_config, blocks, runs, 3, 7, FEEDBACK_GAIN_READING, n_boot, seed),
+        "repair_gain": _gain(by_config, blocks, runs, 3, 2, REPAIR_GAIN_READING, n_boot, seed, seed_set["name"]),
+        "feedback_gain": _gain(by_config, blocks, runs, 3, 7, FEEDBACK_GAIN_READING, n_boot, seed, seed_set["name"]),
         "heuristic_baseline": success(5),
     }
     configurations = [{"config": c, **CONFIGURATIONS[c], "present": str(c) in blocks,
@@ -666,7 +698,9 @@ def compute_metrics(rows: Iterable[AttemptRow], *, n_boot: int = N_BOOT, seed: i
         "schema_version": SCHEMA_VERSION,
         "dry_run": bool(dry_run_configs),  # some configuration is a dry run; dry_run_configs says which
         "dry_run_configs": dry_run_configs,
-        "status": _status(list(runs.values()), dry_run_configs),
+        # config 2 is round 1 of config 3, so its requests are counted once, under config 3
+        "status": _status(list(runs.values()), dry_run_configs,
+                          {c: _service_failures(by_config[c]) for c in by_config if c != 2}),
         "headline": headline,
         "configurations": configurations,
         "configs": blocks,

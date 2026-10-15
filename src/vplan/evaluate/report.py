@@ -122,6 +122,11 @@ def _write_atomic(path: Path, text: str) -> None:
 
 
 # ---- text helpers ----------------------------------------------------------------------------------
+def _status_label(code: str) -> str:
+    """A metrics status.degraded by_status key as the banner names it."""
+    return {"transport": "no HTTP status", "unknown": "status unknown"}.get(code, f"HTTP {code}")
+
+
 def _esc(value: Any) -> str:
     """Escaped text. '://' becomes an entity, so no provider or manifest string ever forms a URL in the file."""
     return html.escape(str(value), quote=True).replace("://", "&#58;//")
@@ -436,6 +441,14 @@ def _banners(m: Mapping[str, Any]) -> str:
         out.append("<strong>Limited runs.</strong> " + _esc(_sentence_list(
             [f"config {r['config']} ran the first {r['planned']} of the seed set's {r['prepared']} tasks"
              for r in status["limited"]])) + ". A prefix (eval run --n) is a smoke test, never a complete result.")
+    if status["degraded"]:
+        total = sum(d["service_failures"] for d in status["degraded"])
+        out.append(f"<strong>Provider failures.</strong> {total} provider request{'' if total == 1 else 's'} failed ("
+                   + _esc("; ".join(f"config {d['config']}: {d['service_failures']}, " + ", ".join(
+                       f"{_status_label(code)} ×{n}" for code, n in d["by_status"].items())
+                       for d in status["degraded"]))
+                   + "). Failures stay in the denominators, so these rates partly measure provider availability, not "
+                     "planning.")
     if m["dry_run_configs"]:
         named = [f"config {c} ({', '.join(blocks[str(c)]['provenance']['providers'])})" for c in m["dry_run_configs"]]
         listed = named[0] if len(named) == 1 else f"{', '.join(named[:-1])} and {named[-1]}"
@@ -444,8 +457,8 @@ def _banners(m: Mapping[str, Any]) -> str:
     h = m["headline"]
     if not h["headline_source"]:
         out.append("<strong>Not a headline report.</strong> A headline report needs "
-                   f"{_esc(config_list(HEADLINE_CONFIGS))}, each from a complete run on Nebius Token Factory; here "
-                   f"{_esc(h['reason'])}.")
+                   f"{_esc(config_list(HEADLINE_CONFIGS))}, each from a complete run on Nebius Token Factory over the "
+                   f"held-out test seeds; here {_esc(h['reason'])}.")
     short = [f"config {c}: {b['tasks']} of {b['coverage']['tasks_in_report']}" for c, b in _configs(m)
              if b["coverage"]["missing"]]
     if short:
@@ -641,7 +654,9 @@ def _cost(m: Mapping[str, Any]) -> str:
                         _num(lat["wall_per_attempt_median"], 1), lat["wall_attempts"]])
     return ("<p>Tokens are summed from the calls that reported usage; calls without usage are counted, not "
             "estimated. Planner latency is the time spent in planner calls; wall time is the supervisor's time for "
-            "the whole attempt, including simulation (config 2 has none of its own).</p>"
+            "the whole attempt, including simulation but not the key-frame export that a run with frames renders "
+            "after each result (config 3 by default); an attempt whose export did not report its time has no wall "
+            "time. Config 2 has none of its own.</p>"
             + _table(["Config", "Attempts", "Without record", "Planner calls", "Calls per attempt",
                       "Calls per feasible success", "Tokens (known)", "Calls without usage",
                       "Tokens per attempt (median)", "Tokens per feasible success"], cost, _row_classes(m))
@@ -668,8 +683,9 @@ def _notes(m: Mapping[str, Any]) -> str:
         "success; it is not part of this report.",
         "Headline sources are Nebius Token Factory runs only (spec §14). Any Nemotron configuration that ran on "
         f"another provider is labelled \"{DRY_RUN_LABEL}\", and a report is a headline report only if "
-        f"{config_list(HEADLINE_CONFIGS)} all come from complete runs on Token Factory: an incomplete or limited "
-        "run is never a headline source (D33).",
+        f"{config_list(HEADLINE_CONFIGS)} all come from complete runs on Token Factory over the held-out test seeds "
+        "(spec §14): an incomplete or limited run (D33) and a run on the development seeds are never headline "
+        "sources.",
     ]
     return "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in items) + "</ul>"
 
@@ -696,7 +712,7 @@ def _provenance(m: Mapping[str, Any]) -> str:
 
 def render_html(m: Mapping[str, Any], *, title: str = "vplan evaluation report") -> str:
     """The whole report page for one metrics dict (compute_metrics output). The title carries the pilot's prefixes
-    (D33): INCOMPLETE, LIMITED and DRY RUN."""
+    (D33): INCOMPLETE, LIMITED, DEGRADED and DRY RUN."""
     s = m["provenance"]["seed_set"]
     title = " — ".join(m["status"]["title_prefixes"] + [title])
     sections = {"headline": _headline, "configurations": _configurations, "success": _success,

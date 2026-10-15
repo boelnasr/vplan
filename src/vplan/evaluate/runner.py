@@ -10,6 +10,11 @@ Run directory RUN_DIR (default runs/c<config>-<split>-<UTC time>):
 - workers/: per attempt STEM.params.json, STEM.tryT.{result.json, stdout.log, stderr.log} and the pacing file.
   STEM is the task index (NNNN) in session 0 and NNNN.sS in resumed session S, so a resumed attempt never shares
   files with a killed session's attempt (or its orphaned worker). Attempt IDs contain ':', so they never name files.
+- frames/: per attempt frames/STEM/ with the visual-gate key frames of its executed rounds and index.json
+  (evaluate.frames), the input of the config-4 shadow study (spec §11, §14). Config 3 renders them by default;
+  --frames/--no-frames overrides that for any config, and the manifest records the choice. The worker renders after
+  the attempt's result is final, and each row's frames field (records.FrameExport) records the export or why it
+  failed; a failed export never changes the attempt.
 
 Configs (spec §14, D40, D48): 1 Nemotron unverified k=0; 3 Nemotron repair k=3 (config 2 is its round 1); 5 heuristic
 repair k=3, no LLM (its later rounds end as repeat_plan, D39); 6 a frontier model, unverified k=0, named with --model
@@ -19,6 +24,9 @@ never in params, results, logs, the manifest or attempts.jsonl.
 
 Resume (--resume RUN_DIR) discards a partial final line, skips recorded attempt IDs and refuses a run whose config,
 mode, k, planner, seed-set hash, config hashes, task count or source (unless --allow-source-drift) differ.
+
+Git provenance (spec §14): a session starts only when the checkout's git SHA is known (pilot._git: the git command,
+then the repository files, then VPLAN_GIT_SHA), unless --allow-no-git, which the manifest and session line record.
 
 Stop rules (D33, D42): a 401/402/403/404 stops the run at once; three consecutive failed provider requests stop it.
 Requests are counted from each AttemptRecord's rounds, in order, as D33 counts them: run_task ends an attempt at its
@@ -52,8 +60,10 @@ from vplan.evaluate.pilot import (PilotError, _git, _manipulapy, _utc_now, _vers
                                   provider_guard, read_env_file, source_digest, source_hashes)
 from vplan.evaluate.seedsets import SPLITS, EvalError, SeedSet, default_seed_dir, load_seed_set
 from vplan.evaluate.supervisor import FATAL_STATUS, MAX_CONSECUTIVE_SERVICE_FAILURES, AttemptJob, supervise
+from vplan.evaluate.worker import AFTER
 from vplan.planners.heuristic import HeuristicPlanner
-from vplan.records import AttemptMode, AttemptRecord, EvalAttempt, SupervisedAttempt, TaskOracle, TaskSpec
+from vplan.records import (AttemptMode, AttemptRecord, EvalAttempt, FrameExport, SupervisedAttempt, TaskOracle,
+                           TaskSpec)
 
 SCHEMA_VERSION = 1
 KIND = "eval_run"
@@ -201,7 +211,9 @@ def build_planner(params: dict, pacing: dict | None = None):
 
 
 def run_task_job(params: dict) -> dict:
-    """Worker side of one attempt (registered as the "run_task" job in vplan.evaluate.worker)."""
+    """Worker side of one attempt (registered as the "run_task" job in vplan.evaluate.worker). With params["frames"]
+    ({"dir", "rel"}), the key-frame export (evaluate.frames) is the job's after step: the worker runs it only once the
+    attempt's result is written, and it reads the finished record without changing it."""
     from vplan.repair import _simulation_error, run_task
     secret = None
     try:
@@ -216,7 +228,20 @@ def run_task_job(params: dict) -> dict:
         return {"outcome": "sim_error", "error_type": error.error_type, "error_message": error.error_message,
                 "error_traceback": error.error_traceback}
     failed = next((r.call.status_code for r in record.rounds if r.call.outcome == "service_failure"), None)
-    return {"outcome": record.outcome, "status_code": failed, "payload": {"record": record.model_dump(mode="json")}}
+    out = {"outcome": record.outcome, "status_code": failed, "payload": {"record": record.model_dump(mode="json")}}
+    frames = params.get("frames")
+    if frames is not None:
+        def export() -> dict:
+            # Timed from before the import: loading the rendering stack (about 0.4 s in a fresh worker) is part of
+            # the export, which report rows leave out of the attempt's wall time (collect.report_wall_s).
+            start = time.perf_counter()
+            from vplan.evaluate.frames import export_frames
+            result = export_frames(record, spec, seed=params["seed"], config_snapshot=params["config_snapshot"],
+                                   out_dir=Path(frames["dir"]), rel_dir=frames["rel"])
+            return {"frames": result.model_copy(update={"render_s": time.perf_counter() - start}).model_dump(
+                mode="json")}
+        out[AFTER] = export
+    return out
 
 
 # ---- parent side ------------------------------------------------------------------------------------------
@@ -328,12 +353,33 @@ def _sessions_started(path: Path) -> int:
     return count
 
 
+def _frames(supervised: SupervisedAttempt, requested: bool) -> FrameExport | None:
+    """The row's key-frame export: None when the run renders no frames or the worker returned no record; failed when
+    the worker returned a record but no valid export (it ended or raised in its after step)."""
+    payload = supervised.payload
+    if not requested or payload.get("record") is None:
+        return None
+    raw = payload.get("frames")
+    if raw is None:
+        error = payload.get("after_error") if isinstance(payload.get("after_error"), dict) else {}
+        return FrameExport(status="failed", error_type=str(error.get("error_type") or "frames_not_reported"),
+                           error_message=str(error.get("error_message") or "the worker ended before reporting its "
+                                             "frames (a crash or timeout while rendering)")[:500])
+    try:
+        return FrameExport.model_validate(raw)
+    except ValidationError as exc:
+        return FrameExport(status="failed", error_type="invalid_frame_export",
+                           error_message=f"the worker's frame export does not validate ({exc.error_count()} errors)")
+
+
 def _row(supervised: SupervisedAttempt, config: EvalConfig, split: str, index: int, task_id: str, session: int,
-         config_hashes: dict[str, str]) -> EvalAttempt:
-    """The attempts.jsonl row; a record that does not belong to this attempt and run becomes sim_error."""
+         config_hashes: dict[str, str], frames: bool = False) -> EvalAttempt:
+    """The attempts.jsonl row; a record that does not belong to this attempt and run becomes sim_error, and its frame
+    export failed (record_rejected)."""
     common = dict(attempt_id=supervised.attempt_id, config=config.number, split=split, task_index=index,
                   task_id=task_id, session=session, tries=supervised.tries, wall_s=supervised.wall_s,
-                  exit_code=supervised.exit_code, status_code=supervised.status_code)
+                  exit_code=supervised.exit_code, status_code=supervised.status_code,
+                  frames=_frames(supervised, frames))
     raw = supervised.payload.get("record")
     if raw is None:
         return EvalAttempt(**common, outcome=supervised.outcome, error_type=supervised.error_type,
@@ -350,6 +396,11 @@ def _row(supervised: SupervisedAttempt, config: EvalConfig, split: str, index: i
             if (record.mode, record.k) != (config.mode, config.k) else
             "config hashes differ from the run's snapshot" if record.config_hashes != config_hashes else None)
     if problem is not None:
+        exported = common["frames"]
+        if exported is not None and exported.status != "failed":  # frames of a rejected record are not evidence
+            common["frames"] = FrameExport(status="failed", bytes=exported.bytes, render_s=exported.render_s,
+                                           error_type="record_rejected", error_message="the attempt's record was "
+                                           "rejected (invalid_attempt_record), so its frames are not evidence")
         return EvalAttempt(**common, outcome="sim_error", error_type="invalid_attempt_record", error_message=problem)
     return EvalAttempt(**common, outcome=record.outcome, record=record)
 
@@ -389,11 +440,12 @@ class _Session(NamedTuple):
     number: int  # 0 for a new run
     previous: _Recorded  # rows of earlier sessions
     discarded: int  # bytes of a partial final attempts.jsonl line
+    frames: bool  # workers render key frames (evaluate.frames)
 
 
 def _create(spec: EvalConfig, split: str, settings: PlannerSettings, *, seed_dir: str | Path | None,
             run_dir: str | Path | None, n: int | None, allow_source_drift: bool, timeout_s: float,
-            max_rpm: float | None) -> _Session:
+            max_rpm: float | None, provenance: dict, allow_no_git: bool, frames: bool | None) -> _Session:
     seed_dir = Path(seed_dir) if seed_dir is not None else default_seed_dir(split)
     seeds = load_seed_set(seed_dir, allow_source_drift=allow_source_drift)
     if seeds.split != split:
@@ -413,6 +465,7 @@ def _create(spec: EvalConfig, split: str, settings: PlannerSettings, *, seed_dir
         raise EvalError(f"run directory {run_dir} is not empty; refusing to overwrite evidence (--resume continues "
                         "a run)")
     run_dir.mkdir(parents=True, exist_ok=True)
+    frames = spec.number == 3 if frames is None else frames  # config 3's frames feed the config-4 shadow study
     manifest = {
         "schema_version": SCHEMA_VERSION, "kind": KIND, "run_id": run_dir.name, "created_utc": _utc_now(),
         "config": spec.number, "mode": spec.mode, "k": spec.k, "planner": settings.describe(),
@@ -423,13 +476,13 @@ def _create(spec: EvalConfig, split: str, settings: PlannerSettings, *, seed_dir
         "n": n, "n_prepared": total, "limited": n < total,
         "config_hashes": {key: config_hash(value) for key, value in seeds.config.items()},
         "source_hashes": hashes, "source_digest": source_digest(hashes), "source_drift": drift,
-        "timeout_s": timeout_s, "max_rpm": max_rpm, **_provenance()}
+        "timeout_s": timeout_s, "max_rpm": max_rpm, "allow_no_git": allow_no_git, "frames": frames, **provenance}
     _write_json(run_dir / "manifest.json", manifest)
-    return _Session(run_dir, manifest, seeds, n, hashes, drift, 0, _Recorded(set(), Counter(), 0), 0)
+    return _Session(run_dir, manifest, seeds, n, hashes, drift, 0, _Recorded(set(), Counter(), 0), 0, frames)
 
 
 def _resume(spec: EvalConfig, split: str, settings: PlannerSettings, run_dir: str | Path, *,
-            seed_dir: str | Path | None, n: int | None, allow_source_drift: bool) -> _Session:
+            seed_dir: str | Path | None, n: int | None, allow_source_drift: bool, frames: bool | None) -> _Session:
     run_dir = Path(run_dir)
     try:
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -448,6 +501,9 @@ def _resume(spec: EvalConfig, split: str, settings: PlannerSettings, run_dir: st
             raise _incompatible(f"planner {key}", planner.get(key), now)
     if not isinstance(manifest.get("n"), int) or (n is not None and n != manifest["n"]):
         raise _incompatible("--n (the planned task count)", manifest.get("n"), n)
+    recorded_frames = manifest.get("frames", False)  # runs from before frames rendered none
+    if frames is not None and frames != recorded_frames:  # a shadow study needs every attempt's frames, or none
+        raise _incompatible("frames (--frames/--no-frames)", recorded_frames, frames)
     seed_dir = Path(seed_dir) if seed_dir is not None else Path((manifest.get("seed_set") or {}).get("dir", ""))
     # Drift against the seed set was accepted when the run was created; only drift since then matters now.
     seeds = load_seed_set(seed_dir, allow_source_drift=True)
@@ -467,17 +523,20 @@ def _resume(spec: EvalConfig, split: str, settings: PlannerSettings, run_dir: st
     n = manifest["n"]
     previous = _read_attempts(run_dir / "attempts.jsonl", {f"{spec.number}:{split}:{i}" for i in range(n)})
     return _Session(run_dir, manifest, seeds, n, hashes, drift, _sessions_started(run_dir / "sessions.jsonl"),
-                    previous, discarded)
+                    previous, discarded, bool(recorded_frames))
 
 
 def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run_dir: str | Path | None = None,
              resume: str | Path | None = None, n: int | None = None, env_file: str | Path | None = None,
              model: str | None = None, temperature: float | None = None, allow_paid: bool = False,
              allow_source_drift: bool = False, timeout_s: float = DEFAULT_TIMEOUT_S, max_rpm: float | None = None,
-             import_modules: Sequence[str] = (), supervise_attempt: Callable[..., SupervisedAttempt] = supervise,
+             allow_no_git: bool = False, frames: bool | None = None, import_modules: Sequence[str] = (),
+             supervise_attempt: Callable[..., SupervisedAttempt] = supervise,
              echo: Callable[[str], None] = lambda line: print(line, flush=True)) -> RunSummary:
     """Run (or with resume, continue) one config over a prepared seed set. Everything is validated before the first
-    worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set."""
+    worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set. Without a git SHA
+    for the checkout the run is refused unless allow_no_git. frames (None: config 3 only; on resume, the run's own
+    setting) makes workers render the key frames of executed rounds."""
     spec = eval_config(config)
     if split not in SPLITS:
         raise EvalError(f"unknown split {split!r}; expected one of {', '.join(SPLITS)}")
@@ -487,13 +546,22 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
         raise EvalError("--max-rpm must be a positive number")
     if resume is not None and run_dir is not None:
         raise EvalError("pass a new run directory or --resume RUN_DIR, not both")
+    if frames is not None and not isinstance(frames, bool):
+        raise EvalError("frames must be True, False or None (the config's default)")
     settings = planner_settings(spec, env_file=env_file, model=model, temperature=temperature,
                                 allow_paid=allow_paid)
+    provenance = _provenance()
+    if provenance["git"] is None and not allow_no_git:
+        raise EvalError("no git SHA for this checkout: the git command failed, HEAD could not be read from the "
+                        "repository files, and VPLAN_GIT_SHA is unset or not a SHA; pass --allow-no-git to run "
+                        "without one (the manifest records it)")
     if resume is None:
         state = _create(spec, split, settings, seed_dir=seed_dir, run_dir=run_dir, n=n,
-                        allow_source_drift=allow_source_drift, timeout_s=timeout_s, max_rpm=max_rpm)
+                        allow_source_drift=allow_source_drift, timeout_s=timeout_s, max_rpm=max_rpm,
+                        provenance=provenance, allow_no_git=allow_no_git, frames=frames)
     else:
-        state = _resume(spec, split, settings, resume, seed_dir=seed_dir, n=n, allow_source_drift=allow_source_drift)
+        state = _resume(spec, split, settings, resume, seed_dir=seed_dir, n=n, allow_source_drift=allow_source_drift,
+                        frames=frames)
     run_dir, manifest, seeds, n, hashes, session, previous = (state.run_dir, state.manifest, state.seeds, state.n,
                                                               state.hashes, state.number, state.previous)
 
@@ -508,7 +576,8 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
     _append(run_dir / "sessions.jsonl", json.dumps({
         "event": "start", "session": session, "started_utc": _utc_now(), "resumed": resume is not None,
         "pending": len(pending), "discarded_partial_bytes": state.discarded, "source_digest": source_digest(hashes),
-        "source_drift": state.drift, "timeout_s": timeout_s, "max_rpm": max_rpm, **_provenance()}))
+        "source_drift": state.drift, "timeout_s": timeout_s, "max_rpm": max_rpm, "allow_no_git": allow_no_git,
+        "frames": state.frames, **provenance}))
     echo(f"run {run_dir}: config {spec.number} ({spec.mode}, k={spec.k}, {settings.provider}/{settings.model}) on "
          f"{split} seed set {manifest['seed_set_hash'][:12]}; {len(pending)} of {n} attempts to run "
          f"(session {session}; resume with --resume {run_dir})")
@@ -524,12 +593,14 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
                     break
                 task = seeds.tasks[index]
                 attempt_id = f"{spec.number}:{split}:{index}"
+                stem = workers / (f"{index:04d}" if session == 0 else f"{index:04d}.s{session}")
+                frame_dir = None if not state.frames else {"dir": str((run_dir / "frames" / stem.name).resolve()),
+                                                           "rel": f"frames/{stem.name}"}
                 job = AttemptJob(attempt_id, JOB, {
                     **base, "attempt_id": attempt_id, "seed": task.seed, "task": task.task.model_dump(mode="json"),
-                    "oracle": seeds.oracles[index].model_dump(mode="json")})
-                stem = workers / (f"{index:04d}" if session == 0 else f"{index:04d}.s{session}")
+                    "oracle": seeds.oracles[index].model_dump(mode="json"), "frames": frame_dir})
                 supervised = supervise_attempt(job, stem, timeout_s=timeout_s, import_modules=import_modules)
-                row = _row(supervised, spec, split, index, task.task_id, session, cfg_hashes)
+                row = _row(supervised, spec, split, index, task.task_id, session, cfg_hashes, state.frames)
                 sink.write(row.model_dump_json() + "\n")
                 sink.flush()
                 os.fsync(sink.fileno())  # a killed parent loses at most the attempt in flight
@@ -537,7 +608,7 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
                 outcomes[row.outcome] += 1
                 successes += row.record is not None and row.record.success
                 echo(f"{attempt_id} {row.outcome}{' success' if row.record is not None and row.record.success else ''}"
-                     f" ({row.wall_s:.1f} s)")
+                     f" ({row.wall_s:.1f} s{'' if row.frames is None else '; frames ' + row.frames.status})")
                 stop_reason = watch.update(row)
                 if stop_reason is not None:
                     break

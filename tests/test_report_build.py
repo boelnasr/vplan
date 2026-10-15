@@ -10,7 +10,7 @@ import os
 import pytest
 
 from tests import eval_rows as ev
-from tests.test_eval_runner import FakeSupervise
+from tests.test_eval_runner import FakeSupervise, known_git  # noqa: F401 (module-scoped autouse: a pinned git SHA)
 from tests.test_generate import _fake_witness
 from tests.test_pilot import env_file
 from vplan import records
@@ -18,12 +18,18 @@ from vplan.planners.heuristic import heuristic_geometry
 from vplan.repair import run_task
 
 
+WALL_S, RENDER_S = 0.25, 0.125  # a scripted attempt's supervisor time, and its key-frame export's share of it
+
+
 class ScriptedSupervise:
     """Stand-in for supervisor.supervise: feasible tasks get the canonical plan and a passing Judge, impossible tasks
-    the proof's refusal; every call carries the job's provider and model, as the real planner's would."""
+    the proof's refusal; every call carries the job's provider and model, as the real planner's would. With render_s,
+    a job that asks for frames also gets the worker's export (written for an execution, none for a refusal), which
+    took render_s of the attempt's WALL_S; without it, the worker reports no export, as after a crash while
+    rendering."""
 
-    def __init__(self, interrupt_at=None):
-        self.interrupt_at, self.jobs = interrupt_at, []
+    def __init__(self, interrupt_at=None, execution=None, render_s=None):
+        self.interrupt_at, self.jobs, self.execution, self.render_s = interrupt_at, [], execution, render_s
 
     def __call__(self, job, stem, **kwargs):
         if self.interrupt_at is not None and len(self.jobs) == self.interrupt_at:
@@ -34,14 +40,21 @@ class ScriptedSupervise:
         source = (p["planner"]["provider"], p["planner"]["model"])
         if oracle.feasibility == "feasible":
             calls, evaluations = [ev.call(heuristic_geometry(task.scene, oracle.target_id), source=source)], [
-                ev.judged()]
+                ev.judged().model_copy(update={"record": self.execution})]
         else:
             calls, evaluations = [ev.call(ev.refusal(oracle.proof.refusal_reason), source=source)], []
         record = run_task(task, oracle, ev.Scripted(calls), k=p["k"], mode=p["mode"],
                           evaluator=lambda plan: evaluations.pop(0), attempt_id=job.attempt_id,
                           config_snapshot=p["config_snapshot"])
+        payload = {"record": record.model_dump(mode="json")}
+        if p.get("frames") is not None and self.render_s is not None:
+            export = (records.FrameExport(status="written", index=f"{p['frames']['rel']}/index.json",
+                                          index_sha256="ab" * 32, rounds=(0,), files=9, bytes=1000,
+                                          render_s=self.render_s)
+                      if record.outcome == "executed" else records.FrameExport(status="none", render_s=self.render_s))
+            payload["frames"] = export.model_dump(mode="json")
         return records.SupervisedAttempt(attempt_id=job.attempt_id, job=job.job, outcome=record.outcome, tries=1,
-                                         wall_s=0.25, exit_code=0, payload={"record": record.model_dump(mode="json")})
+                                         wall_s=WALL_S, exit_code=0, payload=payload)
 
 
 def run(config, seed_dir, run_dir, *, fake=None, **kw):
@@ -71,12 +84,12 @@ def other_seed_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def runs(seed_dir, tmp_path_factory):
-    """Complete runs of configs 5, 3 and 7 over the five tasks."""
+    """Complete runs of configs 5, 3 and 7 over the five tasks; config 3 renders key frames, as by default."""
     root = tmp_path_factory.mktemp("runs")
     out = {}
     for config in (5, 3, 7):
         out[config] = root / f"c{config}"
-        assert run(config, seed_dir, out[config]).status == "complete"
+        assert run(config, seed_dir, out[config], fake=ScriptedSupervise(render_s=RENDER_S)).status == "complete"
     return out
 
 
@@ -98,15 +111,76 @@ def test_every_attempt_becomes_a_report_row_joined_with_its_seed_set_task(runs, 
         rows = [r for r in got.rows if r.config == config]
         for row, attempt in zip(rows, attempts(run_dir), strict=True):
             task = seeds.tasks[attempt.task_index]
-            assert (row.config, row.task_index, row.task_id, row.outcome, row.error_type, row.wall_s) == (
-                attempt.config, attempt.task_index, attempt.task_id, attempt.outcome, attempt.error_type,
-                attempt.wall_s)
+            assert (row.config, row.task_index, row.task_id, row.outcome, row.error_type) == (
+                attempt.config, attempt.task_index, attempt.task_id, attempt.outcome, attempt.error_type)
+            # The row keeps the supervisor's time; the report row leaves config 3's key-frame export out of it.
+            assert attempt.wall_s == WALL_S and row.wall_s == (WALL_S - RENDER_S if config == 3 else WALL_S)
             assert row.seed_set == attempt.split == "dev" and row.attempt == attempt.record
             assert (row.seed_set_hash, row.provider, row.model) == (manifest["seed_set_hash"], manifest["provider"],
                                                                     manifest["model"])
             assert (row.task, row.distractors, row.obstacles) == (task.task, task.distractors, task.obstacles)
             assert row.oracle == seeds.oracles[attempt.task_index]
     assert {(r.provider, r.model) for r in got.rows if r.config == 5} == {("heuristic", "template-heuristic")}
+
+
+STREAMS = ("q_replay", "finger_replay", "object_replay", "sigma_min_steps", "rest_lin_hist", "rest_ang_hist",
+           "rest_pose_hist")
+
+
+def test_report_rows_drop_the_per_step_streams_and_keep_every_metric(seed_dir, tmp_path):
+    # D56: each row kept about 1.2 MB of streams that no metric reads, so a 400-task report needed 1.5-2 GB of RAM.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    run_dir = tmp_path / "c3"
+    assert run(3, seed_dir, run_dir, fake=ScriptedSupervise(execution=ev.execution_record())).status == "complete"
+    got = collect.collect_runs([run_dir])
+    executed = [r.attempt.rounds[-1].evaluation.record for r in got.rows if r.outcome == "executed"]
+    assert len(executed) == 3 and all(rec.approval == "ab" * 32 and rec.events for rec in executed)
+    assert all(not getattr(rec, name) for rec in executed for name in STREAMS)
+    full = [r.model_copy(update={"attempt": a.record}) for r, a in zip(got.rows, attempts(run_dir), strict=True)]
+    assert all(getattr(r.attempt.rounds[-1].evaluation.record, name) for r in full if r.outcome == "executed"
+               for name in STREAMS)
+    assert [collect.without_streams(r.attempt) for r in full] == [r.attempt for r in got.rows]
+    kw = dict(manifests=got.manifests, undetermined=got.undetermined, seed_set_size=got.seed_set_size)
+    assert json.dumps(compute_metrics(got.rows, **kw)) == json.dumps(compute_metrics(full, **kw))
+
+
+def test_without_streams_keeps_records_without_an_execution_unchanged():
+    from vplan.evaluate import collect
+    assert collect.without_streams(None) is None
+    record = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.blocked(ev.COLLISION)], k=0)
+    assert collect.without_streams(record) is record
+
+
+def test_report_wall_time_leaves_out_the_key_frame_export(runs):
+    # The worker renders frames inside the supervised try, after the result is final: about 1.3 s per executed
+    # attempt on the acceptance runs, and only config 3 renders by default. Raw wall times would bias the spec §14
+    # latency-per-configuration comparison, including the config 3 vs 7 equal-budget pair.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    assert all(a.frames.render_s == RENDER_S and a.wall_s == WALL_S for a in attempts(runs[3]))
+    assert all(a.frames is None for c in (5, 7) for a in attempts(runs[c]))
+    got = collect.collect_runs([runs[5], runs[3], runs[7]])
+    m = compute_metrics(got.rows, manifests=got.manifests, undetermined=got.undetermined,
+                        seed_set_size=got.seed_set_size)
+    latency = {c: m["configs"][str(c)]["latency_s"] for c in (3, 5, 7)}
+    assert (latency[3]["wall_per_attempt_median"], latency[3]["wall_total"], latency[3]["wall_attempts"]) == (
+        WALL_S - RENDER_S, 5 * (WALL_S - RENDER_S), 5)
+    assert latency[5]["wall_per_attempt_median"] == latency[7]["wall_per_attempt_median"] == WALL_S
+
+
+def test_an_attempt_whose_export_did_not_report_its_time_has_no_report_wall_time(seed_dir, tmp_path):
+    # A crash or hang while rendering keeps the attempt (the result was written first), but its wall time then holds
+    # an unknown render share, up to the attempt timeout; the report counts it among attempts without wall time.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    run_dir = tmp_path / "c3"
+    assert run(3, seed_dir, run_dir).status == "complete"  # the scripted worker reports no export
+    assert all(a.frames.status == "failed" and a.frames.render_s is None for a in attempts(run_dir))
+    got = collect.collect_runs([run_dir])
+    assert [r.wall_s for r in got.rows] == [None] * 5
+    latency = compute_metrics(got.rows)["configs"]["3"]["latency_s"]
+    assert (latency["wall_attempts"], latency["wall_per_attempt_median"]) == (0, None)
 
 
 def test_the_seed_set_defaults_to_the_one_the_runs_recorded(runs, seed_dir):
@@ -130,6 +204,20 @@ def test_a_report_built_from_runs_is_labelled_and_carries_no_local_path(runs, tm
         text = path.read_text(encoding="utf-8")
         for local in (str(runs[5].parent), str(tmp_path), os.path.expanduser("~")):
             assert local not in text and json.dumps(local)[1:-1] not in text, (path.name, local)
+
+
+def test_complete_token_factory_runs_on_dev_seeds_are_not_a_headline_report(seed_dir, tmp_path):
+    from vplan.evaluate import collect
+    (tmp_path / "tf").mkdir()  # run() writes its default env file into the runs' parent directory
+    tf = env_file(tmp_path / "tf", "https://api.tokenfactory.nebius.com/v1/", "nvidia/Nemotron-3-Ultra-550b-a55b")
+    for config in (3, 7):
+        assert run(config, seed_dir, tmp_path / f"c{config}", env_file=tf, allow_paid=True).status == "complete"
+    files, status = collect.build([tmp_path / "c3", tmp_path / "c7"], tmp_path / "report")
+    m = json.loads(files.metrics.read_text(encoding="utf-8"))
+    assert status["complete"] is True and m["dry_run_configs"] == []
+    assert m["configs"]["3"]["provenance"]["providers"] == ["api.tokenfactory.nebius.com"]
+    assert m["headline"]["status"] == "development" and m["headline"]["headline_source"] is False
+    assert m["headline"]["label"] == "not a headline result: development seeds, not the held-out test set"
 
 
 def test_incomplete_and_limited_runs_are_labelled(seed_dir, runs, tmp_path):
@@ -240,6 +328,42 @@ def test_rows_that_fail_validation_are_refused(runs, tmp_path, damage, message):
         collect.collect_runs([run_dir])
 
 
+@pytest.mark.parametrize("n, n_prepared, extra_row", [(6, 6, True), (6, 6, False), (5, 6, False), (3, 4, False)])
+def test_a_manifest_that_does_not_fit_the_seed_set_is_refused_before_rows_are_read(runs, tmp_path, n, n_prepared,
+                                                                                   extra_row):
+    # A hand-edited n beyond the seed set used to reach seeds.tasks[index] and end in an IndexError traceback.
+    from vplan.evaluate import collect
+    run_dir = _copy_run(runs[5], tmp_path / "c5")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    (run_dir / "manifest.json").write_text(json.dumps({**manifest, "n": n, "n_prepared": n_prepared}),
+                                           encoding="utf-8")
+    if extra_row:
+        row = json.loads((run_dir / "attempts.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        moved = {**row, "attempt_id": "5:dev:5", "task_index": 5, "record": {**row["record"], "attempt_id": "5:dev:5"}}
+        with open(run_dir / "attempts.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(moved) + "\n")
+    with pytest.raises(collect.EvalError, match="seed set's 5 tasks"):
+        collect.collect_runs([run_dir])
+
+
+def test_a_run_labelled_with_another_split_than_its_seed_set_is_refused(runs, tmp_path):
+    # Headline status needs the test split (spec §14). The rows' split was only checked against the run manifest, so
+    # a run over dev seeds relabelled "test" throughout would have passed; the seed set's own split decides.
+    from vplan.evaluate import collect
+    run_dir = _copy_run(runs[5], tmp_path / "c5")
+    manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    (run_dir / "manifest.json").write_text(json.dumps({**manifest, "split": "test"}), encoding="utf-8")
+    lines = []
+    for line in (run_dir / "attempts.jsonl").read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        attempt_id = row["attempt_id"].replace(":dev:", ":test:")
+        lines.append(json.dumps({**row, "split": "test", "attempt_id": attempt_id,
+                                 "record": {**row["record"], "attempt_id": attempt_id}}))
+    (run_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(collect.EvalError, match="test split, but its seed set holds the dev split"):
+        collect.collect_runs([run_dir])
+
+
 def test_a_record_that_does_not_carry_the_runs_planner_is_refused(seed_dir, tmp_path):
     from vplan.evaluate import collect
     run(5, seed_dir, tmp_path / "c5", fake=FakeSupervise())  # its records name provider "fake", not "heuristic"
@@ -305,6 +429,18 @@ def test_cli_report_build_refusals_exit_2_with_a_clean_message(seed_dir, runs, t
     err = capsys.readouterr().err
     assert message in err and err.startswith("error: ") and "Traceback" not in err
     assert not (tmp_path / "report").exists()
+
+
+@pytest.mark.parametrize("where", ["file", "under_a_file"])
+def test_cli_report_build_refuses_an_output_that_is_a_file(runs, tmp_path, capsys, where):
+    from vplan.cli import main
+    taken = tmp_path / "taken"
+    taken.write_text("not a directory", encoding="utf-8")
+    out = taken if where == "file" else taken / "report"
+    assert main(["report", "build", "--run", str(runs[5]), "--output", str(out)]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "--output" in err and "Traceback" not in err
+    assert taken.read_text(encoding="utf-8") == "not a directory"
 
 
 def test_cli_report_build_refuses_wsl_paths(monkeypatch, capsys):

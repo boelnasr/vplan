@@ -80,6 +80,31 @@ def judged(*failed: str, violations: tuple[str, ...] = ()) -> records.Evaluation
         details={}))
 
 
+def execution_record(steps: int = 240) -> records.ExecutionRecord:
+    """A small ExecutionRecord with every per-step stream filled: 60 Hz replay and 240 Hz Judge series."""
+    pose = records.Pose(position=(0.45, 0.28, 0.03))
+    replay = steps // 4
+    return records.ExecutionRecord(
+        scene_hash=records.scene_hash(SCENE), approval="ab" * 32, dt_s=1 / 240, n_physics_steps=steps,
+        events=(records.ExecEvent(step=10, kind="attach", values={"lateral_m": 0.001}),),
+        min_joint_margin_rad=(0.1,) * 7, max_joint_violation_rad=0.0, sigma_min_steps=(0.2,) * steps, contacts=(),
+        tracking_error_rad={"approach": 0.01}, final_poses={"cube_red": pose},
+        rest_lin_hist={"cube_red": (0.0,) * 120}, rest_ang_hist={"cube_red": (0.0,) * 120},
+        rest_pose_hist={"cube_red": (pose,) * 120}, q_replay=((0.0,) * 7,) * replay,
+        finger_replay=((0.04, 0.04),) * replay, object_replay={"cube_red": (pose,) * replay})
+
+
+def with_execution_records(rows: list[records.AttemptRow]) -> list[records.AttemptRow]:
+    """The rows with an ExecutionRecord (streams filled) in every executed round, as the runner records them."""
+    def rnd(r: records.RoundRecord) -> records.RoundRecord:
+        e = r.evaluation
+        if e is None or e.outcome != "executed":
+            return r
+        return r.model_copy(update={"evaluation": e.model_copy(update={"record": execution_record()})})
+    return [row if row.attempt is None else row.model_copy(update={"attempt": row.attempt.model_copy(
+        update={"rounds": tuple(rnd(r) for r in row.attempt.rounds)})}) for row in rows]
+
+
 def blocked(*checks: tuple[str, str]) -> records.EvaluationResult:
     """A gate rejection with one Finding per (check, stage)."""
     return records.EvaluationResult(outcome="blocked", findings=tuple(records.Finding(

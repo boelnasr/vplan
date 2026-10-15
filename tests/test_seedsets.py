@@ -162,6 +162,17 @@ def test_manifest_records_mix_seeds_hashes_and_provenance(tmp_path):
     assert set(m["config_hashes"]) == {"verifier", "judge", "physics"}
     assert m["seeds"]["max_candidates"] == 2 * 7 + 20
     assert {"created_utc", "python", "manipulapy", "git"} <= set(m)
+    assert m["git"] == pilot._git()  # head, dirty and the source that supplied the SHA (gitinfo)
+
+
+def test_seed_set_preparation_records_the_sha_from_the_environment_without_git(tmp_path, monkeypatch):
+    from vplan.evaluate import gitinfo
+    monkeypatch.setattr(gitinfo, "_from_git", lambda cwd, run: None)
+    monkeypatch.setattr(gitinfo, "_from_files", lambda cwd, windows: None)
+    monkeypatch.setenv("VPLAN_GIT_SHA", "d" * 40)
+    monkeypatch.setenv("VPLAN_GIT_DIRTY", "false")
+    assert manifest(prepare(tmp_path, feasible=1, impossible=0))["git"] == {"head": "d" * 40, "dirty": False,
+                                                                           "source": "env"}
 
 
 def test_rejected_candidate_is_excluded_and_the_next_seed_fills_the_same_slot(tmp_path):

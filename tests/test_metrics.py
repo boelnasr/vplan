@@ -60,6 +60,19 @@ def test_metrics_are_plain_json_without_nan(m):
     assert json.loads(json.dumps(m, allow_nan=False)) == m
 
 
+def test_no_metric_reads_the_execution_record_streams(rows):
+    # The report drops them from its rows (collect.without_streams); every metric must stay identical.
+    from vplan.evaluate.collect import without_streams
+    full = ev.with_execution_records(rows)
+    assert sum(r.attempt is not None and r.attempt.rounds[-1].evaluation is not None
+               and r.attempt.rounds[-1].evaluation.record is not None for r in full) >= 10
+    slim = [r.model_copy(update={"attempt": without_streams(r.attempt)}) for r in full]
+    assert slim != full
+    for kw in ({}, {"manifests": COVERAGE, "seed_set_size": 9}):
+        assert json.dumps(compute_metrics(slim, **kw)) == json.dumps(compute_metrics(full, **kw)) == json.dumps(
+            compute_metrics(rows, **kw))
+
+
 def test_every_verifier_check_has_one_blocked_plan_category():
     assert set(CHECK_CATEGORIES) == set(records.CheckName.__args__)
     assert set(CHECK_CATEGORIES.values()) == {"physical_constraint", "solver_non_convergence", "learned_visual"}
@@ -418,6 +431,46 @@ def test_complete_token_factory_runs_stay_a_headline():
     assert m["headline"]["feedback_gain"]["headline_source"] is True
 
 
+DEV_REASON = "development seeds, not the held-out test set"
+
+
+def on_dev(rows):
+    return [r.model_copy(update={"seed_set": "dev"}) for r in rows]
+
+
+def test_complete_token_factory_runs_on_dev_seeds_are_not_a_headline():
+    # Spec §14: every configuration runs on the same held-out test seeds, so a dev report is never a headline report.
+    rows = on_dev([r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)])
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    headline = m["headline"]
+    assert m["status"]["complete"] is True and m["dry_run_configs"] == []
+    assert headline["headline_source"] is False and headline["status"] == "development"
+    assert headline["reason"] == DEV_REASON and headline["label"] == f"not a headline result: {DEV_REASON}"
+    for gain in ("repair_gain", "feedback_gain"):
+        assert headline[gain]["headline_source"] is False and headline[gain]["dry_run_configs"] == []
+        assert headline[gain]["label"] == f"not a headline result: {DEV_REASON}"
+    for c in ("2", "3", "7"):
+        provenance = m["configs"][c]["provenance"]
+        assert provenance["headline_source"] is False and provenance["dry_run"] is False
+        assert provenance["label"] == m["configs"][c]["label"] == (
+            f"Nebius Token Factory run, not a headline result: {DEV_REASON}")
+    assert TOKEN_FACTORY_LABEL not in json.dumps(m)
+
+
+def test_a_dev_report_lists_the_split_after_every_other_reason():
+    dry = compute_metrics(on_dev(ev.scenario_rows()))["headline"]
+    assert dry["status"] == "dry_run" and dry["reason"] == (
+        f"configs 2, 3 and 7 are dry runs (not on Nebius Token Factory); {DEV_REASON}")
+    assert dry["repair_gain"]["label"] == DRY_RUN_LABEL  # a dry run says so first, as on the test split
+    rows = on_dev([r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)])
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 400, 400)],
+                        seed_set_size=400)
+    assert m["headline"]["status"] == "incomplete"
+    assert m["headline"]["reason"] == f"{LIMITED_3}; config 7 run is incomplete (7/400 tasks); {DEV_REASON}"
+    assert m["configs"]["3"]["label"] == f"Nebius Token Factory run, not a headline result: limited run; {DEV_REASON}"
+    assert m["headline"]["repair_gain"]["label"] == f"not a headline result: {LIMITED_3}; {DEV_REASON}"
+
+
 def test_a_token_factory_run_that_is_both_incomplete_and_limited_names_both():
     rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
     m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 9, 400)], seed_set_size=400)
@@ -479,7 +532,7 @@ def test_incomplete_and_limited_runs_are_labelled_as_the_pilot_titles_them(rows)
                                                                               "prepared": 9}]
     assert status["title_prefixes"] == ["INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks",
                                         "LIMITED: config 3 first 7 of 9 tasks; config 6 first 7 of 9 tasks",
-                                        "DRY RUN: configs 1, 2, 3 and 7"]
+                                        "DEGRADED: 1 service failure", "DRY RUN: configs 1, 2, 3 and 7"]
     run3 = {"config": 3, "run_id": "c3-test", "planned": 7, "prepared": 9, "recorded": 7, "incomplete": False,
             "limited": True}
     assert m["configs"]["3"]["run"] == run3 and m["configs"]["2"]["run"] == run3  # config 2 is round 1 of 3
@@ -490,15 +543,35 @@ def test_complete_runs_and_the_seed_set_size_from_its_manifest(rows):
     full = [r for r in rows if r.config in (3, 7)]
     m = compute_metrics(full, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
     assert m["status"] == {"complete": True, "incomplete": [], "limited": [],
-                           "title_prefixes": ["DRY RUN: configs 2, 3 and 7"]}
+                           "degraded": [{"config": 7, "service_failures": 1, "by_status": {"503": 1}}],
+                           "title_prefixes": ["DEGRADED: 1 service failure", "DRY RUN: configs 2, 3 and 7"]}
     assert m["provenance"]["seed_set"]["size"] == 7 and m["provenance"]["seed_set"]["tasks"] == 7
     limited = compute_metrics(full[:3], seed_set_size=100)["provenance"]["seed_set"]
     assert (limited["size"], limited["tasks"]) == (100, 3)  # the real size next to the tasks in the report
 
 
 def test_without_run_manifests_coverage_is_unknown(m):
-    assert m["status"]["complete"] is None and m["status"]["title_prefixes"] == ["DRY RUN: configs 1, 2, 3 and 7"]
+    assert m["status"]["complete"] is None
+    assert m["status"]["title_prefixes"] == ["DEGRADED: 1 service failure", "DRY RUN: configs 1, 2, 3 and 7"]
     assert m["configs"]["3"]["run"] is None and m["provenance"]["seed_set"]["size"] is None
+
+
+def test_service_failures_title_the_report_degraded_once_per_request():
+    # D33: any provider failure prefixes the title, and failures are counted by HTTP status ("transport" for a call
+    # without one, "unknown" for a row without a record). Config 2 is round 1 of config 3, so its failures are not
+    # counted again; a row whose worker returned no record but a service failure counts once.
+    sf = ev.call(outcome="service_failure", tokens=None, status_code=503)
+    rows = [ev.scripted_row(3, 0, ev.FEASIBLE, [sf]),
+            ev.scripted_row(3, 1, ev.FEASIBLE, [ev.call(ev.GOOD), sf], [ev.blocked(ev.COLLISION)]),
+            ev.scripted_row(3, 2, ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None)]),
+            ev.scripted_row(7, 0, ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.judged()]),
+            ev.row(7, 1, ev.FEASIBLE, None, outcome="service_failure", error_type="provider_error_body")]
+    status = compute_metrics(rows)["status"]
+    assert status["degraded"] == [{"config": 3, "service_failures": 3, "by_status": {"503": 2, "transport": 1}},
+                                  {"config": 7, "service_failures": 1, "by_status": {"unknown": 1}}]
+    assert status["title_prefixes"] == ["DEGRADED: 4 service failures", "DRY RUN: configs 2, 3 and 7"]
+    clean = compute_metrics([r for r in rows if r.config == 7 and r.attempt is not None])["status"]
+    assert clean["degraded"] == [] and not [p for p in clean["title_prefixes"] if p.startswith("DEGRADED")]
 
 
 @pytest.mark.parametrize("manifests, size, message", [

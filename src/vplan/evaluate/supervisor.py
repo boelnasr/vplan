@@ -2,6 +2,9 @@
 writer of RUN_DIR/results.jsonl (spec §14, §16). Crashes, kills and hangs become sim_error; provider failures
 reported by the worker stay service_failure in the denominator, with the D33 stop rules.
 
+A try that outlives its timeout is killed; it is a worker_timeout unless its result file was already written (the
+worker writes it before a job's after step), in which case that result stands.
+
 Layout: RUN_DIR/results.jsonl (parent) and RUN_DIR/workers/NNNN.{params.json, tryT.result.json,
 tryT.stdout.log, tryT.stderr.log}. Files are named by batch index because attempt IDs such as "3:dev:7"
 contain ':', which Windows does not allow in file names. supervise() is one attempt's try loop; the W3.1
@@ -102,6 +105,11 @@ def _run_try(job: AttemptJob, stem: Path, attempt: int, timeout_s: float, import
                 proc.kill()
                 proc.wait()
     if timed_out:
+        # A result written before the hang is final: the worker writes it before any after step (worker.AFTER), and
+        # a hang there or in interpreter teardown must not turn a finished attempt into a sim_error.
+        result = read_result(out, job.attempt_id)
+        if result is not None:
+            return result, None
         return (WorkerResult(attempt_id=job.attempt_id, job=job.job, outcome="sim_error", error_type="worker_timeout",
                              error_message=f"worker killed after the {timeout_s:g} s attempt timeout",
                              error_traceback=_tail(stderr_log)), None)

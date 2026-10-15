@@ -14,6 +14,18 @@ from vplan import records
 from vplan.config import config_hash, config_snapshot
 
 FREE = "nvidia/nemotron-3-ultra-550b-a55b:free"
+KNOWN_GIT = {"head": "c" * 40, "dirty": False, "source": "git"}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def known_git():
+    """eval run refuses to start without a git SHA, and the container stand-in has no .git, so runner tests pin the
+    repository's SHA (tests/test_gitinfo.py covers how it is resolved). Other checkouts (ManipulaPy) stay real."""
+    from vplan.evaluate import runner
+    real = runner._git
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(runner, "_git", lambda *args: dict(KNOWN_GIT) if not args else real(*args))
+        yield KNOWN_GIT
 
 
 @pytest.fixture(scope="module")
@@ -64,10 +76,12 @@ def record_for(job, script):
 
 
 class FakeSupervise:
-    """script[i] is the round list for the i-th attempt this fake runs (default: one refusal), or 'crash'."""
+    """script[i] is the round list for the i-th attempt this fake runs (default: one refusal), or 'crash'. extra is
+    merged into every payload that carries a record (e.g. a worker's frame export)."""
 
-    def __init__(self, script=(), interrupt_at=None):
+    def __init__(self, script=(), interrupt_at=None, extra=None):
         self.script, self.interrupt_at, self.jobs, self.stems = list(script), interrupt_at, [], []
+        self.extra = extra or {}
 
     def __call__(self, job, stem, **kwargs):
         if self.interrupt_at is not None and len(self.jobs) == self.interrupt_at:
@@ -82,7 +96,7 @@ class FakeSupervise:
         failed = [r.call.status_code for r in record.rounds if r.call.outcome == "service_failure"]
         return records.SupervisedAttempt(attempt_id=job.attempt_id, job=job.job, outcome=record.outcome, tries=1,
                                          wall_s=.01, exit_code=0, status_code=failed[0] if failed else None,
-                                         payload={"record": record.model_dump(mode="json")})
+                                         payload={"record": record.model_dump(mode="json"), **self.extra})
 
 
 def run(seed_dir, tmp_path, config=5, fake=None, **kw):
@@ -187,12 +201,44 @@ def test_new_run_records_every_attempt_once_with_a_spec_manifest(seed_dir, tmp_p
     assert (m["n"], m["n_prepared"], m["limited"]) == (5, 5, False)
     assert m["config_hashes"] == {k: config_hash(v) for k, v in config_snapshot().items()}
     assert m["image_digest"] == "sha256:feedface" and m["timeout_s"] == 600.0
-    assert {"head", "dirty"} >= set(m["git"] or {}) and {"version", "location", "git"} <= set(m["manipulapy"])
+    assert m["git"] == KNOWN_GIT and m["allow_no_git"] is False
+    assert {"version", "location", "git"} <= set(m["manipulapy"])
     assert {"openai", "pybullet", "ManipulaPy", "numpy", "pydantic"} <= set(m["versions"])
     assert {"python", "os", "source_digest", "source_hashes", "created_utc"} <= set(m)
     start, end = sessions(run_dir)
     assert (start["event"], start["session"], start["pending"]) == ("start", 0, 5)
+    assert start["git"] == KNOWN_GIT and start["allow_no_git"] is False
     assert (end["event"], end["status"], end["recorded"]) == ("end", "complete", 5)
+
+
+def test_a_run_without_a_git_sha_is_refused_unless_allowed(seed_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import runner
+    real = runner._git
+    monkeypatch.setattr(runner, "_git", lambda *args: None if not args else real(*args))
+    fake = FakeSupervise()
+    with pytest.raises(runner.EvalError, match="--allow-no-git"):
+        run(seed_dir, tmp_path, fake=fake)
+    assert not (tmp_path / "run").exists() and fake.jobs == []
+    assert run(seed_dir, tmp_path, fake=fake, allow_no_git=True).status == "complete"
+    m = manifest(tmp_path / "run")
+    assert m["git"] is None and m["allow_no_git"] is True
+    assert sessions(tmp_path / "run")[0]["allow_no_git"] is True
+
+
+def test_resume_without_a_git_sha_is_refused_unless_allowed(seed_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import runner
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, fake=FakeSupervise(interrupt_at=1))
+    real = runner._git
+    monkeypatch.setattr(runner, "_git", lambda *args: None if not args else real(*args))
+    fake = FakeSupervise()
+    with pytest.raises(runner.EvalError, match="--allow-no-git"):
+        run(seed_dir, tmp_path, fake=fake, resume=tmp_path / "run")
+    assert fake.jobs == [] and len(sessions(tmp_path / "run")) == 2  # the first session's start and end only
+    assert run(seed_dir, tmp_path, fake=fake, resume=tmp_path / "run", allow_no_git=True).status == "complete"
+    resumed = [s for s in sessions(tmp_path / "run") if s["event"] == "start"][-1]
+    assert resumed["git"] is None and resumed["allow_no_git"] is True
+    assert manifest(tmp_path / "run")["git"] == KNOWN_GIT  # the manifest keeps the first session's provenance
 
 
 def test_image_digest_is_null_when_unset(seed_dir, tmp_path, monkeypatch):
@@ -417,6 +463,80 @@ def test_an_inconsistent_record_becomes_sim_error(seed_dir, tmp_path, tamper):
     assert row.outcome == "sim_error" and row.error_type == "invalid_attempt_record" and row.record is None
 
 
+# ---- key frames (spec §11, §14 frames/) -------------------------------------------------------------------------
+WRITTEN = {"status": "written", "index": "frames/0000/index.json", "index_sha256": "ab" * 32, "rounds": [0],
+           "files": 9, "bytes": 1234, "render_s": 1.5}
+
+
+def test_config_3_renders_frames_by_default_into_one_folder_per_attempt_stem(seed_dir, tmp_path):
+    fake = FakeSupervise(extra={"frames": WRITTEN})
+    run(seed_dir, tmp_path, config=3, fake=fake, env_file=env_file(tmp_path))
+    run_dir = tmp_path / "run"
+    assert manifest(run_dir)["frames"] is True and sessions(run_dir)[0]["frames"] is True
+    for job, stem in zip(fake.jobs, fake.stems, strict=True):
+        assert job.params["frames"] == {"dir": str((run_dir / "frames" / stem.name).resolve()),
+                                        "rel": f"frames/{stem.name}"}
+    assert all(r.frames == records.FrameExport.model_validate(WRITTEN) for r in rows(run_dir))
+
+
+@pytest.mark.parametrize("config, flag, expected", [(5, None, False), (5, True, True), (3, False, False),
+                                                    (1, None, False), (7, True, True)])
+def test_frames_default_to_config_3_and_the_flag_overrides(seed_dir, tmp_path, config, flag, expected):
+    fake = FakeSupervise()
+    kw = {} if config == 5 else {"env_file": env_file(tmp_path)}
+    run(seed_dir, tmp_path, config=config, fake=fake, frames=flag, **kw)
+    assert manifest(tmp_path / "run")["frames"] is expected
+    assert all((j.params["frames"] is not None) is expected for j in fake.jobs)
+    assert all((r.frames is not None) is expected for r in rows(tmp_path / "run"))
+
+
+@pytest.mark.parametrize("payload, error_type", [
+    ({}, "frames_not_reported"),  # the worker died or hung in its after step: the result stands, the frames do not
+    ({"after_error": {"error_type": "ImportError", "error_message": "no module"}}, "ImportError"),
+    ({"frames": {"status": "written"}}, "invalid_frame_export")])
+def test_frames_that_were_not_exported_are_recorded_as_failed_and_the_attempt_stands(seed_dir, tmp_path, payload,
+                                                                                    error_type):
+    run(seed_dir, tmp_path, fake=FakeSupervise(extra=payload), frames=True, n=1)
+    (row,) = rows(tmp_path / "run")
+    assert row.outcome == "refused" and row.record is not None and row.record.success
+    assert row.frames.status == "failed" and row.frames.error_type == error_type and row.frames.files == 0
+    assert row.frames.render_s is None  # unknown: report rows then have no wall time (evaluate.collect)
+
+
+def test_the_frames_of_a_rejected_record_are_not_evidence(seed_dir, tmp_path):
+    # The row becomes sim_error/invalid_attempt_record, so frames on disk for it must not read as a written export.
+    class Tampered(FakeSupervise):
+        def __call__(self, job, stem, **kwargs):
+            out = super().__call__(job, stem, **kwargs)
+            record = {**out.payload["record"], "attempt_id": "5:dev:99"}
+            return records.SupervisedAttempt.model_validate({**out.model_dump(),
+                                                             "payload": {**out.payload, "record": record}})
+    run(seed_dir, tmp_path, fake=Tampered(extra={"frames": WRITTEN}), frames=True, n=1)
+    (row,) = rows(tmp_path / "run")
+    assert row.outcome == "sim_error" and row.error_type == "invalid_attempt_record" and row.record is None
+    assert (row.frames.status, row.frames.error_type, row.frames.index, row.frames.files) == (
+        "failed", "record_rejected", None, 0)
+    assert (row.frames.render_s, row.frames.bytes) == (WRITTEN["render_s"], WRITTEN["bytes"])  # still on disk
+
+
+def test_an_attempt_without_a_record_has_no_frame_export(seed_dir, tmp_path):
+    run(seed_dir, tmp_path, fake=FakeSupervise(["crash"]), frames=True, n=1)
+    (row,) = rows(tmp_path / "run")
+    assert row.outcome == "sim_error" and row.frames is None
+
+
+def test_resume_keeps_the_runs_frames_setting_and_refuses_a_change(seed_dir, tmp_path):
+    from vplan.evaluate import runner
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, fake=FakeSupervise(interrupt_at=1), frames=True)
+    with pytest.raises(runner.EvalError, match="frames"):
+        run(seed_dir, tmp_path, resume=tmp_path / "run", frames=False)
+    fake = FakeSupervise()
+    assert run(seed_dir, tmp_path, fake=fake, resume=tmp_path / "run").status == "complete"
+    assert all(j.params["frames"]["rel"] == f"frames/{s.name}" and s.name.endswith(".s1")
+               for j, s in zip(fake.jobs, fake.stems))
+
+
 # ---- pacing -------------------------------------------------------------------------------------------------
 def test_request_pacer_spaces_request_starts_across_worker_processes(tmp_path):
     from vplan.evaluate import runner
@@ -504,13 +624,21 @@ def two_task_seeds(tmp_path_factory):
 
 def test_config_5_runs_real_workers_with_simulation(two_task_seeds, tmp_path):
     from vplan.evaluate import runner
-    summary = runner.run_eval(5, "dev", seed_dir=two_task_seeds, run_dir=tmp_path / "run", echo=lambda *a: None)
+    summary = runner.run_eval(5, "dev", seed_dir=two_task_seeds, run_dir=tmp_path / "run", echo=lambda *a: None,
+                              frames=True)
     assert summary.status == "complete" and summary.recorded == 2
     feasible, impossible = rows(tmp_path / "run")
     assert feasible.record is not None, feasible.error_traceback
     assert feasible.record.config_hashes == manifest(tmp_path / "run")["config_hashes"]
     if feasible.outcome == "executed":  # D41: the record keeps what replay needs
         assert feasible.record.rounds[-1].evaluation.record.q_replay
+        assert feasible.frames.status == "written" and feasible.frames.files == 9, feasible.frames
+        index = records.FrameIndex.model_validate_json((tmp_path / "run" / feasible.frames.index).read_bytes())
+        assert index.attempt_id == "5:dev:0" and all((tmp_path / "run" / "frames" / "0000" / f.file).is_file()
+                                                    for f in index.frames)
+    else:
+        assert feasible.frames.status == "none"
+    assert impossible.frames.status == "none" and not (tmp_path / "run" / "frames" / "0001").exists()
     assert impossible.outcome == "refused" and impossible.record.success
     names = {p.name for p in (tmp_path / "run" / "workers").iterdir()}
     assert {"0000.params.json", "0000.try1.result.json", "0001.try1.stdout.log"} <= names
@@ -567,13 +695,17 @@ def test_cli_eval_run_wiring_and_exit_codes(monkeypatch, tmp_path, capsys):
                  "--run-dir", "r"]) == 0
     assert seen[0] == (5, "dev", {"seed_dir": "s", "run_dir": "r", "resume": None, "n": 3, "env_file": None,
                                   "model": None, "temperature": None, "allow_paid": False,
-                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None})
+                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None,
+                                  "allow_no_git": False, "frames": None})
     status[0] = "incomplete"
     assert main(["eval", "run", "--config", "3", "--seeds", "dev", "--env-file", "e.env", "--resume", "r",
-                 "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid"]) == 1
+                 "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid", "--allow-no-git",
+                 "--no-frames"]) == 1
     kw = seen[1][2]
-    assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"]) == (
-        "r", "e.env", 20.0, 300.0, 0.5, True)
+    assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"],
+            kw["allow_no_git"], kw["frames"]) == ("r", "e.env", 20.0, 300.0, 0.5, True, True, False)
+    main(["eval", "run", "--config", "5", "--seeds", "dev", "--frames"])
+    assert seen[2][2]["frames"] is True
     assert "--resume" in capsys.readouterr().err
 
 

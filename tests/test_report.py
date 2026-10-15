@@ -89,7 +89,18 @@ def test_a_missing_config_7_is_named_in_the_not_headline_banner(tmp_path):
     page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
     assert "Dry run, not a headline result:</strong> config 1 (openrouter) did not run" in page
     assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
-            "run on Nebius Token Factory; here config 7 not run.") in page
+            "run on Nebius Token Factory over the held-out test seeds; here config 7 not run.") in page
+
+
+def test_a_token_factory_report_on_dev_seeds_says_why_it_is_not_a_headline(tmp_path):
+    rows = [r.model_copy(update={"seed_set": "dev"})
+            for r in ev.scenario_rows(source_override={3: ev.TOKEN_FACTORY, 7: ev.TOKEN_FACTORY})]
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    reason = "development seeds, not the held-out test set"
+    assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
+            f"run on Nebius Token Factory over the held-out test seeds; here {reason}.") in page
+    assert f"Status:</strong> not a headline result: {reason}." in page
+    assert "(headline source)" not in page and f"Nebius Token Factory run, not a headline result: {reason}" in page
 
 
 def test_an_incomplete_or_limited_token_factory_run_raises_the_not_headline_banner(tmp_path):
@@ -99,7 +110,7 @@ def test_an_incomplete_or_limited_token_factory_run_raises_the_not_headline_bann
     page = files.html.read_text(encoding="utf-8")
     reason = "config 3 covers only the first 7 of 400 tasks; config 7 run is incomplete (7/400 tasks)"
     assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
-            f"run on Nebius Token Factory; here {reason}.") in page
+            f"run on Nebius Token Factory over the held-out test seeds; here {reason}.") in page
     assert f"Status:</strong> not a headline result: {reason}." in page
     assert "(headline source)" not in page  # no row or tile calls these runs a headline source
     assert "Nebius Token Factory run, not a headline result: limited run" in page
@@ -113,6 +124,13 @@ def test_html_makes_no_fixed_claim_that_feedback_beats_resampling(html):
     lowered = html.lower()
     assert "separates the effect of feedback from retrying at the same budget" in html
     assert not [claim for claim in CLAIMS if claim in lowered]
+
+
+def test_html_says_wall_time_leaves_out_the_key_frame_export(html):
+    # evaluate.collect subtracts config 3's frame rendering, so the latency table compares like with like.
+    note = "wall time is the supervisor's time for the whole attempt, including simulation but not the key-frame"
+    assert note in html
+    assert "whose export did not report its time has no wall time" in html
 
 
 def test_html_shows_the_headline_numbers(html):
@@ -145,7 +163,8 @@ def test_incomplete_and_limited_runs_title_the_page_and_raise_banners(tmp_path, 
     from tests.test_metrics import COVERAGE
     page = build_report(rows, tmp_path, manifests=COVERAGE, seed_set_size=9).html.read_text(encoding="utf-8")
     title = ("INCOMPLETE: config 6 2/7 tasks; config 7 7/9 tasks — LIMITED: config 3 first 7 of 9 tasks; config 6 "
-             "first 7 of 9 tasks — DRY RUN: configs 1, 2, 3 and 7 — vplan evaluation report")
+             "first 7 of 9 tasks — DEGRADED: 1 service failure — DRY RUN: configs 1, 2, 3 and 7 — vplan evaluation "
+             "report")
     assert f"<title>{title}</title>" in page and f"<h1>{title}</h1>" in page
     assert ("<strong>Incomplete runs.</strong> Config 6 recorded 2 of its 7 planned tasks; config 7 recorded 7 of "
             "its 9 planned tasks.") in page
@@ -160,8 +179,21 @@ def test_a_complete_report_has_no_incomplete_or_limited_label(tmp_path, rows):
     page = build_report(full, tmp_path, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)],
                         seed_set_size=7).html.read_text(encoding="utf-8")
     assert "INCOMPLETE" not in page and "LIMITED" not in page and "Incomplete runs" not in page
-    assert "<title>DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
+    assert "<title>DEGRADED: 1 service failure — DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
+    assert ("<strong>Provider failures.</strong> 1 provider request failed (config 7: 1, HTTP 503 ×1). Failures stay "
+            "in the "
+            "denominators, so these rates partly measure provider availability, not planning.") in page
     assert "complete 7/7" in page
+
+
+def test_the_provider_failure_banner_counts_failures_by_status(tmp_path):
+    sf = ev.call(outcome="service_failure", tokens=None, status_code=429)
+    rows = [ev.scripted_row(3, 0, ev.FEASIBLE, [sf]), ev.scripted_row(3, 1, ev.FEASIBLE, [sf]),
+            ev.scripted_row(3, 2, ev.FEASIBLE, [ev.call(outcome="service_failure", tokens=None)]),
+            ev.row(7, 0, ev.FEASIBLE, None, outcome="service_failure", error_type="provider_error_body")]
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    assert ("<strong>Provider failures.</strong> 4 provider requests failed (config 3: 3, HTTP 429 ×2, no HTTP "
+            "status ×1; config 7: 1, status unknown ×1).") in page
 
 
 def test_files_are_replaced_atomically(tmp_path, rows, monkeypatch):
