@@ -94,7 +94,7 @@ _LOCAL_PATH = re.compile(r"(?:^|[\s'\"(=,;])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|/[^/\s
 REPAIR_GAIN_READING = (
     "Change in feasible success from the verified first attempt (config 2) to up to k = 3 further verified rounds "
     "with findings (config 3), on the same tasks. It includes the effect of the extra attempts, so it does not by "
-    "itself credit the feedback; the feedback gain (3 - 7) does that comparison.")
+    "itself credit the feedback; the feedback gain (3 - 7) addresses that question at equal budget.")
 FEEDBACK_GAIN_READING = (
     "Repair with verifier findings (config 3) minus equal-budget resampling without feedback (config 7), on the "
     "same tasks: the comparison that separates the effect of feedback from retrying at the same budget.")

@@ -110,6 +110,7 @@ def strings(data):
 def test_gain_wording_is_neutral_about_feedback_versus_resampling(m):
     repair, feedback = m["headline"]["repair_gain"]["reading"], m["headline"]["feedback_gain"]["reading"]
     assert "does not by itself credit the feedback" in repair
+    assert repair.endswith("the feedback gain (3 - 7) addresses that question at equal budget.")
     assert feedback == ("Repair with verifier findings (config 3) minus equal-budget resampling without feedback "
                         "(config 7), on the same tasks: the comparison that separates the effect of feedback from "
                         "retrying at the same budget.")
