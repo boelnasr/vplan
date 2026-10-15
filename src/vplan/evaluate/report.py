@@ -647,7 +647,9 @@ def _cost(m: Mapping[str, Any]) -> str:
                         _num(lat["wall_per_attempt_median"], 1), lat["wall_attempts"]])
     return ("<p>Tokens are summed from the calls that reported usage; calls without usage are counted, not "
             "estimated. Planner latency is the time spent in planner calls; wall time is the supervisor's time for "
-            "the whole attempt, including simulation (config 2 has none of its own).</p>"
+            "the whole attempt, including simulation but not the key-frame export that a run with frames renders "
+            "after each result (config 3 by default); an attempt whose export did not report its time has no wall "
+            "time. Config 2 has none of its own.</p>"
             + _table(["Config", "Attempts", "Without record", "Planner calls", "Calls per attempt",
                       "Calls per feasible success", "Tokens (known)", "Calls without usage",
                       "Tokens per attempt (median)", "Tokens per feasible success"], cost, _row_classes(m))

@@ -232,10 +232,14 @@ def run_task_job(params: dict) -> dict:
     frames = params.get("frames")
     if frames is not None:
         def export() -> dict:
+            # Timed from before the import: loading the rendering stack (about 0.4 s in a fresh worker) is part of
+            # the export, which report rows leave out of the attempt's wall time (collect.report_wall_s).
+            start = time.perf_counter()
             from vplan.evaluate.frames import export_frames
             result = export_frames(record, spec, seed=params["seed"], config_snapshot=params["config_snapshot"],
                                    out_dir=Path(frames["dir"]), rel_dir=frames["rel"])
-            return {"frames": result.model_dump(mode="json")}
+            return {"frames": result.model_copy(update={"render_s": time.perf_counter() - start}).model_dump(
+                mode="json")}
         out[AFTER] = export
     return out
 

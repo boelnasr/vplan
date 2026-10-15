@@ -1,10 +1,10 @@
 """W3.1 run directories as report input (spec §15 `vplan report build --run ...`).
 
 One run directory per configuration (runner.run_eval). Each attempts.jsonl row (records.EvalAttempt) becomes one
-records.AttemptRow: config, task index and id, outcome, error type and wall time from the row; the seed-set name from
-its split; the AttemptRecord from its record, without the per-step ExecutionRecord streams (without_streams); the
-seed-set hash, provider and model from the run's manifest.json; the TaskSpec and scene counts from the seed set's
-tasks[task_index], and the oracle from oracles[task_index].
+records.AttemptRow: config, task index and id, outcome and error type from the row, and its wall time without the
+key-frame export (report_wall_s); the seed-set name from its split; the AttemptRecord from its record, without the
+per-step ExecutionRecord streams (without_streams); the seed-set hash, provider and model from the run's manifest.json;
+the TaskSpec and scene counts from the seed set's tasks[task_index], and the oracle from oracles[task_index].
 
 The seed set is loaded and validated with the W3.1 loader (seedsets.load_seed_set), from --seed-dir or from the
 directory the first run recorded, and its hash must match every run manifest. Reporting code is not evidence, so source
@@ -42,7 +42,8 @@ MANIFEST_KEYS: dict[str, type] = {"config": int, "split": str, "seed_set_hash": 
 STREAMS: dict[str, Any] = {"q_replay": (), "finger_replay": (), "object_replay": {}, "sigma_min_steps": (),
                            "rest_lin_hist": {}, "rest_ang_hist": {}, "rest_pose_hist": {}}
 
-__all__ = ["Collected", "EvalError", "STREAMS", "build", "collect_runs", "read_run_manifest", "without_streams"]
+__all__ = ["Collected", "EvalError", "STREAMS", "build", "collect_runs", "read_run_manifest", "report_wall_s",
+           "without_streams"]
 
 
 def without_streams(record: AttemptRecord | None) -> AttemptRecord | None:
@@ -57,6 +58,18 @@ def without_streams(record: AttemptRecord | None) -> AttemptRecord | None:
     if record is None or all(r.evaluation is None or r.evaluation.record is None for r in record.rounds):
         return record
     return record.model_copy(update={"rounds": tuple(slim(r) for r in record.rounds)})
+
+
+def report_wall_s(attempt: EvalAttempt) -> float | None:
+    """The attempt's wall time without its key-frame export, s. The worker renders frames inside the supervised try,
+    after the result is final, and by default only config 3 does, so the raw time would bias the per-configuration
+    latency comparison (spec §14). None when the export did not report its time (a crash, hang or exception while
+    rendering): the raw time then holds an unknown render share, up to the attempt timeout."""
+    if attempt.frames is None:
+        return attempt.wall_s
+    if attempt.frames.render_s is None:
+        return None
+    return max(0.0, attempt.wall_s - attempt.frames.render_s)
 
 
 class Collected(NamedTuple):
@@ -122,7 +135,7 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
                     task_index=attempt.task_index, task_id=attempt.task_id, task=task.task,
                     oracle=seeds.oracles[attempt.task_index], distractors=task.distractors, obstacles=task.obstacles,
                     outcome=attempt.outcome, attempt=without_streams(attempt.record), provider=manifest["provider"],
-                    model=manifest["model"], error_type=attempt.error_type, wall_s=attempt.wall_s))
+                    model=manifest["model"], error_type=attempt.error_type, wall_s=report_wall_s(attempt)))
             except ValidationError as exc:
                 first = exc.errors()[0]["msg"]
                 raise EvalError(f"{where} line {number} does not join its seed-set task and run "

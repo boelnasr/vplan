@@ -500,6 +500,7 @@ def test_frames_that_were_not_exported_are_recorded_as_failed_and_the_attempt_st
     (row,) = rows(tmp_path / "run")
     assert row.outcome == "refused" and row.record is not None and row.record.success
     assert row.frames.status == "failed" and row.frames.error_type == error_type and row.frames.files == 0
+    assert row.frames.render_s is None  # unknown: report rows then have no wall time (evaluate.collect)
 
 
 def test_an_attempt_without_a_record_has_no_frame_export(seed_dir, tmp_path):

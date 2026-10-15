@@ -123,15 +123,20 @@ def test_frame_file_names_are_plain_png_names():
             records.FrameEntry(**{**entry, "file": bad})
 
 
+def job_params(tmp_path) -> dict:
+    from vplan.evaluate import runner
+    return {"attempt_id": ATTEMPT, "task": SPEC.model_dump(mode="json"),
+            "oracle": ev.FEASIBLE.model_dump(mode="json"), "seed": SEED, "config_snapshot": config_snapshot(),
+            "mode": "repair", "k": 3, "planner": runner.planner_settings(runner.CONFIGS[5]).params(),
+            "pacing": None, "frames": {"dir": str(tmp_path / "frames" / "0004"), "rel": "frames/0004"}}
+
+
 def test_the_worker_job_renders_after_its_result_and_never_changes_it(executed, tmp_path, monkeypatch):
     # run_task_job returns the finished record first; the frame export is its after step (worker.AFTER).
     from vplan.evaluate import runner, worker
     from vplan import repair
     monkeypatch.setattr(repair, "run_task", lambda *a, **kw: executed)
-    params = {"attempt_id": ATTEMPT, "task": SPEC.model_dump(mode="json"),
-              "oracle": ev.FEASIBLE.model_dump(mode="json"), "seed": SEED, "config_snapshot": config_snapshot(),
-              "mode": "repair", "k": 3, "planner": runner.planner_settings(runner.CONFIGS[5]).params(),
-              "pacing": None, "frames": {"dir": str(tmp_path / "frames" / "0004"), "rel": "frames/0004"}}
+    params = job_params(tmp_path)
     out = runner.run_task_job(params)
     before = json.dumps(out["payload"]["record"], sort_keys=True)
     assert callable(out[worker.AFTER]) and not (tmp_path / "frames").exists()
@@ -141,3 +146,16 @@ def test_the_worker_job_renders_after_its_result_and_never_changes_it(executed, 
     assert records.FrameExport.model_validate(extra["frames"]).status == "written"
     assert (tmp_path / "frames" / "0004" / "index.json").is_file()
     assert worker.AFTER not in runner.run_task_job({**params, "frames": None})
+
+
+def test_the_after_step_reports_its_whole_time_including_the_rendering_imports(executed, tmp_path, monkeypatch):
+    # Importing the rendering stack takes about 0.4 s in a fresh worker. It belongs to the export, whose time report
+    # rows subtract from the attempt's wall time (evaluate.collect.report_wall_s).
+    from types import SimpleNamespace
+    from vplan import repair
+    from vplan.evaluate import frames, runner, worker
+    monkeypatch.setattr(repair, "run_task", lambda *a, **kw: executed)
+    monkeypatch.setattr(frames, "export_frames", lambda *a, **kw: records.FrameExport(status="none", render_s=0.5))
+    monkeypatch.setattr(runner, "time", SimpleNamespace(perf_counter=iter([10.0, 12.5]).__next__))
+    after = runner.run_task_job(job_params(tmp_path))[worker.AFTER]
+    assert after()["frames"] == records.FrameExport(status="none", render_s=2.5).model_dump(mode="json")

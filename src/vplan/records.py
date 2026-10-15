@@ -549,7 +549,8 @@ class AttemptRow(Frozen):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
     error_type: str | None = None  # supervisor or worker failure kind, e.g. worker_timeout
-    wall_s: float | None = Field(default=None, ge=0)  # supervisor wall-clock time for the whole attempt, s
+    # The supervisor's wall-clock time for the whole attempt without its key-frame export, s; None when unknown
+    wall_s: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _consistent(self) -> "AttemptRow":
@@ -685,14 +686,15 @@ class FrameExport(Frozen):
     written: every executed round's frames and the index (index is the run-directory-relative POSIX path); none: no
     round was executed, so there is nothing to render; failed: nothing usable was written (error_type says why; the
     attempt's outcome is unaffected). bytes is the disk use of the PNGs and index; render_s is the export's wall
-    time, s."""
+    time as the worker measured it, s, or None when the export did not report it (the worker crashed, hung or raised
+    in its after step, or reported an invalid export). Report rows subtract it from the attempt's wall_s."""
     status: Literal["written", "none", "failed"]
     index: str | None = None
     index_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     rounds: tuple[int, ...] = ()
     files: int = Field(default=0, ge=0)
     bytes: int = Field(default=0, ge=0)
-    render_s: float = Field(default=0.0, ge=0)
+    render_s: float | None = Field(default=None, ge=0)
     error_type: str | None = None
     error_message: str | None = None
 
@@ -721,7 +723,7 @@ class EvalAttempt(Frozen):
       provenance). tries, wall_s and exit_code describe the supervised worker; status_code is the provider status of
       a failed request.
     - frames is the key-frame export (FrameExport) when the run renders frames and the worker returned a record;
-      None otherwise. wall_s includes its rendering.
+      None otherwise. wall_s includes its rendering; report rows leave it out (evaluate.collect).
     """
     attempt_id: str
     config: EvalConfigNumber

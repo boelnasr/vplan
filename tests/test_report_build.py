@@ -18,12 +18,18 @@ from vplan.planners.heuristic import heuristic_geometry
 from vplan.repair import run_task
 
 
+WALL_S, RENDER_S = 0.25, 0.125  # a scripted attempt's supervisor time, and its key-frame export's share of it
+
+
 class ScriptedSupervise:
     """Stand-in for supervisor.supervise: feasible tasks get the canonical plan and a passing Judge, impossible tasks
-    the proof's refusal; every call carries the job's provider and model, as the real planner's would."""
+    the proof's refusal; every call carries the job's provider and model, as the real planner's would. With render_s,
+    a job that asks for frames also gets the worker's export (written for an execution, none for a refusal), which
+    took render_s of the attempt's WALL_S; without it, the worker reports no export, as after a crash while
+    rendering."""
 
-    def __init__(self, interrupt_at=None, execution=None):
-        self.interrupt_at, self.jobs, self.execution = interrupt_at, [], execution
+    def __init__(self, interrupt_at=None, execution=None, render_s=None):
+        self.interrupt_at, self.jobs, self.execution, self.render_s = interrupt_at, [], execution, render_s
 
     def __call__(self, job, stem, **kwargs):
         if self.interrupt_at is not None and len(self.jobs) == self.interrupt_at:
@@ -40,8 +46,15 @@ class ScriptedSupervise:
         record = run_task(task, oracle, ev.Scripted(calls), k=p["k"], mode=p["mode"],
                           evaluator=lambda plan: evaluations.pop(0), attempt_id=job.attempt_id,
                           config_snapshot=p["config_snapshot"])
+        payload = {"record": record.model_dump(mode="json")}
+        if p.get("frames") is not None and self.render_s is not None:
+            export = (records.FrameExport(status="written", index=f"{p['frames']['rel']}/index.json",
+                                          index_sha256="ab" * 32, rounds=(0,), files=9, bytes=1000,
+                                          render_s=self.render_s)
+                      if record.outcome == "executed" else records.FrameExport(status="none", render_s=self.render_s))
+            payload["frames"] = export.model_dump(mode="json")
         return records.SupervisedAttempt(attempt_id=job.attempt_id, job=job.job, outcome=record.outcome, tries=1,
-                                         wall_s=0.25, exit_code=0, payload={"record": record.model_dump(mode="json")})
+                                         wall_s=WALL_S, exit_code=0, payload=payload)
 
 
 def run(config, seed_dir, run_dir, *, fake=None, **kw):
@@ -71,12 +84,12 @@ def other_seed_dir(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def runs(seed_dir, tmp_path_factory):
-    """Complete runs of configs 5, 3 and 7 over the five tasks."""
+    """Complete runs of configs 5, 3 and 7 over the five tasks; config 3 renders key frames, as by default."""
     root = tmp_path_factory.mktemp("runs")
     out = {}
     for config in (5, 3, 7):
         out[config] = root / f"c{config}"
-        assert run(config, seed_dir, out[config]).status == "complete"
+        assert run(config, seed_dir, out[config], fake=ScriptedSupervise(render_s=RENDER_S)).status == "complete"
     return out
 
 
@@ -98,9 +111,10 @@ def test_every_attempt_becomes_a_report_row_joined_with_its_seed_set_task(runs, 
         rows = [r for r in got.rows if r.config == config]
         for row, attempt in zip(rows, attempts(run_dir), strict=True):
             task = seeds.tasks[attempt.task_index]
-            assert (row.config, row.task_index, row.task_id, row.outcome, row.error_type, row.wall_s) == (
-                attempt.config, attempt.task_index, attempt.task_id, attempt.outcome, attempt.error_type,
-                attempt.wall_s)
+            assert (row.config, row.task_index, row.task_id, row.outcome, row.error_type) == (
+                attempt.config, attempt.task_index, attempt.task_id, attempt.outcome, attempt.error_type)
+            # The row keeps the supervisor's time; the report row leaves config 3's key-frame export out of it.
+            assert attempt.wall_s == WALL_S and row.wall_s == (WALL_S - RENDER_S if config == 3 else WALL_S)
             assert row.seed_set == attempt.split == "dev" and row.attempt == attempt.record
             assert (row.seed_set_hash, row.provider, row.model) == (manifest["seed_set_hash"], manifest["provider"],
                                                                     manifest["model"])
@@ -136,6 +150,37 @@ def test_without_streams_keeps_records_without_an_execution_unchanged():
     assert collect.without_streams(None) is None
     record = ev.attempt(ev.FEASIBLE, [ev.call(ev.GOOD)], [ev.blocked(ev.COLLISION)], k=0)
     assert collect.without_streams(record) is record
+
+
+def test_report_wall_time_leaves_out_the_key_frame_export(runs):
+    # The worker renders frames inside the supervised try, after the result is final: about 1.3 s per executed
+    # attempt on the acceptance runs, and only config 3 renders by default. Raw wall times would bias the spec §14
+    # latency-per-configuration comparison, including the config 3 vs 7 equal-budget pair.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    assert all(a.frames.render_s == RENDER_S and a.wall_s == WALL_S for a in attempts(runs[3]))
+    assert all(a.frames is None for c in (5, 7) for a in attempts(runs[c]))
+    got = collect.collect_runs([runs[5], runs[3], runs[7]])
+    m = compute_metrics(got.rows, manifests=got.manifests, undetermined=got.undetermined,
+                        seed_set_size=got.seed_set_size)
+    latency = {c: m["configs"][str(c)]["latency_s"] for c in (3, 5, 7)}
+    assert (latency[3]["wall_per_attempt_median"], latency[3]["wall_total"], latency[3]["wall_attempts"]) == (
+        WALL_S - RENDER_S, 5 * (WALL_S - RENDER_S), 5)
+    assert latency[5]["wall_per_attempt_median"] == latency[7]["wall_per_attempt_median"] == WALL_S
+
+
+def test_an_attempt_whose_export_did_not_report_its_time_has_no_report_wall_time(seed_dir, tmp_path):
+    # A crash or hang while rendering keeps the attempt (the result was written first), but its wall time then holds
+    # an unknown render share, up to the attempt timeout; the report counts it among attempts without wall time.
+    from vplan.evaluate import collect
+    from vplan.evaluate.metrics import compute_metrics
+    run_dir = tmp_path / "c3"
+    assert run(3, seed_dir, run_dir).status == "complete"  # the scripted worker reports no export
+    assert all(a.frames.status == "failed" and a.frames.render_s is None for a in attempts(run_dir))
+    got = collect.collect_runs([run_dir])
+    assert [r.wall_s for r in got.rows] == [None] * 5
+    latency = compute_metrics(got.rows)["configs"]["3"]["latency_s"]
+    assert (latency["wall_attempts"], latency["wall_per_attempt_median"]) == (0, None)
 
 
 def test_the_seed_set_defaults_to_the_one_the_runs_recorded(runs, seed_dir):

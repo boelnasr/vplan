@@ -126,6 +126,13 @@ def test_html_makes_no_fixed_claim_that_feedback_beats_resampling(html):
     assert not [claim for claim in CLAIMS if claim in lowered]
 
 
+def test_html_says_wall_time_leaves_out_the_key_frame_export(html):
+    # evaluate.collect subtracts config 3's frame rendering, so the latency table compares like with like.
+    note = "wall time is the supervisor's time for the whole attempt, including simulation but not the key-frame"
+    assert note in html
+    assert "whose export did not report its time has no wall time" in html
+
+
 def test_html_shows_the_headline_numbers(html):
     assert "1/5" in html and "2/5" in html  # first try (config 2) and with repair (config 3)
     assert "+20.0 pp" in html  # repair gain over the five feasible tasks
