@@ -132,6 +132,20 @@ def test_a_report_built_from_runs_is_labelled_and_carries_no_local_path(runs, tm
             assert local not in text and json.dumps(local)[1:-1] not in text, (path.name, local)
 
 
+def test_complete_token_factory_runs_on_dev_seeds_are_not_a_headline_report(seed_dir, tmp_path):
+    from vplan.evaluate import collect
+    (tmp_path / "tf").mkdir()  # run() writes its default env file into the runs' parent directory
+    tf = env_file(tmp_path / "tf", "https://api.tokenfactory.nebius.com/v1/", "nvidia/Nemotron-3-Ultra-550b-a55b")
+    for config in (3, 7):
+        assert run(config, seed_dir, tmp_path / f"c{config}", env_file=tf, allow_paid=True).status == "complete"
+    files, status = collect.build([tmp_path / "c3", tmp_path / "c7"], tmp_path / "report")
+    m = json.loads(files.metrics.read_text(encoding="utf-8"))
+    assert status["complete"] is True and m["dry_run_configs"] == []
+    assert m["configs"]["3"]["provenance"]["providers"] == ["api.tokenfactory.nebius.com"]
+    assert m["headline"]["status"] == "development" and m["headline"]["headline_source"] is False
+    assert m["headline"]["label"] == "not a headline result: development seeds, not the held-out test set"
+
+
 def test_incomplete_and_limited_runs_are_labelled(seed_dir, runs, tmp_path):
     from vplan.evaluate import collect
     with pytest.raises(KeyboardInterrupt):

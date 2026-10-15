@@ -89,7 +89,18 @@ def test_a_missing_config_7_is_named_in_the_not_headline_banner(tmp_path):
     page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
     assert "Dry run, not a headline result:</strong> config 1 (openrouter) did not run" in page
     assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
-            "run on Nebius Token Factory; here config 7 not run.") in page
+            "run on Nebius Token Factory over the held-out test seeds; here config 7 not run.") in page
+
+
+def test_a_token_factory_report_on_dev_seeds_says_why_it_is_not_a_headline(tmp_path):
+    rows = [r.model_copy(update={"seed_set": "dev"})
+            for r in ev.scenario_rows(source_override={3: ev.TOKEN_FACTORY, 7: ev.TOKEN_FACTORY})]
+    page = build_report(rows, tmp_path).html.read_text(encoding="utf-8")
+    reason = "development seeds, not the held-out test set"
+    assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
+            f"run on Nebius Token Factory over the held-out test seeds; here {reason}.") in page
+    assert f"Status:</strong> not a headline result: {reason}." in page
+    assert "(headline source)" not in page and f"Nebius Token Factory run, not a headline result: {reason}" in page
 
 
 def test_an_incomplete_or_limited_token_factory_run_raises_the_not_headline_banner(tmp_path):
@@ -99,7 +110,7 @@ def test_an_incomplete_or_limited_token_factory_run_raises_the_not_headline_bann
     page = files.html.read_text(encoding="utf-8")
     reason = "config 3 covers only the first 7 of 400 tasks; config 7 run is incomplete (7/400 tasks)"
     assert ("<strong>Not a headline report.</strong> A headline report needs configs 2, 3 and 7, each from a complete "
-            f"run on Nebius Token Factory; here {reason}.") in page
+            f"run on Nebius Token Factory over the held-out test seeds; here {reason}.") in page
     assert f"Status:</strong> not a headline result: {reason}." in page
     assert "(headline source)" not in page  # no row or tile calls these runs a headline source
     assert "Nebius Token Factory run, not a headline result: limited run" in page

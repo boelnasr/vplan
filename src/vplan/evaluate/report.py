@@ -444,8 +444,8 @@ def _banners(m: Mapping[str, Any]) -> str:
     h = m["headline"]
     if not h["headline_source"]:
         out.append("<strong>Not a headline report.</strong> A headline report needs "
-                   f"{_esc(config_list(HEADLINE_CONFIGS))}, each from a complete run on Nebius Token Factory; here "
-                   f"{_esc(h['reason'])}.")
+                   f"{_esc(config_list(HEADLINE_CONFIGS))}, each from a complete run on Nebius Token Factory over the "
+                   f"held-out test seeds; here {_esc(h['reason'])}.")
     short = [f"config {c}: {b['tasks']} of {b['coverage']['tasks_in_report']}" for c, b in _configs(m)
              if b["coverage"]["missing"]]
     if short:
@@ -668,8 +668,9 @@ def _notes(m: Mapping[str, Any]) -> str:
         "success; it is not part of this report.",
         "Headline sources are Nebius Token Factory runs only (spec §14). Any Nemotron configuration that ran on "
         f"another provider is labelled \"{DRY_RUN_LABEL}\", and a report is a headline report only if "
-        f"{config_list(HEADLINE_CONFIGS)} all come from complete runs on Token Factory: an incomplete or limited "
-        "run is never a headline source (D33).",
+        f"{config_list(HEADLINE_CONFIGS)} all come from complete runs on Token Factory over the held-out test seeds "
+        "(spec §14): an incomplete or limited run (D33) and a run on the development seeds are never headline "
+        "sources.",
     ]
     return "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in items) + "</ul>"
 

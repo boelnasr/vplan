@@ -415,6 +415,46 @@ def test_complete_token_factory_runs_stay_a_headline():
     assert m["headline"]["feedback_gain"]["headline_source"] is True
 
 
+DEV_REASON = "development seeds, not the held-out test set"
+
+
+def on_dev(rows):
+    return [r.model_copy(update={"seed_set": "dev"}) for r in rows]
+
+
+def test_complete_token_factory_runs_on_dev_seeds_are_not_a_headline():
+    # Spec §14: every configuration runs on the same held-out test seeds, so a dev report is never a headline report.
+    rows = on_dev([r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)])
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    headline = m["headline"]
+    assert m["status"]["complete"] is True and m["dry_run_configs"] == []
+    assert headline["headline_source"] is False and headline["status"] == "development"
+    assert headline["reason"] == DEV_REASON and headline["label"] == f"not a headline result: {DEV_REASON}"
+    for gain in ("repair_gain", "feedback_gain"):
+        assert headline[gain]["headline_source"] is False and headline[gain]["dry_run_configs"] == []
+        assert headline[gain]["label"] == f"not a headline result: {DEV_REASON}"
+    for c in ("2", "3", "7"):
+        provenance = m["configs"][c]["provenance"]
+        assert provenance["headline_source"] is False and provenance["dry_run"] is False
+        assert provenance["label"] == m["configs"][c]["label"] == (
+            f"Nebius Token Factory run, not a headline result: {DEV_REASON}")
+    assert TOKEN_FACTORY_LABEL not in json.dumps(m)
+
+
+def test_a_dev_report_lists_the_split_after_every_other_reason():
+    dry = compute_metrics(on_dev(ev.scenario_rows()))["headline"]
+    assert dry["status"] == "dry_run" and dry["reason"] == (
+        f"configs 2, 3 and 7 are dry runs (not on Nebius Token Factory); {DEV_REASON}")
+    assert dry["repair_gain"]["label"] == DRY_RUN_LABEL  # a dry run says so first, as on the test split
+    rows = on_dev([r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)])
+    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 400, 400)],
+                        seed_set_size=400)
+    assert m["headline"]["status"] == "incomplete"
+    assert m["headline"]["reason"] == f"{LIMITED_3}; config 7 run is incomplete (7/400 tasks); {DEV_REASON}"
+    assert m["configs"]["3"]["label"] == f"Nebius Token Factory run, not a headline result: limited run; {DEV_REASON}"
+    assert m["headline"]["repair_gain"]["label"] == f"not a headline result: {LIMITED_3}; {DEV_REASON}"
+
+
 def test_a_token_factory_run_that_is_both_incomplete_and_limited_names_both():
     rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
     m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 400), ev.run_manifest(7, 9, 400)], seed_set_size=400)
