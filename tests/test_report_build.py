@@ -220,3 +220,72 @@ def test_a_record_that_does_not_carry_the_runs_planner_is_refused(seed_dir, tmp_
     run(5, seed_dir, tmp_path / "c5", fake=FakeSupervise())  # its records name provider "fake", not "heuristic"
     with pytest.raises(collect.EvalError, match="line 1 does not join its seed-set task"):
         collect.collect_runs([tmp_path / "c5"])
+
+
+# ---- CLI ---------------------------------------------------------------------------------------------------
+def test_cli_report_build_writes_the_report_and_exits_0(runs, tmp_path, capsys):
+    from vplan.cli import main
+    out = tmp_path / "report"
+    assert main(["report", "build", "--run", str(runs[5]), "--run", str(runs[3]), "--run", str(runs[7]),
+                 "--output", str(out)]) == 0
+    assert sorted(p.name for p in out.iterdir()) == ["metrics.json", "report.html"]
+    printed = capsys.readouterr().out
+    assert "report.html" in printed and "DRY RUN: configs 2, 3 and 7" in printed
+
+
+def test_cli_report_build_passes_every_run_and_the_seed_dir(monkeypatch, tmp_path):
+    from vplan.cli import main
+    from vplan.evaluate import collect
+    from vplan.evaluate.report import ReportFiles
+    seen = []
+
+    def fake(run_dirs, output, seed_dir=None):
+        seen.append((run_dirs, output, seed_dir))
+        return ReportFiles(tmp_path / "metrics.json", tmp_path / "report.html"), {
+            "complete": False, "incomplete": [], "limited": [{"config": 5, "planned": 3, "prepared": 5}],
+            "title_prefixes": ["LIMITED: config 5 first 3 of 5 tasks"]}
+    monkeypatch.setattr(collect, "build", fake)
+    assert main(["report", "build", "--run", "a", "--run", "b", "--output", "out", "--seed-dir", "s"]) == 0
+    assert seen == [(["a", "b"], "out", "s")]
+
+
+def test_cli_report_build_exits_1_for_an_incomplete_run_and_still_writes_it(seed_dir, runs, tmp_path, capsys):
+    from vplan.cli import main
+    with pytest.raises(KeyboardInterrupt):
+        run(7, seed_dir, tmp_path / "c7", fake=ScriptedSupervise(interrupt_at=2))
+    out = tmp_path / "report"
+    assert main(["report", "build", "--run", str(runs[3]), "--run", str(tmp_path / "c7"), "--output", str(out)]) == 1
+    assert (out / "report.html").is_file()
+    captured = capsys.readouterr()
+    assert "INCOMPLETE: config 7 2/5 tasks" in captured.out and "--resume" in captured.err
+
+
+@pytest.mark.parametrize("case, message", [("same_config", "two runs of config 5"),
+                                           ("no_manifest", "no manifest.json"), ("no_rows", "no attempt rows")])
+def test_cli_report_build_refusals_exit_2_with_a_clean_message(seed_dir, runs, tmp_path, capsys, case, message):
+    from vplan.cli import main
+    if case == "same_config":
+        dirs = [runs[5], runs[5]]
+    elif case == "no_manifest":
+        (tmp_path / "empty").mkdir()
+        dirs = [runs[5], tmp_path / "empty"]
+    else:
+        with pytest.raises(KeyboardInterrupt):
+            run(5, seed_dir, tmp_path / "c5", fake=ScriptedSupervise(interrupt_at=0))
+        dirs = [tmp_path / "c5"]
+    argv = ["report", "build", "--output", str(tmp_path / "report")]
+    for d in dirs:
+        argv += ["--run", str(d)]
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert message in err and err.startswith("error: ") and "Traceback" not in err
+    assert not (tmp_path / "report").exists()
+
+
+def test_cli_report_build_refuses_wsl_paths(monkeypatch, capsys):
+    from vplan.cli import main
+    from vplan.evaluate import collect, pilot
+    monkeypatch.setattr(pilot, "_WINDOWS", True)
+    monkeypatch.setattr(collect, "build", lambda *a, **kw: pytest.fail("must refuse first"))
+    assert main(["report", "build", "--run", "/mnt/c/run", "--output", "out"]) == 2
+    assert "Windows" in capsys.readouterr().err
