@@ -1,5 +1,11 @@
 """Offline provider boundary tests: no credentials and no network."""
 import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -118,6 +124,72 @@ def test_service_error_is_sanitized_and_no_retry():
     assert result.outcome == "service_failure" and len(client.requests) == 1
     assert "secret-token" not in result.model_dump_json()
     assert result.total_tokens is None
+
+
+class StallingClient(FakeClient):
+    """A provider that never finishes until released, like OpenRouter keeping a slow request alive (D63)."""
+    def __init__(self, reply):
+        super().__init__([reply])
+        self.release = threading.Event()
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        self.release.wait(10)
+        return next(self.replies)
+
+
+def test_a_call_that_outlives_the_deadline_is_a_service_failure_and_a_late_reply_changes_nothing():
+    # D63: the SDK timeout bounds each wait for data, so a 225 s call once passed a 60 s timeout and its attempt
+    # died at the 600 s worker limit as a sim_error. The deadline bounds the whole call.
+    from vplan.planners.nemotron import NemotronPlanner
+    task, plan = fixture()
+    client = StallingClient(response(plan))
+    events = []
+    try:
+        result = NemotronPlanner(model="free-model", client=client, call_deadline_s=0.2).plan(task, event_sink=events.append)
+    finally:
+        client.release.set()
+    assert result.outcome == "service_failure" and result.error_type == "CallDeadlineExceeded"
+    assert result.status_code is None and result.next_protocol == "forced" and result.plan is None
+    assert 0.2 <= result.latency_s < 5 and len(client.requests) == 1
+    time.sleep(0.1)  # the abandoned request completes in the background; nothing reaches the evidence
+    assert [e["event"] for e in events] == ["request_started", "request_completed"]
+    assert events[1]["call"]["outcome"] == "service_failure"
+
+
+def test_an_abandoned_call_does_not_hold_up_the_process_exit():
+    # The eval worker is one subprocess per attempt; a stalled request must not keep it alive to the 600 s kill.
+    code = ("import time; from vplan.planners.nemotron import _within_deadline, CallDeadlineExceeded\n"
+            "try:\n    _within_deadline(lambda: time.sleep(60), 0.2)\nexcept CallDeadlineExceeded:\n    print('deadline')\n")
+    start = time.perf_counter()
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30,
+                          cwd=Path(__file__).resolve().parents[1],
+                          env={**os.environ, "PYTHONPATH": os.pathsep.join(["src", "."])})
+    assert done.returncode == 0 and done.stdout.strip() == "deadline", done.stderr
+    assert time.perf_counter() - start < 20
+
+
+def test_a_call_inside_the_deadline_is_unchanged():
+    from vplan.planners.nemotron import NemotronPlanner
+    task, plan = fixture()
+    client = StallingClient(response(plan))
+    client.release.set()
+    result = NemotronPlanner(model="free-model", client=client, call_deadline_s=5).plan(task)
+    assert result.outcome == "proposed" and result.plan == plan
+
+
+def test_the_default_deadline_is_the_spec_per_call_timeout():
+    from vplan.planners import nemotron
+    assert nemotron.CALL_DEADLINE_S == 60.0
+    assert nemotron.NemotronPlanner(model="m", client=FakeClient([])).call_deadline_s == 60.0
+    assert "per-call timeout 60 s" in (Path(__file__).resolve().parents[1] / "docs" / "spec.md").read_text("utf-8")
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), True, threading.TIMEOUT_MAX * 2])
+def test_an_unusable_deadline_is_refused(bad):
+    from vplan.planners.nemotron import NemotronPlanner
+    with pytest.raises(ValueError, match="deadline"):
+        NemotronPlanner(model="m", client=FakeClient([]), call_deadline_s=bad)
 
 
 @pytest.mark.parametrize("code, status", [(503, 503), (402, 402), ("overloaded", None)])
