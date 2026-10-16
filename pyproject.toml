@@ -11,6 +11,7 @@ dependencies = [
   "pydantic==2.13.5",
   "openai==3.24.0",
   "matplotlib==3.10.9",
+  "gradio==6.30.0",
 ]
 
 [project.optional-dependencies]
