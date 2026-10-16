@@ -71,7 +71,7 @@ def _decode_string_plan(payload: Any) -> Any:
     if isinstance(payload, dict) and isinstance(payload.get("plan"), str):
         try:
             plan = json.loads(payload["plan"])
-        except ValueError:
+        except (ValueError, RecursionError):
             return payload
         if isinstance(plan, dict):
             return {**payload, "plan": plan}
@@ -95,7 +95,7 @@ def _parse(raw: dict):
         if isinstance(arguments, str):
             try:
                 loaded = json.loads(arguments)
-            except ValueError:
+            except (ValueError, RecursionError):
                 loaded = None  # left for model_validate_json to report, as before
             decoded = _decode_string_plan(loaded)
             if decoded is not loaded:  # only the string-plan case is re-encoded; every other reply validates as sent

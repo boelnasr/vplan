@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from vplan.planners.heuristic import heuristic_geometry
-from vplan.records import Finding, SubmitPlanArgs
+from vplan.records import Finding, Refusal, SubmitPlanArgs
 from vplan.tasks import generate_candidate
 
 
@@ -84,10 +84,13 @@ def test_rejects_malformed_outputs_before_simulation(bad):
 
 
 @pytest.mark.parametrize("protocol", ["forced", "content"])
-def test_a_plan_sent_as_a_json_string_is_decoded_once(protocol):
+@pytest.mark.parametrize("refusal", [False, True])
+def test_a_plan_sent_as_a_json_string_is_decoded_once(protocol, refusal):
     # D64: Nemotron Super sends {"plan": "<the plan object as a JSON string>"} in every reply, also after the
     # schema retry. The evidence keeps the reply as sent.
     task, plan = fixture()
+    if refusal:
+        plan = Refusal(reason="target_unreachable", explanation="beyond the reach bound")
     wrapped = json.dumps({"plan": plan.model_dump_json()})
     reply = response(content=wrapped) if protocol == "content" else response(arguments=wrapped)
     result = planner(FakeClient([reply])).plan(task, protocol=protocol)
