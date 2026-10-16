@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -141,9 +142,43 @@ def _response_call(response, common: dict, secret: str | None) -> PlannerCall:
             errors=({"type": type(exc).__name__, "message": "invalid provider response envelope or metadata"},))
 
 
+# Spec §7 per-call timeout, as wall-clock time for the whole call (D63). The SDK timeout below only bounds each wait
+# for data, and OpenRouter keeps a slow request alive, so calls of 178-225 s passed it.
+CALL_DEADLINE_S = 60.0
+
+
+class CallDeadlineExceeded(TimeoutError):
+    """No complete response within the call deadline; the request is abandoned, never retried."""
+
+
+def _within_deadline(call: Callable[[], Any], deadline_s: float) -> Any:
+    """Run call on a daemon thread and give up after deadline_s. The abandoned request finishes or times out on its
+    own and its result is dropped; a daemon thread never holds up the worker's exit."""
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def run() -> None:
+        try:
+            outcome["response"] = call()
+        except BaseException as exc:  # relayed to the caller, which classifies it as before
+            outcome["error"] = exc
+        finally:
+            finished.set()
+
+    threading.Thread(target=run, name="planner-call", daemon=True).start()
+    if not finished.wait(deadline_s):
+        raise CallDeadlineExceeded(f"no complete provider response within {deadline_s:g} s")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["response"]
+
+
 class NemotronPlanner:
     def __init__(self, *, model: str, provider: str = "openrouter", base_url: str | None = None,
-                 api_key: str | None = None, client=None, temperature: float = .2):
+                 api_key: str | None = None, client=None, temperature: float = .2,
+                 call_deadline_s: float = CALL_DEADLINE_S):
+        if type(call_deadline_s) not in (int, float) or not 0 < call_deadline_s <= threading.TIMEOUT_MAX:
+            raise ValueError("call deadline must be a positive, finite number of seconds")
         if client is None:
             from openai import OpenAI
             client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=60.0)
@@ -151,6 +186,7 @@ class NemotronPlanner:
         self._client = client.with_options(max_retries=0, timeout=60.0)
         self._secret = api_key
         self.model, self.provider, self.temperature = model, provider, temperature
+        self.call_deadline_s = float(call_deadline_s)
 
     def plan(self, task: TaskSpec, *, feedback: PlannerFeedback | None = None,
              protocol: PlannerProtocol = "forced", event_sink: Callable[[dict], None] | None = None) -> PlannerCall:
@@ -181,7 +217,7 @@ class NemotronPlanner:
         common = dict(provider=self.provider, model=self.model, protocol=protocol,
                       next_protocol=protocol, temperature=self.temperature, raw_request=raw_request)
         try:
-            response = self._client.chat.completions.create(**request)
+            response = _within_deadline(lambda: self._client.chat.completions.create(**request), self.call_deadline_s)
         except Exception as exc:
             status = getattr(exc, "status_code", None)
             status = status if isinstance(status, int) else None

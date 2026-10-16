@@ -68,7 +68,7 @@ from vplan.records import (AttemptMode, AttemptRecord, EvalAttempt, FrameExport,
 SCHEMA_VERSION = 1
 KIND = "eval_run"
 JOB = "run_task"
-DEFAULT_TIMEOUT_S = 600.0  # k + 1 = 4 calls at the 60 s client timeout plus simulation stay well inside it (D42)
+DEFAULT_TIMEOUT_S = 600.0  # k + 1 = 4 calls at the 60 s call deadline plus simulation stay well inside it (D42, D63)
 DEFAULT_TEMPERATURE = 0.7  # as in the pilot (D33): resampling only means something if samples differ
 RUNS_ROOT = Path("runs")  # relative to the working directory, which is the repo root for every command
 

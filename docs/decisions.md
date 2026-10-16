@@ -1656,3 +1656,25 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
   - D30's single planner model, for the evaluation only. Development history, R4 (20/20) and the pilots (D35, D46) stay as recorded on Ultra.
   - Spec §7's NemotronPlanner lines.
 - **Prompt:** Lightning's failures on the hard cohort were mostly transport collisions and releases above the limit (D60). Any prompt change must reach every config equally and happen before the freeze, so no `test` result is tuned.
+
+## D63. The 60 s per-call timeout is wall-clock time (2026-10-16)
+
+**Found:** in a free Lightning run on Oct 16 (config 3, 20 dev tasks), single planner calls took 83, 100, 178 and 225 s although the client was built with `timeout=60.0`.
+- The SDK timeout bounds each wait for data, not the whole call. A call that ended after 178 s means OpenRouter kept sending bytes while it waited, so the timeout never fired.
+- One attempt then ran into the 600 s worker limit (D42) and was recorded as `sim_error` (`worker_timeout`), which the report counts as a verifier/simulator issue. A slow provider was scored as our fault.
+
+**Ruling:** spec §7's "per-call timeout 60 s" is wall-clock time for the whole call.
+- `NemotronPlanner` runs each request on a daemon thread and stops waiting after `call_deadline_s` (default `CALL_DEADLINE_S = 60.0`). Past it, the call is a `service_failure` with `error_type` `CallDeadlineExceeded`. The request is abandoned, never retried, and its late reply is dropped.
+- The SDK's 60 s timeout stays as a guard on each read. It does not bound a request the provider keeps alive, so an abandoned request lives until the provider finishes:
+  - in an eval worker (one subprocess per attempt, which stops at its first service failure) it dies with the process; a daemon thread never holds up the exit;
+  - in a long-lived process (`pilot`, the coming demo UI) it keeps its thread and connection until the provider is done, and may overlap the next request.
+- With at most 4 calls of 60 s each, the 600 s attempt limit again catches only real hangs. One exception: `--max-rpm` below 1 makes the pacing wait (outside the deadline) longer than 60 s per call, so four calls can still reach 600 s.
+
+**Consequences:**
+- **Lightning fits:** past free calls had a median of 25–29 s, and about 12 of about 720 took longer than 60 s (pilot-hard-20a, cmp-1015).
+- **Ultra often does not:** on the free endpoint the hard pilot's median was 69 s, and about 180 of 292 calls took longer than 60 s. Those would now be service failures. The pilots (D35, D46) ran without a wall-clock limit and stay as recorded.
+- **Demo:** the live demo uses Ultra on Token Factory (D62). The W3.0 smoke test must record Ultra's latency there. If it routinely needs more than 60 s, a longer demo-only deadline is a new decision; the evaluation stays at 60 s.
+- **Stop rule:** a deadline failure is a service failure, so it counts toward the runner's and the pilot's "3 consecutive service failures" stop. A slow endpoint stops a run early instead of filling it with timeouts.
+- An abandoned request may still be billed by a paid provider.
+- Runs made before this change (such as the cmp-1016 comparison at 708235d) can still hold slow-call `worker_timeout` sim errors; compare them with those attempts excluded.
+- Not changed: the demo-only Cosmos client (`visual/cosmos.py`) keeps the SDK timeout; it talks to a local vLLM server.
