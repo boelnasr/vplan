@@ -1576,7 +1576,7 @@ Prompted by the owner's review and the open items of D56:
   - A failed export is recorded and never fatal. About 1.3 s and 0.18 MB per executed attempt.
   - `vplan eval shadow` (week 4) reads these. Its state-predicate truth comes from the seed set's oracle at shadow time.
 - **Report wall time** excludes the frame export (`EvalAttempt.wall_s − render_s`), so config 3's latency is comparable with configs 5 and 7. `attempts.jsonl` keeps the supervisor's raw time.
-- **D42 amendment (owner to confirm).** A job may return an after-step that the worker runs once the result file is written. A try that times out after writing its result keeps that result instead of becoming `worker_timeout`.
+- **D42 amendment (confirmed by the owner, Oct 16).** A job may return an after-step that the worker runs once the result file is written. A try that times out after writing its result keeps that result instead of becoming `worker_timeout`.
 - **D56 items closed:**
   - the D33 "DEGRADED: n service failures" title prefix, with failures by HTTP status;
   - `report build` refuses (exit 2) an `--output` that is a file, and a run manifest whose n disagrees with the seed set;
