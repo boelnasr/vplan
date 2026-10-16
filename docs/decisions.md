@@ -1708,6 +1708,9 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - The manifest records it (`planner.call_deadline_s`), resume refuses a change, and a manifest from before D65 counts as 60 s.
 - The heuristic config refuses the option, like the other LLM options.
 - Without `--timeout`, the attempt limit is max(600 s, (k + 1) × deadline + 360 s): 1080 s at 180 s for configs 3 and 7, unchanged at 60 s. An explicit `--timeout` stands.
+- The SDK's own timeout (a limit on each wait for data) becomes max(60 s, deadline). A server that sends nothing until the reply is done, as GMI Cloud and AIHubMix did, would otherwise still fail the call at 60 s.
 - Dev runs on the free endpoints use 180 s from now on.
 
-**Consequences:** dev results at 180 s are not comparable with runs at 60 s on latency or provider failures. Plan quality is comparable.
+**Consequences:**
+- Success rates and provider failures at 180 s are not comparable with runs at 60 s: at 60 s, replies that take 60–180 s count as failures. Only the plans that arrived compare.
+- `report build` does not check that its runs share one deadline (nor one model or temperature). Build reports only from runs made with the same `--call-deadline`; the deadline shows in each run's provenance. Headline reports are safe because they need `test`.

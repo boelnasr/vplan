@@ -201,11 +201,14 @@ class NemotronPlanner:
                  call_deadline_s: float = CALL_DEADLINE_S):
         if type(call_deadline_s) not in (int, float) or not 0 < call_deadline_s <= threading.TIMEOUT_MAX:
             raise ValueError("call deadline must be a positive, finite number of seconds")
+        # The SDK timeout bounds each wait for data; a server that sends nothing until the reply is done would trip it
+        # before a longer dev deadline (D65), so it is never shorter than the deadline.
+        read_timeout_s = max(60.0, float(call_deadline_s))
         if client is None:
             from openai import OpenAI
-            client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=60.0)
+            client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=read_timeout_s)
         # Enforce this even on an injected real SDK client configured with its default retries.
-        self._client = client.with_options(max_retries=0, timeout=60.0)
+        self._client = client.with_options(max_retries=0, timeout=read_timeout_s)
         self._secret = api_key
         self.model, self.provider, self.temperature = model, provider, temperature
         self.call_deadline_s = float(call_deadline_s)

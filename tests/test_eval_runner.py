@@ -233,14 +233,28 @@ def test_build_planner_hands_the_deadline_to_the_planner(tmp_path):
 
 
 def test_resume_reads_a_manifest_from_before_the_deadline_was_recorded_as_the_spec_deadline(seed_dir, tmp_path):
+    from vplan.evaluate import runner
     path = env_file(tmp_path)
     with pytest.raises(KeyboardInterrupt):
         run(seed_dir, tmp_path, config=1, env_file=path, fake=FakeSupervise(interrupt_at=1))
     m = manifest(tmp_path / "run")
     del m["planner"]["call_deadline_s"]
     (tmp_path / "run" / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    with pytest.raises(runner.EvalError, match="call_deadline_s"):
+        run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run", call_deadline_s=180)
     summary = run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run")
     assert summary.status == "complete"
+
+
+def test_resuming_a_180_s_run_without_the_option_is_refused(seed_dir, tmp_path):
+    from vplan.evaluate import runner
+    path = env_file(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, config=1, env_file=path, call_deadline_s=180, fake=FakeSupervise(interrupt_at=1))
+    with pytest.raises(runner.EvalError, match="call_deadline_s"):
+        run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run")
+    assert run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run",
+               call_deadline_s=180).status == "complete"
 
 
 # ---- new runs ---------------------------------------------------------------------------------------------
