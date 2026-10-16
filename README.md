@@ -144,6 +144,7 @@ python -m vplan report build --run runs/<c3_run> --run runs/<c7_run> --run runs/
 
 - Each run directory holds `manifest.json` (code, config and seed-set hashes, versions, provider and model), `sessions.jsonl` and `attempts.jsonl`, written only by the supervising parent. The API key never reaches any of them.
 - **Resume** counts every recorded attempt, including provider failures, so failures stay in the denominator. It refuses a changed config, model or seed set.
+- **Call deadline:** each planner call gets 60 s of wall-clock time (spec §10, D63); a slower reply is a provider failure. For dev runs on slow free endpoints, `--call-deadline 180` raises it (recorded in the manifest; refused on `test`), and the attempt limit grows to match (D65).
 - **Provenance:** every manifest records the git commit (read from `.git` directly when the git command is unavailable); `eval run` refuses to start without one unless `--allow-no-git`.
 - **Frames:** config 3 saves 9 key frames per executed attempt under `frames/` for the Cosmos shadow study (`--frames`/`--no-frames` to change). Report wall times exclude the rendering.
 - **The report labels its own status:** INCOMPLETE, LIMITED and DEGRADED (provider failures) runs, and a "not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.

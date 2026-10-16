@@ -45,6 +45,7 @@ import math
 import os
 import platform
 import subprocess
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -62,6 +63,7 @@ from vplan.evaluate.seedsets import SPLITS, EvalError, SeedSet, default_seed_dir
 from vplan.evaluate.supervisor import FATAL_STATUS, MAX_CONSECUTIVE_SERVICE_FAILURES, AttemptJob, supervise
 from vplan.evaluate.worker import AFTER
 from vplan.planners.heuristic import HeuristicPlanner
+from vplan.planners.nemotron import CALL_DEADLINE_S
 from vplan.records import (AttemptMode, AttemptRecord, EvalAttempt, FrameExport, SupervisedAttempt, TaskOracle,
                            TaskSpec)
 
@@ -69,6 +71,7 @@ SCHEMA_VERSION = 1
 KIND = "eval_run"
 JOB = "run_task"
 DEFAULT_TIMEOUT_S = 600.0  # k + 1 = 4 calls at the 60 s call deadline plus simulation stay well inside it (D42, D63)
+SIMULATION_ALLOWANCE_S = DEFAULT_TIMEOUT_S - 4 * CALL_DEADLINE_S  # what the default leaves beyond the calls (D65)
 DEFAULT_TEMPERATURE = 0.7  # as in the pilot (D33): resampling only means something if samples differ
 RUNS_ROOT = Path("runs")  # relative to the working directory, which is the repo root for every command
 
@@ -110,11 +113,15 @@ class PlannerSettings:
     base_url: str | None = None
     base_url_host: str | None = None
     env_file: str | None = None
+    call_deadline_s: float = CALL_DEADLINE_S  # wall-clock limit per planner call (D63); other values dev only (D65)
 
     def describe(self) -> dict:
         """The manifest form, compared on resume."""
-        return {"kind": self.kind, "provider": self.provider, "model": self.model, "temperature": self.temperature,
-                "base_url_host": self.base_url_host}
+        out = {"kind": self.kind, "provider": self.provider, "model": self.model, "temperature": self.temperature,
+               "base_url_host": self.base_url_host}
+        if self.kind == "llm":
+            out["call_deadline_s"] = self.call_deadline_s
+        return out
 
     def params(self) -> dict:
         """The worker form: the env-file path to read the key from, never the key."""
@@ -122,11 +129,13 @@ class PlannerSettings:
 
 
 def planner_settings(config: EvalConfig, *, env_file: str | Path | None = None, model: str | None = None,
-                     temperature: float | None = None, allow_paid: bool = False) -> PlannerSettings:
+                     temperature: float | None = None, allow_paid: bool = False,
+                     call_deadline_s: float | None = None) -> PlannerSettings:
     """Resolve and guard the planner before anything runs (D33 free-model guard)."""
     if config.planner == "heuristic":
-        given = [flag for flag, value in (("--env-file", env_file), ("--model", model), ("--temperature", temperature))
-                 if value is not None] + (["--allow-paid"] if allow_paid else [])
+        given = [flag for flag, value in (("--env-file", env_file), ("--model", model), ("--temperature", temperature),
+                                          ("--call-deadline", call_deadline_s)) if value is not None]
+        given += ["--allow-paid"] if allow_paid else []
         if given:
             raise EvalError(f"config {config.number} runs the heuristic planner without an LLM; drop "
                             + ", ".join(given))
@@ -148,7 +157,17 @@ def planner_settings(config: EvalConfig, *, env_file: str | Path | None = None, 
     temperature = DEFAULT_TEMPERATURE if temperature is None else float(temperature)
     if not (math.isfinite(temperature) and temperature >= 0):
         raise EvalError("--temperature must be a finite number >= 0")
-    return PlannerSettings("llm", provider, model, temperature, base_url, host, str(Path(env_file).resolve()))
+    deadline = CALL_DEADLINE_S if call_deadline_s is None else call_deadline_s
+    if type(deadline) not in (int, float) or not 0 < deadline <= threading.TIMEOUT_MAX:
+        raise EvalError("--call-deadline must be a positive number of seconds")
+    return PlannerSettings("llm", provider, model, temperature, base_url, host, str(Path(env_file).resolve()),
+                           float(deadline))
+
+
+def default_timeout(spec: EvalConfig, settings: PlannerSettings) -> float:
+    """The attempt limit when --timeout is not given: (k + 1) calls at the call deadline plus the simulation
+    allowance, never below the 600 s default (D42, D65)."""
+    return max(DEFAULT_TIMEOUT_S, (spec.k + 1) * settings.call_deadline_s + SIMULATION_ALLOWANCE_S)
 
 
 # ---- worker side ------------------------------------------------------------------------------------------
@@ -204,7 +223,8 @@ def build_planner(params: dict, pacing: dict | None = None):
     if not key:
         raise EvalError(f"{params['env_file']} does not set LLM_API_KEY")
     planner = NemotronPlanner(model=params["model"], provider=params["provider"], base_url=params["base_url"],
-                              api_key=key, temperature=params["temperature"])
+                              api_key=key, temperature=params["temperature"],
+                              call_deadline_s=params.get("call_deadline_s", CALL_DEADLINE_S))
     if pacing is not None:
         planner = PacedPlanner(planner, RequestPacer(Path(pacing["path"]), pacing["min_interval_s"]))
     return planner, key
@@ -496,6 +516,8 @@ def _resume(spec: EvalConfig, split: str, settings: PlannerSettings, run_dir: st
         if manifest.get(what) != now:
             raise _incompatible(what, manifest.get(what), now)
     planner = manifest.get("planner") or {}
+    if settings.kind == "llm":  # runs from before D65 recorded no deadline and ran at the spec's
+        planner = {"call_deadline_s": CALL_DEADLINE_S, **planner}
     for key, now in settings.describe().items():
         if planner.get(key) != now:
             raise _incompatible(f"planner {key}", planner.get(key), now)
@@ -529,18 +551,20 @@ def _resume(spec: EvalConfig, split: str, settings: PlannerSettings, run_dir: st
 def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run_dir: str | Path | None = None,
              resume: str | Path | None = None, n: int | None = None, env_file: str | Path | None = None,
              model: str | None = None, temperature: float | None = None, allow_paid: bool = False,
-             allow_source_drift: bool = False, timeout_s: float = DEFAULT_TIMEOUT_S, max_rpm: float | None = None,
-             allow_no_git: bool = False, frames: bool | None = None, import_modules: Sequence[str] = (),
+             allow_source_drift: bool = False, timeout_s: float | None = None, max_rpm: float | None = None,
+             allow_no_git: bool = False, frames: bool | None = None, call_deadline_s: float | None = None,
+             import_modules: Sequence[str] = (),
              supervise_attempt: Callable[..., SupervisedAttempt] = supervise,
              echo: Callable[[str], None] = lambda line: print(line, flush=True)) -> RunSummary:
     """Run (or with resume, continue) one config over a prepared seed set. Everything is validated before the first
     worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set. Without a git SHA
     for the checkout the run is refused unless allow_no_git. frames (None: config 3 only; on resume, the run's own
-    setting) makes workers render the key frames of executed rounds."""
+    setting) makes workers render the key frames of executed rounds. call_deadline_s (default the spec's 60 s) bounds
+    each planner call; another value is for dev runs only, and timeout_s then defaults to default_timeout (D65)."""
     spec = eval_config(config)
     if split not in SPLITS:
         raise EvalError(f"unknown split {split!r}; expected one of {', '.join(SPLITS)}")
-    if not (math.isfinite(timeout_s) and timeout_s > 0):
+    if timeout_s is not None and not (math.isfinite(timeout_s) and timeout_s > 0):
         raise EvalError("--timeout must be a positive number of seconds")
     if max_rpm is not None and not (math.isfinite(max_rpm) and max_rpm > 0):
         raise EvalError("--max-rpm must be a positive number")
@@ -549,7 +573,11 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
     if frames is not None and not isinstance(frames, bool):
         raise EvalError("frames must be True, False or None (the config's default)")
     settings = planner_settings(spec, env_file=env_file, model=model, temperature=temperature,
-                                allow_paid=allow_paid)
+                                allow_paid=allow_paid, call_deadline_s=call_deadline_s)
+    if split == "test" and settings.call_deadline_s != CALL_DEADLINE_S:
+        raise EvalError(f"a call deadline other than spec §10's {CALL_DEADLINE_S:g} s is for dev runs only (D65)")
+    if timeout_s is None:
+        timeout_s = default_timeout(spec, settings)
     provenance = _provenance()
     if provenance["git"] is None and not allow_no_git:
         raise EvalError("no git SHA for this checkout: the git command failed, HEAD could not be read from the "

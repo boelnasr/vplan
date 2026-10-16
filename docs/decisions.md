@@ -1695,3 +1695,19 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - It applies to every model and config alike, before the freeze. No recorded Lightning or Ultra result changes, and replay does not re-parse old replies.
 - Re-parsing the 4 recorded Super replies (run `cmp-1016/c3-super-1`) gives 4 valid pick-and-place plans.
 - Super becomes usable as a free development model (99.9 % uptime on OpenRouter on Oct 16). Its results never stand in for Lightning's (D62), and free-tier daily caps still apply.
+
+## D65. A longer call deadline for dev runs only (2026-10-16)
+
+**Found:** with D63's 60 s deadline, the free endpoints were too slow to test on Oct 16 evening.
+- Free Lightning: 3 of 3 calls past 60 s in each of two runs (OpenRouter still showed 100 % uptime, which counts errors, not latency).
+- Free Super: 6 of 12 calls past 60 s; its successful calls took 45–55 s.
+- Every run stopped after 3 consecutive provider failures.
+
+**Ruling (owner's choice, Oct 16: "Make it 180"):** `vplan eval run --call-deadline S` sets the per-call deadline.
+- The default stays spec §10's 60 s. Any other value is refused on the `test` split, so headline runs always use the spec's deadline.
+- The manifest records it (`planner.call_deadline_s`), resume refuses a change, and a manifest from before D65 counts as 60 s.
+- The heuristic config refuses the option, like the other LLM options.
+- Without `--timeout`, the attempt limit is max(600 s, (k + 1) × deadline + 360 s): 1080 s at 180 s for configs 3 and 7, unchanged at 60 s. An explicit `--timeout` stands.
+- Dev runs on the free endpoints use 180 s from now on.
+
+**Consequences:** dev results at 180 s are not comparable with runs at 60 s on latency or provider failures. Plan quality is comparable.
