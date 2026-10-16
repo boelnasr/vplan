@@ -1678,3 +1678,20 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - An abandoned request may still be billed by a paid provider.
 - Runs made before this change (such as the cmp-1016 comparison at 708235d) can still hold slow-call `worker_timeout` sim errors; compare them with those attempts excluded.
 - Not changed: the demo-only Cosmos client (`visual/cosmos.py`) keeps the SDK timeout; it talks to a local vLLM server.
+
+## D64. A plan sent as a JSON string is decoded once (2026-10-16)
+
+**Found:** Nemotron Super sends `{"plan": "<the plan object as a JSON string>"}` instead of `{"plan": {…}}`.
+- 10 of 10 calls did it: free Super 3 on OpenRouter, and Super VL on GMI Cloud.
+- It persisted after the schema retry ("plan: Input should be an object", spec §7), so every attempt ended `malformed_final` although the plan inside was well formed.
+- No Lightning or Ultra reply in any recorded run had this form.
+
+**Ruling (owner's OK, Oct 16):** before validation, the parser decodes a string `plan` once when it holds a JSON object, in the tool-call arguments and in the content fallback.
+- Anything else stays as sent and is validated as before: a string that is not JSON, JSON that is not an object, a plan encoded twice, and an object that still fails the schema are all `malformed`.
+- Replies with an object `plan` take exactly the old path.
+- The evidence keeps the reply as sent (`raw_response`), so a decoded reply can always be recognized in the records.
+
+**Consequences:**
+- It applies to every model and config alike, before the freeze. No recorded Lightning or Ultra result changes, and replay does not re-parse old replies.
+- Re-parsing the 4 recorded Super replies (run `cmp-1016/c3-super-1`) gives 4 valid pick-and-place plans.
+- Super becomes usable as a free development model (99.9 % uptime on OpenRouter on Oct 16). Its results never stand in for Lightning's (D62), and free-tier daily caps still apply.

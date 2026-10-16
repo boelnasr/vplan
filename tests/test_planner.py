@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from vplan.planners.heuristic import heuristic_geometry
-from vplan.records import Finding, SubmitPlanArgs
+from vplan.records import Finding, Refusal, SubmitPlanArgs
 from vplan.tasks import generate_candidate
 
 
@@ -80,6 +80,41 @@ def test_forced_tool_schema_metadata_and_no_hidden_retries():
 def test_rejects_malformed_outputs_before_simulation(bad):
     task, _ = fixture()
     result = planner(FakeClient([bad])).plan(task, protocol="content")
+    assert result.outcome == "malformed" and result.plan is None and result.errors
+
+
+@pytest.mark.parametrize("protocol", ["forced", "content"])
+@pytest.mark.parametrize("refusal", [False, True])
+def test_a_plan_sent_as_a_json_string_is_decoded_once(protocol, refusal):
+    # D64: Nemotron Super sends {"plan": "<the plan object as a JSON string>"} in every reply, also after the
+    # schema retry. The evidence keeps the reply as sent.
+    task, plan = fixture()
+    if refusal:
+        plan = Refusal(reason="target_unreachable", explanation="beyond the reach bound")
+    wrapped = json.dumps({"plan": plan.model_dump_json()})
+    reply = response(content=wrapped) if protocol == "content" else response(arguments=wrapped)
+    result = planner(FakeClient([reply])).plan(task, protocol=protocol)
+    assert result.outcome == "proposed" and result.plan == plan
+    message = result.raw_response["choices"][0]["message"]
+    sent = message["content"] if protocol == "content" else message["tool_calls"][0]["function"]["arguments"]
+    assert sent == wrapped
+
+
+def _schema_invalid(plan):
+    return {**plan.model_dump(mode="json"), "grasp": "top"}
+
+
+@pytest.mark.parametrize("protocol", ["forced", "content"])
+@pytest.mark.parametrize("inner", [
+    lambda plan: "not json", lambda plan: json.dumps("a string"), lambda plan: json.dumps([1, 2]),
+    lambda plan: json.dumps(plan.model_dump_json()),  # encoded twice: decoding stops after one level
+    lambda plan: json.dumps(_schema_invalid(plan)),  # decodes to an object that still fails the schema
+])
+def test_a_string_plan_that_is_not_one_valid_object_stays_malformed(protocol, inner):
+    task, plan = fixture()
+    wrapped = json.dumps({"plan": inner(plan)})
+    reply = response(content=wrapped) if protocol == "content" else response(arguments=wrapped)
+    result = planner(FakeClient([reply])).plan(task, protocol=protocol)
     assert result.outcome == "malformed" and result.plan is None and result.errors
 
 

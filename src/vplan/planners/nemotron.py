@@ -65,6 +65,19 @@ def _no_tools(raw: dict) -> bool:
     return calls is None or calls == []
 
 
+def _decode_string_plan(payload: Any) -> Any:
+    """D64: Nemotron Super sends {"plan": "<the plan object as a JSON string>"}. Decode that string once when it
+    holds a JSON object; anything else is returned unchanged for validation to reject."""
+    if isinstance(payload, dict) and isinstance(payload.get("plan"), str):
+        try:
+            plan = json.loads(payload["plan"])
+        except (ValueError, RecursionError):
+            return payload
+        if isinstance(plan, dict):
+            return {**payload, "plan": plan}
+    return payload
+
+
 def _parse(raw: dict):
     message = _message(raw)
     calls = message.get("tool_calls")
@@ -78,11 +91,20 @@ def _parse(raw: dict):
         function = calls[0].get("function", {})
         if not isinstance(function, dict) or function.get("name") != "submit_plan":
             raise ValueError("unknown tool name")
-        return SubmitPlanArgs.model_validate_json(function.get("arguments", "")).plan
+        arguments = function.get("arguments", "")
+        if isinstance(arguments, str):
+            try:
+                loaded = json.loads(arguments)
+            except (ValueError, RecursionError):
+                loaded = None  # left for model_validate_json to report, as before
+            decoded = _decode_string_plan(loaded)
+            if decoded is not loaded:  # only the string-plan case is re-encoded; every other reply validates as sent
+                arguments = json.dumps(decoded)
+        return SubmitPlanArgs.model_validate_json(arguments).plan
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("empty response content")
-    payload = json.loads(content)
+    payload = _decode_string_plan(json.loads(content))
     return SubmitPlanArgs.model_validate(payload).plan if isinstance(payload, dict) and "plan" in payload else PLAN_ADAPTER.validate_python(payload)
 
 
