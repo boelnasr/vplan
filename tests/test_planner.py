@@ -220,6 +220,15 @@ def test_the_default_deadline_is_the_spec_per_call_timeout():
     assert "per-call timeout 60 s" in (Path(__file__).resolve().parents[1] / "docs" / "spec.md").read_text("utf-8")
 
 
+def test_a_longer_deadline_also_lengthens_the_sdk_read_timeout():
+    # D65: a server silent until the reply is done (GMI, AIHubMix) would otherwise fail at the SDK's 60 s first.
+    from vplan.planners.nemotron import NemotronPlanner
+    for deadline, read_timeout in ((180, 180.0), (30, 60.0)):
+        client = FakeClient([])
+        NemotronPlanner(model="m", client=client, call_deadline_s=deadline)
+        assert client.options == [{"max_retries": 0, "timeout": read_timeout}]
+
+
 @pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), True, threading.TIMEOUT_MAX * 2])
 def test_an_unusable_deadline_is_refused(bad):
     from vplan.planners.nemotron import NemotronPlanner

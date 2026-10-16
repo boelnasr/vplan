@@ -178,6 +178,85 @@ def test_llm_settings_never_hold_the_key(tmp_path):
     assert paid.model == "anthropic/claude-sonnet-5.5"  # config 6 never falls back to LLM_MODEL
 
 
+# ---- the per-call deadline (D63, D65) -------------------------------------------------------------------------
+def test_llm_runs_record_the_spec_call_deadline_and_keep_the_600_s_attempt_limit(seed_dir, tmp_path):
+    fake = FakeSupervise()
+    run(seed_dir, tmp_path, config=3, env_file=env_file(tmp_path), fake=fake)
+    m = manifest(tmp_path / "run")
+    assert m["planner"]["call_deadline_s"] == 60.0 and m["timeout_s"] == 600.0
+    assert sessions(tmp_path / "run")[0]["timeout_s"] == 600.0
+    assert fake.jobs[0].params["planner"]["call_deadline_s"] == 60.0
+
+
+@pytest.mark.parametrize("config, timeout, expected", [(3, None, 1080.0), (7, None, 1080.0), (1, None, 600.0),
+                                                       (3, 900.0, 900.0)])
+def test_a_dev_call_deadline_reaches_the_workers_and_scales_the_attempt_limit(seed_dir, tmp_path, config, timeout,
+                                                                              expected):
+    # D65: (k + 1) calls at the deadline plus the 360 s the default leaves for simulation, never below 600 s;
+    # an explicit --timeout stands.
+    fake = FakeSupervise()
+    run(seed_dir, tmp_path, config=config, env_file=env_file(tmp_path), fake=fake, call_deadline_s=180,
+        timeout_s=timeout)
+    m = manifest(tmp_path / "run")
+    assert m["planner"]["call_deadline_s"] == 180.0 and m["timeout_s"] == expected
+    assert fake.jobs[0].params["planner"]["call_deadline_s"] == 180.0
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), True, "180"])
+def test_an_unusable_call_deadline_is_refused(tmp_path, bad):
+    from vplan.evaluate import runner
+    with pytest.raises(runner.EvalError, match="--call-deadline"):
+        runner.planner_settings(runner.CONFIGS[3], env_file=env_file(tmp_path), call_deadline_s=bad)
+
+
+def test_the_heuristic_config_refuses_a_call_deadline():
+    from vplan.evaluate import runner
+    with pytest.raises(runner.EvalError, match="without an LLM.*--call-deadline"):
+        runner.planner_settings(runner.CONFIGS[5], call_deadline_s=180)
+
+
+def test_a_call_deadline_other_than_the_spec_is_for_dev_runs_only(seed_dir, tmp_path):
+    from vplan.evaluate import runner
+    fake = FakeSupervise()
+    with pytest.raises(runner.EvalError, match="dev runs only"):
+        runner.run_eval(3, "test", seed_dir=seed_dir, run_dir=tmp_path / "run", env_file=env_file(tmp_path),
+                        call_deadline_s=180, supervise_attempt=fake, echo=lambda *a: None)
+    assert fake.jobs == [] and not (tmp_path / "run").exists()
+
+
+def test_build_planner_hands_the_deadline_to_the_planner(tmp_path):
+    from vplan.evaluate import runner
+    params = runner.planner_settings(runner.CONFIGS[3], env_file=env_file(tmp_path), call_deadline_s=180).params()
+    assert runner.build_planner(params)[0].call_deadline_s == 180.0
+    legacy = {k: v for k, v in params.items() if k != "call_deadline_s"}  # params written before D65
+    assert runner.build_planner(legacy)[0].call_deadline_s == 60.0
+
+
+def test_resume_reads_a_manifest_from_before_the_deadline_was_recorded_as_the_spec_deadline(seed_dir, tmp_path):
+    from vplan.evaluate import runner
+    path = env_file(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, config=1, env_file=path, fake=FakeSupervise(interrupt_at=1))
+    m = manifest(tmp_path / "run")
+    del m["planner"]["call_deadline_s"]
+    (tmp_path / "run" / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+    with pytest.raises(runner.EvalError, match="call_deadline_s"):
+        run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run", call_deadline_s=180)
+    summary = run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run")
+    assert summary.status == "complete"
+
+
+def test_resuming_a_180_s_run_without_the_option_is_refused(seed_dir, tmp_path):
+    from vplan.evaluate import runner
+    path = env_file(tmp_path)
+    with pytest.raises(KeyboardInterrupt):
+        run(seed_dir, tmp_path, config=1, env_file=path, call_deadline_s=180, fake=FakeSupervise(interrupt_at=1))
+    with pytest.raises(runner.EvalError, match="call_deadline_s"):
+        run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run")
+    assert run(seed_dir, tmp_path, config=1, env_file=path, resume=tmp_path / "run",
+               call_deadline_s=180).status == "complete"
+
+
 # ---- new runs ---------------------------------------------------------------------------------------------
 def test_new_run_records_every_attempt_once_with_a_spec_manifest(seed_dir, tmp_path, monkeypatch):
     from vplan.evaluate import seedsets
@@ -357,7 +436,8 @@ def test_resume_refuses_damaged_attempt_rows(seed_dir, tmp_path, damage, message
 
 
 @pytest.mark.parametrize("change, message", [
-    ("config", "config"), ("model", "model"), ("temperature", "temperature"), ("n", "--n"),
+    ("config", "config"), ("model", "model"), ("temperature", "temperature"), ("deadline", "call_deadline_s"),
+    ("n", "--n"),
     ("seed_set", "seed-set hash"), ("configs", "configuration"), ("source", "source changed"),
     ("not_a_run", "not an evaluation run")])
 def test_resume_refuses_an_incompatible_run(seed_dir, tmp_path, monkeypatch, change, message):
@@ -372,6 +452,8 @@ def test_resume_refuses_an_incompatible_run(seed_dir, tmp_path, monkeypatch, cha
         kw["model"] = "nvidia/nemotron-3.5-lightning:free"
     elif change == "temperature":
         kw["temperature"] = 0.2
+    elif change == "deadline":
+        kw["call_deadline_s"] = 180
     elif change == "n":
         kw["n"] = 2
     elif change == "seed_set":
@@ -695,13 +777,14 @@ def test_cli_eval_run_wiring_and_exit_codes(monkeypatch, tmp_path, capsys):
                  "--run-dir", "r"]) == 0
     assert seen[0] == (5, "dev", {"seed_dir": "s", "run_dir": "r", "resume": None, "n": 3, "env_file": None,
                                   "model": None, "temperature": None, "allow_paid": False,
-                                  "allow_source_drift": False, "timeout_s": 600.0, "max_rpm": None,
-                                  "allow_no_git": False, "frames": None})
+                                  "allow_source_drift": False, "timeout_s": None, "max_rpm": None,
+                                  "allow_no_git": False, "frames": None, "call_deadline_s": None})
     status[0] = "incomplete"
     assert main(["eval", "run", "--config", "3", "--seeds", "dev", "--env-file", "e.env", "--resume", "r",
                  "--max-rpm", "20", "--timeout", "300", "--temperature", "0.5", "--allow-paid", "--allow-no-git",
-                 "--no-frames"]) == 1
+                 "--no-frames", "--call-deadline", "180"]) == 1
     kw = seen[1][2]
+    assert kw["call_deadline_s"] == 180.0
     assert (kw["resume"], kw["env_file"], kw["max_rpm"], kw["timeout_s"], kw["temperature"], kw["allow_paid"],
             kw["allow_no_git"], kw["frames"]) == ("r", "e.env", 20.0, 300.0, 0.5, True, True, False)
     main(["eval", "run", "--config", "5", "--seeds", "dev", "--frames"])

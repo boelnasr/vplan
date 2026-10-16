@@ -148,7 +148,7 @@ def _eval(args) -> int:
             args.config, args.seeds, seed_dir=args.seed_dir, run_dir=args.run_dir, resume=args.resume, n=args.n,
             env_file=args.env_file, model=args.model, temperature=args.temperature, allow_paid=args.allow_paid,
             allow_source_drift=args.allow_source_drift, timeout_s=args.timeout, max_rpm=args.max_rpm,
-            allow_no_git=args.allow_no_git, frames=args.frames)
+            allow_no_git=args.allow_no_git, frames=args.frames, call_deadline_s=args.call_deadline)
     except pilot.PilotError as exc:  # EvalError is a PilotError; messages never carry credentials
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -252,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     er.add_argument("--temperature", type=float, help="every planner call (default 0.7)")
     er.add_argument("--allow-paid", action="store_true", help="permit non-free or non-OpenRouter models")
     er.add_argument("--allow-source-drift", action="store_true", help="record source changes instead of refusing")
-    er.add_argument("--timeout", type=float, default=600.0, help="per-attempt wall-clock limit, s")
+    er.add_argument("--timeout", type=float,
+                    help="per-attempt wall-clock limit, s (default 600, or (k+1) calls at --call-deadline + 360 s)")
+    er.add_argument("--call-deadline", type=float,
+                    help="wall-clock limit per planner call, s (default 60, spec §10; another value: dev runs only)")
     er.add_argument("--max-rpm", type=float, help="pace provider requests to at most this many per minute")
     er.add_argument("--allow-no-git", action="store_true",
                     help="run although the checkout's git SHA is unknown (recorded in the manifest)")
