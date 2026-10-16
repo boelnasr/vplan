@@ -142,7 +142,7 @@ def _response_call(response, common: dict, secret: str | None) -> PlannerCall:
             errors=({"type": type(exc).__name__, "message": "invalid provider response envelope or metadata"},))
 
 
-# Spec §7 per-call timeout, as wall-clock time for the whole call (D63). The SDK timeout below only bounds each wait
+# Spec §10 per-call timeout, as wall-clock time for the whole call (D63). The SDK timeout below only bounds each wait
 # for data, and OpenRouter keeps a slow request alive, so calls of 178-225 s passed it.
 CALL_DEADLINE_S = 60.0
 

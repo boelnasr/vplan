@@ -1663,7 +1663,7 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - The SDK timeout bounds each wait for data, not the whole call. A call that ended after 178 s means OpenRouter kept sending bytes while it waited, so the timeout never fired.
 - One attempt then ran into the 600 s worker limit (D42) and was recorded as `sim_error` (`worker_timeout`), which the report counts as a verifier/simulator issue. A slow provider was scored as our fault.
 
-**Ruling:** spec §7's "per-call timeout 60 s" is wall-clock time for the whole call.
+**Ruling:** spec §10's "per-call timeout 60 s" is wall-clock time for the whole call.
 - `NemotronPlanner` runs each request on a daemon thread and stops waiting after `call_deadline_s` (default `CALL_DEADLINE_S = 60.0`). Past it, the call is a `service_failure` with `error_type` `CallDeadlineExceeded`. The request is abandoned, never retried, and its late reply is dropped.
 - The SDK's 60 s timeout stays as a guard on each read. It does not bound a request the provider keeps alive, so an abandoned request lives until the provider finishes:
   - in an eval worker (one subprocess per attempt, which stops at its first service failure) it dies with the process; a daemon thread never holds up the exit;
