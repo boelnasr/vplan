@@ -212,8 +212,10 @@ All records are pydantic models, and JSONL lines are `model_dump_json()` output.
 
 **Planners**
 - **`NemotronPlanner`:**
-  - development: OpenRouter `nvidia/nemotron-3-ultra-550b-a55b` (owner's choice, D30);
-  - final: Token Factory `nvidia/Nemotron-3-Ultra-550b-a55b`. Its catalog entry has no "function calling" tag, so the D13 fallback chain (forced tool call → `required` → validated content JSON) decides, verified in the W3.0 smoke test (moved from W2.6 by D37).
+  - evaluation (D62): Nemotron 3.5 Lightning. Development and dry runs: OpenRouter `nvidia/nemotron-3.5-lightning:free`. Final: Token Factory `nvidia/Nemotron-3_5-Lightning`, re-checked in the catalog before use.
+  - live demo (D62): Nemotron 3 Ultra on Token Factory, `nvidia/Nemotron-3-Ultra-550b-a55b`. Its catalog entry has no "function calling" tag.
+  - For both models, the D13 fallback chain (forced tool call → `required` → validated content JSON) decides, verified in the W3.0 smoke test (moved from W2.6 by D37).
+  - Development until D62 used OpenRouter `nvidia/nemotron-3-ultra-550b-a55b` (D30).
 - **`HeuristicPlanner`:**
   - a template-aware parser;
   - a top-down grasp with yaw aligned to the nearest cube face, a vertical via-point at the tallest obstacle + 0.10 m, and placement at the bin center;

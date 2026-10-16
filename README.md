@@ -2,9 +2,9 @@
 
 A language model proposes a pick-and-place plan for a Franka Panda arm. Deterministic kinematic and collision checks then approve or reject the plan **before anything moves**. A rejected plan comes back with structured findings the model can use to repair it. An independent Judge scores every executed run in physics simulation.
 
-Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron 3 Ultra**. Final runs use **Nebius Token Factory** and **Nebius Serverless Jobs**.
+Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron**: **3.5 Lightning** for the evaluation and **3 Ultra** for the live demo, both served by **Nebius Token Factory** in the final runs (D62).
 
-> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron 3 Ultra. Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come: calibration and freeze, the Gradio UI, and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
+> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). The singularity threshold is calibrated (D61). Still to come: the freeze, the Gradio UI, and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
 
 ## How it works
 
@@ -180,7 +180,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `src/vplan/verify/` | Pre-execution checks and finding ordering |
 | `src/vplan/execute/` | Approval token, physics execution, grasp attachment |
 | `src/vplan/judge/` | Independent scoring and PyBullet Jacobian |
-| `src/vplan/planners/` | Heuristic baseline and the Nemotron 3 Ultra adapter (forced tool calls) |
+| `src/vplan/planners/` | Heuristic baseline and the Nemotron adapter (forced tool calls) |
 | `src/vplan/pipeline.py` | One attempt end to end |
 | `src/vplan/repair.py` | `run_task`: attempts, verifier-feedback repair and resampling within a call budget |
 | `src/vplan/replay.py` | Keyless playback of recorded executions |

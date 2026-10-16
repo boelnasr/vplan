@@ -1638,3 +1638,21 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
   - Because seeds are consumed in order (D53), that one rejection shifts every later slot: dev tasks 13–99 change content.
   - The heuristic (config 5) then scored 100/100 attempts: 75/75 feasible executed with Judge success, 19/19 refusals of types 1, 2 and 4, and 6/6 type-3 tasks `budget_exhausted`. No singularity finding came up.
 - **Consequences:** every seed set, cohort and run prepared before this commit has stale config hashes and is refused by `eval run`/`report build`. The generator is not frozen and `test` is not generated (W3.3 steps 4–5, kept for last). Suite: 987 passed.
+
+## D62. Lightning for the evaluation, Ultra for the demo (2026-10-16)
+
+**Owner's choice** (from D60's comparison and the $25 Token Factory budget, D57):
+- **Evaluation** (configs 1, 2/3 and 7, the dry run and the final `test` runs): **Nemotron 3.5 Lightning**.
+  - Development and dry runs: OpenRouter `nvidia/nemotron-3.5-lightning:free` (tools and tool_choice; no 503s in about 200 calls on Oct 15).
+  - Final: Token Factory, catalog ID `nvidia/Nemotron-3_5-Lightning` (tagged "function calling" when checked on Oct 4). Re-check it in the catalog before first use, because Token Factory removes models without rerouting.
+  - About $2–7 per full `test` pass, so the evaluation fits the credit with room for reruns.
+- **Live demo:** **Nemotron 3 Ultra** on Token Factory (`nvidia/Nemotron-3-Ultra-550b-a55b`), about $1–2 for the recording.
+
+**Consequences:**
+- **Headline source** (open since D57): the headline stays Token Factory only, as spec §14 says. A report is a headline report when configs 2, 3 and 7 ran complete on Token Factory Lightning over `test` (D56, D59). No rule change.
+- **The demo shows a different model** from the one the numbers describe. The README and the video must say which model each part uses.
+- **W3.0 smoke test** (still the owner's OK, D57): forced tool calls on Token Factory for both models, about 20 calls each (about $0.01 for Lightning, $0.20 for Ultra).
+- **Superseded:**
+  - D30's single planner model, for the evaluation only. Development history, R4 (20/20) and the pilots (D35, D46) stay as recorded on Ultra.
+  - Spec §7's NemotronPlanner lines.
+- **Prompt:** Lightning's failures on the hard cohort were mostly transport collisions and releases above the limit (D60). Any prompt change must reach every config equally and happen before the freeze, so no `test` result is tuned.
