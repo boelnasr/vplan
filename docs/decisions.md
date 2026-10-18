@@ -1875,3 +1875,16 @@ All model and provider text is HTML-escaped.
 - The runner has no daily budget, and a 429 from the cap would be recorded as a service failure for every remaining task. A local driver (`.claude/dryrun_guard.py`, not committed) stops the runner before the day's 46th request or after a 429, and resumes the next UTC day. A 429 that does arrive stays in the record. When the runner's own stop rule fires (three failed requests in a row, D33/D42), the driver waits 15 minutes and resumes.
 - **First day:** in config 1's first 5 calls, free Lightning hit the 180 s deadline 3 times and returned one 504; the one reply took about 66 s. At that rate most rows will be provider failures. Lightning on Token Factory answered in 8.2 s median in W3.0, at about $0.0006 a call (about $2 for a full pass), but the owner ruled the dry run off Token Factory (D65 addendum).
 - The result is labelled "dry run, not a headline result" (D56). At 40 tasks it checks the pipeline end to end on `test` (runner, resume across days, report build), not success rates.
+
+## D69. The W3.6 dry run moves to Token Factory (2026-10-18)
+
+**Why:** on the first day of D68's reduced free run, free Lightning hit the 180 s deadline on 3 of config 1's first 5 calls and returned one 504, and the runner's stop rule (three failed requests in a row) halted it after 5 attempts. At that rate the dry run would have measured the free tier, not the planner.
+
+**Ruling (owner, Oct 18, about $2 approved):** the dry run is the **full** `test` set on Token Factory Lightning, superseding D68's reduced free run and the D65 addendum's "off Token Factory".
+- Configs 1, 3 and 7: `--env-file .env.tokenfactory --model nvidia/Nemotron-3_5-Lightning --allow-paid --max-rpm 15`, the 60 s deadline (no `--call-deadline`), all 400 tasks, no `--allow-source-drift`. Config 5 on all 400 tasks. Run directories `runs/dryrun-tf/c{1,3,5,7}-test` (local, not committed).
+- The three LLM configs run in parallel. At about 6 requests a minute each they stay well under Token Factory's default 60 requests and 400k tokens per minute (docs: ai-models-inference/rate-limits).
+- Cost from W3.0's token counts: about $0.0006 per call, so about $1.25 for the expected 2,200 calls and about $2 for the 3,600-call maximum.
+
+**Consequences:**
+- These runs meet D59's headline conditions (Token Factory provider, `test`, configs 2/3/7 complete at 60 s), so the report will not label them "dry run". If the dry run needs no code fix, the owner may keep them as the final runs, and week 4's paid batch is not needed. A fix after the freeze means a new ruling and a new pass.
+- D68's reduced runs stay as recorded: `runs/dryrun/c5-test-n40` complete, `runs/dryrun/c1-test-n40` stopped at 5 of 40. They are not resumed, and `.claude/dryrun_guard.py` is retired.
