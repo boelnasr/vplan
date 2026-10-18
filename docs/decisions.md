@@ -1722,7 +1722,7 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 
 ## D67. The tool schema requires each plan's `kind` (2026-10-18)
 
-**Found** (free Super run `cmp-1016/c3-super-v3`, Oct 16): Super left out `kind` in 5 of its 13 calls up to task 7, and 2 of its 12 feasible tasks ended `malformed_final` for that reason alone.
+**Found** (free Super run `cmp-1016/c3-super-v3`, Oct 16): Super left out `kind` in 6 of its 13 replies over tasks 0–6, and 2 of its 12 feasible tasks ended `malformed_final` for that reason alone.
 - The cause was ours. `PickPlacePlan.kind` and `Refusal.kind` have defaults, so pydantic's JSON schema leaves them out of `required`, and the tool schema told the model the tag was optional.
 - The parser needs that tag to tell a pick-and-place plan from a refusal (a discriminated union, spec §7), so a reply without it is rejected.
 - The schema-retry message ("Unable to extract tag using discriminator 'kind'") did not help Super reliably.
@@ -1734,3 +1734,5 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 **Consequences:**
 - Every model's request changes by that one word, so this is a prompt change. D62 allows it only before the freeze and for all configs equally; both hold. It must land before `test` is generated.
 - Runs before and after this change do not share a byte-identical prompt. The pilots (D35, D46), D60 and the Oct 16 comparison runs stay as recorded.
+- Do not resume a run started before D67 with `--allow-source-drift`: it would mix the two schemas in one run.
+- R4 (D13, forced tool calls 20/20) was measured with the old schema. A provider that rejected the new one with a 400 naming the tool would push the planner from the forced protocol to the fallbacks without failing. The W3.0 smoke test, or the first free Lightning call, must confirm the protocol stays `forced` and the reply carries `kind`.

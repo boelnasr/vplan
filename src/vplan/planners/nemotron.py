@@ -70,10 +70,12 @@ def plan_schema() -> dict:
     The parser needs that tag to tell a pick-and-place plan from a refusal, but pydantic leaves a defaulted field out
     of `required`. A fresh dict on every call, so no request can alter another's schema."""
     schema = SubmitPlanArgs.model_json_schema()
-    for ref in schema["properties"]["plan"]["discriminator"]["mapping"].values():
+    discriminator = schema["properties"]["plan"]["discriminator"]
+    tag = discriminator["propertyName"]
+    for ref in discriminator["mapping"].values():
         definition = schema["$defs"][ref.rsplit("/", 1)[-1]]
-        if "kind" not in definition.get("required", []):
-            definition["required"] = ["kind", *definition.get("required", [])]
+        if tag not in definition.get("required", []):
+            definition["required"] = [tag, *definition.get("required", [])]
     return schema
 
 
