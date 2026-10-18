@@ -1714,3 +1714,8 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 **Consequences:**
 - Success rates and provider failures at 180 s are not comparable with runs at 60 s: at 60 s, replies that take 60–180 s count as failures. Only the plans that arrived compare.
 - `report build` does not check that its runs share one deadline (nor one model or temperature). Build reports only from runs made with the same `--call-deadline`; the deadline shows in each run's provenance. Headline reports are safe because they need `test`.
+
+**Addendum (2026-10-18): the W3.6 dry run on free Lightning.** The owner ruled that the dry run stays off Token Factory and uses free Lightning on OpenRouter. At 60 s free Lightning hardly answered (D65 above), and the dry run runs on `test`.
+- The refusal now applies only to a **Token Factory run on `test`**, the only kind that can be a headline result (spec §14, D59). Any other run on `test`, such as the dry run, may use `--call-deadline 180`. Dev runs are unchanged.
+- This supersedes the title's "dev runs only" and the consequence that headline reports are safe because they need `test`: they are safe because they need a Token Factory run on `test`, which keeps 60 s.
+- Expect the dry run to take several sessions: the free daily cap is 50 or 1,000 requests depending on credits ever bought, and resume keeps every provider failure in the denominator.
