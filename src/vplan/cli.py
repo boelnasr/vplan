@@ -214,7 +214,7 @@ def _ui(args) -> int:
     except (pilot.PilotError, sources.ReplayError) as exc:  # messages never carry credentials
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    from vplan.ui import app  # imports gradio, which only this command needs
+    from vplan.ui import gradio_app as app  # imports gradio, which only this command needs
     settings = app.UISettings(planners=tuple(planners), cosmos_url=args.cosmos_url, replay=args.replay,
                               seed_dir=args.seed_dir, record_dir=None if args.no_record else args.record_dir,
                               host=args.host, port=args.port)

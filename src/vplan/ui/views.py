@@ -1,5 +1,5 @@
 """View models for the W3.5 UI (spec §15): plain, typed data built from the shared records (records.py), without
-Gradio or PyBullet, so every panel's content is tested offline. ui.markup turns them into HTML and ui.app lays it out.
+Gradio or PyBullet, so every panel's content is tested offline. ui.markup turns them into HTML and ui.gradio_app lays it out.
 
 Check statuses (spec §9 V-1..V-8, one row per check and round):
 - pass: the check ran over the whole trajectory and reported nothing;

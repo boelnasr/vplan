@@ -8,7 +8,7 @@ import pytest
 from tests.ui_fixtures import SECRET, basic_result
 from vplan import cli
 from vplan.evaluate import pilot
-from vplan.ui import app, live
+from vplan.ui import gradio_app as app, live
 
 
 @pytest.fixture
@@ -158,3 +158,4 @@ def test_empty_galleries_are_hidden_and_filled_ones_shown():
     out = dict(zip(app.display.Display.FIELDS, app.shown(values)))
     assert out["findings"]["visible"] is False and out["cosmos"]["visible"] is True
     assert out["judge_html"] == "" and out["plan_json"] == ""
+

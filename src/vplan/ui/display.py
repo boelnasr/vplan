@@ -1,4 +1,4 @@
-"""Panel contents for both UI modes (spec §15), without Gradio: ui.app maps a Display onto its components in
+"""Panel contents for both UI modes (spec §15), without Gradio: ui.gradio_app maps a Display onto its components in
 Display.FIELDS order. Live progress (LiveProgress, fed with ui.live events), a finished live attempt and a replayed
 recording all end up as the same panels: banner, status, plan JSON, check timeline, highlighted findings, Cosmos frames,
 execution and Judge."""
