@@ -914,6 +914,30 @@ Consequences:
 - **Budget:** about 35 s per first-try plan on `:free`. Repair rounds add a similar amount, so plan for parallel calls in batch evaluation.
 - **Still unverified:** forced tool calls for Ultra on **Nebius Token Factory** (the catalog has no function-calling tag). The W2.6 smoke test decides that (moved to W3.0 by D37).
 
+**W3.0 result (2026-10-18, owner's OK): PASS on Token Factory for both models**
+
+Setup:
+- The real planner, not the R4 spike: `vplan eval run --config 1 --seeds dev --n 20` (one call per task, D67 schema, 60 s deadline, temperature 0.7) on the Oct 16 dev seed set, with `--allow-source-drift` (the seed set predates D63–D67).
+- Base URL `https://api.tokenfactory.nebius.com/v1/`. Model IDs from the account's `GET /v1/models` (the docs' list-of-models call): `nvidia/Nemotron-3_5-Lightning` and `nvidia/Nemotron-3-Ultra-550b-a55b`.
+- Runs: `runs/w3.0-smoke/c1-lightning`, `runs/w3.0-smoke/c1-ultra` (local, not committed).
+
+| Measure | Lightning | Ultra |
+|---|---|---|
+| Valid forced tool calls | 19/20 | 20/20 |
+| Protocol | `forced` on every call, no fallback | `forced` on every call, no fallback |
+| Replies carrying `kind` | 19/19 (16 plans, 3 refusals) | 20/20 (12 plans, 8 refusals) |
+| Failures | 1 `APITimeoutError` after 21 s, before any reply (Windows' TCP connect timeout) | 0 |
+| Latency, median / max | 8.2 s / 25.7 s | 8.6 s / 28.5 s |
+| Tokens in / out | 50,511 / 35,474 | 53,347 / 46,666 |
+| Cost at catalog prices | about $0.01 ($0.06 / $0.24 per 1M) | about $0.19 ($1 / $3 per 1M) |
+
+Consequences:
+- The forced named tool call is the path on Token Factory for both models. The fallbacks stay unexercised.
+- D67's schema is accepted and followed: every reply carried `kind`.
+- **The demo needs no longer deadline:** Ultra's slowest call took 28.5 s against the 60 s deadline (D62, D63). The UI keeps 60 s.
+- The catalog now lists `function_calling` among Ultra's use cases.
+- Config 1's judged successes (Lightning 8/20, Ultra 17/20) are a by-product of 20 dev tasks without the verifier, not a result.
+
 ---
 
 ## Verified facts behind these decisions
@@ -1832,3 +1856,22 @@ All model and provider text is HTML-escaped.
 - Runs before and after this change do not share a byte-identical prompt. The pilots (D35, D46), D60 and the Oct 16 comparison runs stay as recorded.
 - Do not resume a run started before D67 with `--allow-source-drift`: it would mix the two schemas in one run.
 - R4 (D13, forced tool calls 20/20) was measured with the old schema. A provider that rejected the new one with a 400 naming the tool would push the planner from the forced protocol to the fallbacks without failing. The W3.0 smoke test, or the first free Lightning call, must confirm the protocol stays `forced` and the reply carries `kind`.
+
+## D68. The freeze, the `test` split and a reduced dry run (2026-10-18)
+
+**Freeze (W3.3 step 4):** the generator and every hashed file (`src/vplan/**/*.py`, `config/*.json`) are frozen at `main` 32cbd6d, after D63–D67, the UI (D66) and the W3.0 smoke test (D13 addendum), which needed no code change.
+- Source digest `1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32`, recorded in the `test` manifest with every file's hash.
+- The manifest's git `dirty` is true only because of the untracked `.claude/` and `docs/diagrams/` folders and a line-ending-only change to `docs/evidence/cylinder-contact-fresh.json`. No hashed file differs from 32cbd6d.
+- Any later change to a hashed file is refused by `test` runs, or recorded with `--allow-source-drift`, and needs its own ruling. The deferred UI text cleanup (Oct 18) is such a change, though only `src/vplan/ui/` would differ, which no evaluation path imports.
+
+**`test` (W3.3 step 5):** `vplan eval prepare --seeds test --allow-test-split` wrote `runs/seeds/test` (local, not committed) on Oct 18 in about 24 minutes.
+- 400 tasks: 300 feasible and 100 impossible, 25 per type (D51). 405 candidates were tried and 5 excluded.
+- Seed-set hash `834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf`.
+
+**Reduced dry run (W3.6, owner's choice Oct 18):** the OpenRouter key is on the free tier (`is_free_tier` true), so free models allow 50 requests per UTC day. A full pass needs up to 3,600 requests (about 72 days at that cap). The owner chose a reduced dry run over buying credits.
+- Configs 5, 1, 3 and 7 on the first 40 `test` tasks (`--n 40`, a stratified prefix: 30 feasible, impossible types 1–4 as 3, 3, 2, 2).
+- Free Lightning (`nvidia/nemotron-3.5-lightning:free`), `--call-deadline 180` (D65 addendum), `--max-rpm 10`, no `--allow-source-drift`.
+- Expected about 216 requests (config 1: 40; configs 3 and 7: about 2.2 per attempt, as free Super averaged on Oct 16), so about five days at 46 a day, finishing around Oct 22. If attempts need more rounds, config 7 is cut at the Oct 23 milestone.
+- The runner has no daily budget, and a 429 from the cap would be recorded as a service failure for every remaining task. A local driver (`.claude/dryrun_guard.py`, not committed) stops the runner before the day's 46th request or after a 429, and resumes the next UTC day. A 429 that does arrive stays in the record. When the runner's own stop rule fires (three failed requests in a row, D33/D42), the driver waits 15 minutes and resumes.
+- **First day:** in config 1's first 5 calls, free Lightning hit the 180 s deadline 3 times and returned one 504; the one reply took about 66 s. At that rate most rows will be provider failures. Lightning on Token Factory answered in 8.2 s median in W3.0, at about $0.0006 a call (about $2 for a full pass), but the owner ruled the dry run off Token Factory (D65 addendum).
+- The result is labelled "dry run, not a headline result" (D56). At 40 tasks it checks the pipeline end to end on `test` (runner, resume across days, report build), not success rates.
