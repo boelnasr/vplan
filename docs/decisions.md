@@ -1744,6 +1744,7 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - **Attempt:** one `run_task` repair attempt, k = 0–3. A plan appears as soon as the planner returns, and each round's check timeline once the round finishes.
 - **Cosmos:**
   - with `--cosmos-url`, the D47 gate runs. The frames it was sent are shown with its verdicts, and an outage banner reaches the page before motion starts (D58);
+  - a gate that asked no stage (`skipped`: the instruction names no single object) is shown like no gate, on the geometric checks only;
   - without a URL, a banner says approved plans execute on the geometric checks only (D22).
 - **Recording:** every attempt is saved as `runs/ui/ui-<UTC>-NN.json` (task, oracle, seed, `AttemptRecord`).
   - The file is created exclusively, so recordings never overwrite each other. A Windows clock tick once let two quick attempts share a name; a fixed-width counter fixed it and keeps newest-first order.
@@ -1779,7 +1780,11 @@ All model and provider text is HTML-escaped.
 - **Offline:** replay needs no `.env`, keys, GPU or network.
   - `GRADIO_ANALYTICS_ENABLED=False` is set before Gradio is imported, so telemetry and the version check are off.
   - The theme uses system fonts.
-  - The server listens on 127.0.0.1. From WSL in NAT mode, `--host <WSL gateway IP>` reaches it; `0.0.0.0` would expose the planner to the LAN.
+  - The server listens on 127.0.0.1, and `vplan ui` warns on any non-loopback `--host`. From WSL in NAT mode, `--host <WSL gateway IP>` reaches it; `0.0.0.0` would expose the planner to the LAN.
+  - `share` and `mcp_server` are passed as `False`, so `GRADIO_SHARE` cannot open a public link and `GRADIO_MCP_SERVER` cannot expose the handlers.
+- **Paths:** the tab reads only under the working directory, `--record-dir`, `--replay` and `--seed-dir`. This includes the seed set or cohort a run points to.
+  - Network (UNC) paths are always refused, because opening one on Windows sends the user's credentials to that server.
+  - A damaged row, manifest or recording is refused with a message.
 
 **Storyboard (spec §3) covered:** steps 1–9.
 - Plan, Verifier rejection with the offending body and clearance, repaired plan, Cosmos frames and verdicts, execution, Judge, an impossible task with its correct refusal, and keyless replay.
@@ -1807,7 +1812,9 @@ All model and provider text is HTML-escaped.
 - A live Cosmos endpoint (faked in tests).
 - The demo call deadline.
 - A report tab for step 10.
-- Use by several people at once: simulator work is serialized in one Gradio concurrency group.
+- Use by several people at once. Simulator work is serialized by a process-wide lock.
+  - A live attempt's worker thread holds it until the attempt ends, even after its page closed; Gradio frees an event's concurrency slot on disconnect, so the slot alone would let a second simulation start beside the first, and the motion layer reseeds numpy's global RNG.
+  - Meanwhile another attempt, a scene load or a replay is refused with a "simulator is still running" message.
 
 ## D67. The tool schema requires each plan's `kind` (2026-10-18)
 
