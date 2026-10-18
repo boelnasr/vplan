@@ -1,5 +1,6 @@
 """Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show), the W3.1 evaluation
-(eval prepare / eval run), the W3.3 sigma_thr calibration (eval calibrate) and the spec §15 report (report build)."""
+(eval prepare / eval run), the W3.3 sigma_thr calibration (eval calibrate), the spec §15 report (report build) and the
+W3.5 Gradio UI (ui)."""
 from __future__ import annotations
 
 import argparse
@@ -187,6 +188,43 @@ def _report(args) -> int:
     return 0
 
 
+def _ui(args) -> int:
+    """vplan ui: exit code 2 when refused before the server starts. Credentials only from --env-file (D33)."""
+    import math
+
+    from vplan.evaluate import pilot
+    from vplan.ui import live, sources
+    try:
+        for name in ("replay", "seed_dir", "env_file", "record_dir"):
+            if getattr(args, name, None):
+                pilot.check_path_arg(getattr(args, name))
+        given = [flag for flag, on in (("--model", args.model), ("--allow-paid", args.allow_paid),
+                                       ("--temperature", args.temperature is not None)) if on]
+        if given and not args.env_file:
+            raise pilot.PilotError(f"{', '.join(given)} configure an LLM planner: pass --env-file as well")
+        temperature = live.DEFAULT_TEMPERATURE if args.temperature is None else args.temperature
+        if not (math.isfinite(temperature) and temperature >= 0):
+            raise pilot.PilotError("--temperature must be a finite number >= 0")
+        planners = [live.heuristic_option()]
+        if args.env_file:
+            planners.append(live.llm_option(args.env_file, model=args.model, allow_paid=args.allow_paid,
+                                            temperature=temperature))
+        if args.replay:
+            sources.list_cases(args.replay)  # refuse an unreadable path before the server starts
+    except (pilot.PilotError, sources.ReplayError) as exc:  # messages never carry credentials
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    from vplan.ui import app  # imports gradio, which only this command needs
+    settings = app.UISettings(planners=tuple(planners), cosmos_url=args.cosmos_url, replay=args.replay,
+                              seed_dir=args.seed_dir, record_dir=None if args.no_record else args.record_dir,
+                              host=args.host, port=args.port)
+    cosmos = f"Cosmos gate at {args.cosmos_url}" if args.cosmos_url else "no Cosmos gate (geometric checks only)"
+    print(f"vplan ui: http://{args.host}:{args.port} - planners: {'; '.join(o.label for o in planners)}; {cosmos}",
+          flush=True)
+    app.launch(settings)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vplan")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -270,7 +308,23 @@ def main(argv: list[str] | None = None) -> int:
     rb.add_argument("--output", required=True, help="the report directory: metrics.json and report.html")
     rb.add_argument("--seed-dir", help="the runs' seed set (default: the directory the first run recorded, as that "
                     "OS wrote it; pass --seed-dir when building on another OS, e.g. in the Linux container)")
+    ui = sub.add_parser("ui", help="W3.5 Gradio UI: live planning and keyless replay (spec §15)")
+    ui.add_argument("--replay", help="open this W3.1 run directory, pilot run or UI recording in the Replay tab")
+    ui.add_argument("--seed-dir", help="the seed set of a W3.1 run to replay, if its recorded path does not resolve")
+    ui.add_argument("--env-file", help="KEY=VALUE file with LLM_BASE_URL, LLM_API_KEY, LLM_MODEL for the Nemotron "
+                    "planner; without it the template heuristic plans (no key)")
+    ui.add_argument("--model", help="overrides LLM_MODEL (D62: the demo uses Nemotron 3 Ultra)")
+    ui.add_argument("--temperature", type=float, help="every planner call (default 0.7, as in the evaluation)")
+    ui.add_argument("--allow-paid", action="store_true", help="permit non-free or non-OpenRouter models")
+    ui.add_argument("--cosmos-url", help="live Cosmos gate (demo only, D47), e.g. http://127.0.0.1:8000/v1")
+    ui.add_argument("--record-dir", default="runs/ui", help="where live attempts are saved for replay (default "
+                    "runs/ui)")
+    ui.add_argument("--no-record", action="store_true", help="do not save live attempts")
+    ui.add_argument("--host", default="127.0.0.1", help="interface to serve on (default 127.0.0.1, this machine only)")
+    ui.add_argument("--port", type=int, default=7860)
     args = parser.parse_args(argv)
+    if args.cmd == "ui":
+        return _ui(args)
     if args.cmd == "eval":
         return _eval(args)
     if args.cmd == "report":
