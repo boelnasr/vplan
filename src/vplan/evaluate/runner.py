@@ -57,6 +57,7 @@ from typing import Literal, NamedTuple
 from pydantic import ValidationError
 
 from vplan.config import config_hash, config_snapshot
+from vplan.evaluate.metrics import TOKEN_FACTORY_PROVIDERS
 from vplan.evaluate.pilot import (PilotError, _git, _manipulapy, _utc_now, _versions, _write_json, llm_settings,
                                   provider_guard, read_env_file, source_digest, source_hashes)
 from vplan.evaluate.seedsets import SPLITS, EvalError, SeedSet, default_seed_dir, load_seed_set
@@ -560,7 +561,8 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
     worker starts. seed_dir defaults to runs/seeds/<split>, or on resume to the run's own seed set. Without a git SHA
     for the checkout the run is refused unless allow_no_git. frames (None: config 3 only; on resume, the run's own
     setting) makes workers render the key frames of executed rounds. call_deadline_s (default the spec's 60 s) bounds
-    each planner call; another value is for dev runs only, and timeout_s then defaults to default_timeout (D65)."""
+    each planner call; another value is refused only for a Token Factory run on test (a possible headline result),
+    and timeout_s then defaults to default_timeout (D65)."""
     spec = eval_config(config)
     if split not in SPLITS:
         raise EvalError(f"unknown split {split!r}; expected one of {', '.join(SPLITS)}")
@@ -574,8 +576,9 @@ def run_eval(config: int, split: str, *, seed_dir: str | Path | None = None, run
         raise EvalError("frames must be True, False or None (the config's default)")
     settings = planner_settings(spec, env_file=env_file, model=model, temperature=temperature,
                                 allow_paid=allow_paid, call_deadline_s=call_deadline_s)
-    if split == "test" and settings.call_deadline_s != CALL_DEADLINE_S:
-        raise EvalError(f"a call deadline other than spec §10's {CALL_DEADLINE_S:g} s is for dev runs only (D65)")
+    if split == "test" and settings.provider in TOKEN_FACTORY_PROVIDERS and settings.call_deadline_s != CALL_DEADLINE_S:
+        # Only Token Factory runs on test can be headline results (spec §14, D59); they keep the spec's deadline.
+        raise EvalError(f"a Token Factory run on test keeps spec §10's {CALL_DEADLINE_S:g} s call deadline (D65)")
     if timeout_s is None:
         timeout_s = default_timeout(spec, settings)
     provenance = _provenance()

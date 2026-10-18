@@ -215,13 +215,33 @@ def test_the_heuristic_config_refuses_a_call_deadline():
         runner.planner_settings(runner.CONFIGS[5], call_deadline_s=180)
 
 
-def test_a_call_deadline_other_than_the_spec_is_for_dev_runs_only(seed_dir, tmp_path):
+TOKEN_FACTORY = ("https://api.tokenfactory.nebius.com/v1/", "nvidia/Nemotron-3_5-Lightning")
+
+
+@pytest.mark.parametrize("split", ["test", "dev"])
+def test_a_token_factory_run_on_test_keeps_the_spec_deadline(seed_dir, tmp_path, split):
+    # D65 amended: only a Token Factory run on test can be a headline result (spec §14, D59), so only there is a
+    # longer deadline refused; on dev it is allowed and the run proceeds to the seed set.
     from vplan.evaluate import runner
     fake = FakeSupervise()
-    with pytest.raises(runner.EvalError, match="dev runs only"):
+    kw = dict(seed_dir=seed_dir, run_dir=tmp_path / "run", env_file=env_file(tmp_path, *TOKEN_FACTORY),
+              allow_paid=True, call_deadline_s=180, supervise_attempt=fake, echo=lambda *a: None)
+    if split == "test":
+        with pytest.raises(runner.EvalError, match="Token Factory"):
+            runner.run_eval(3, "test", **kw)
+        assert fake.jobs == [] and not (tmp_path / "run").exists()
+    else:
+        assert runner.run_eval(3, "dev", **kw).status == "complete"
+        assert manifest(tmp_path / "run")["planner"]["call_deadline_s"] == 180.0
+
+
+def test_a_dry_run_on_test_may_use_a_longer_deadline_off_token_factory(seed_dir, tmp_path):
+    # The free-Lightning dry run (W3.6) is never headline: it passes the deadline rule and reaches the seed set,
+    # which here is the dev fixture, so the split check is what stops it.
+    from vplan.evaluate import runner
+    with pytest.raises(runner.EvalError, match="holds the dev split, not test"):
         runner.run_eval(3, "test", seed_dir=seed_dir, run_dir=tmp_path / "run", env_file=env_file(tmp_path),
-                        call_deadline_s=180, supervise_attempt=fake, echo=lambda *a: None)
-    assert fake.jobs == [] and not (tmp_path / "run").exists()
+                        call_deadline_s=180, supervise_attempt=FakeSupervise(), echo=lambda *a: None)
 
 
 def test_build_planner_hands_the_deadline_to_the_planner(tmp_path):

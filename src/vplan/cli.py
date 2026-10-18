@@ -255,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     er.add_argument("--timeout", type=float,
                     help="per-attempt wall-clock limit, s (default 600, or (k+1) calls at --call-deadline + 360 s)")
     er.add_argument("--call-deadline", type=float,
-                    help="wall-clock limit per planner call, s (default 60, spec §10; another value: dev runs only)")
+                    help="wall-clock limit per planner call, s (default 60, spec §10; refused for Token Factory runs on test)")
     er.add_argument("--max-rpm", type=float, help="pace provider requests to at most this many per minute")
     er.add_argument("--allow-no-git", action="store_true",
                     help="run although the checkout's git SHA is unknown (recorded in the manifest)")
