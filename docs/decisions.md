@@ -1714,3 +1714,92 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 **Consequences:**
 - Success rates and provider failures at 180 s are not comparable with runs at 60 s: at 60 s, replies that take 60–180 s count as failures. Only the plans that arrived compare.
 - `report build` does not check that its runs share one deadline (nor one model or temperature). Build reports only from runs made with the same `--call-deadline`; the deadline shows in each run's provenance. Headline reports are safe because they need `test`.
+
+## D66. The W3.5 Gradio UI: live and keyless replay (2026-10-17)
+
+**Dependency (D22: approved; owner's OK for W3.5 on Oct 16):** `gradio==6.30.0`.
+- It is the newest release on PyPI (2026-10-08) and requires Python ≥ 3.10.
+- Its requirements fit the pinned stack: pydantic ≤ 3.0, numpy < 3, pillow < 13, anyio < 5 and typing-extensions ~= 4. Its `httpx` is a separate package from openai's `httpx2`, with no module or script name in common.
+- `pyproject.toml` pins it; `uv.lock` and `docker/requirements.txt` are regenerated.
+- On the development interpreter, `pip install --dry-run gradio==6.30.0` would only add 20 new packages and change none, so it was installed. Among them: gradio-client 2.7.2, fastapi 0.143.3, starlette 1.7.0, uvicorn 0.54.0, pandas 2.3.3, httpx 0.28.1 and orjson 3.13.0.
+- The lock picks the same versions for those 20. For three packages the interpreter already had, the lock picks newer versions (filelock 4.1.0, fsspec 2026.9.0, markupsafe 3.0.4); pip leaves the installed ones alone, so these differ between the container and development.
+
+**What it is:** `src/vplan/ui/`, started with `vplan ui`.
+- Module split: views (view models), markup (escaped HTML), render (PyBullet images), live, sources (replay readers), display (panel contents) and gradio_app (the Gradio layout).
+- The layout module is not named `app.py`: in the R8 container the repository root is `/app`, and two provenance tests (`test_calibrate`, `test_cylinder_contact_benchmark`) reject any evidence text that contains that path as a plain substring, so `src/vplan/ui/app.py` failed them there.
+- Only `ui.gradio_app` imports Gradio. Planner, Verifier, executor, Judge and runner are unchanged; live mode only listens to `run_task`'s events.
+
+**Live tab:**
+- **Tasks:**
+  - the basic demo scene, with or without its wall, and a typed template instruction. It must name exactly one object, and the heuristic witness must solve it (the spec §6 rule for feasible tasks); otherwise the task is refused before any planner call;
+  - or `generate_task(seed, kind)`: feasible, or impossible types 1–4 with their proofs.
+- **Planners:**
+  - the template heuristic, always available, with no key;
+  - Nemotron, built once from `--env-file` behind the D33 guard. It uses temperature 0.7 as the evaluation does and the spec's 60 s call deadline (D63). A longer demo deadline is still undecided (D63/D65).
+- **Attempt:** one `run_task` repair attempt, k = 0–3. A plan appears as soon as the planner returns, and each round's check timeline once the round finishes.
+- **Cosmos:**
+  - with `--cosmos-url`, the D47 gate runs. The frames it was sent are shown with its verdicts, and an outage banner reaches the page before motion starts (D58);
+  - without a URL, a banner says approved plans execute on the geometric checks only (D22).
+- **Recording:** every attempt is saved as `runs/ui/ui-<UTC>-NN.json` (task, oracle, seed, `AttemptRecord`).
+  - The file is created exclusively, so recordings never overwrite each other. A Windows clock tick once let two quick attempts share a name; a fixed-width counter fixed it and keeps newest-first order.
+  - A recording whose text contains the API key is refused.
+
+**Check timeline:** one row per V-1 … V-8 and round, with five statuses:
+- `fail`: the Finding, with its bodies and measured value against the threshold, for example "cube_red ↔ wall_1: clearance 0.94 cm (minimum 1.00 cm) in transport, sample 279".
+- `partial`: nothing was reported, but the segment checks stopped at an IK or continuity failure.
+- `unknown`: the check was not reported because of the five-finding cap, or the round ended in a simulation error.
+- `off`: the check did not run (unverified mode, or an unknown target).
+- `pass`: none of the above.
+
+All model and provider text is HTML-escaped.
+
+**Highlighting the offending body (feasible with the existing renderer):**
+- How a finding is drawn:
+  - It is re-posed in a private DIRECT client from the plan's rebuilt trajectory, with the attempt's seed and verifier config.
+  - Its segment is identified by stage and plan field together, because transport segments share a label. Its sample comes from `sample_index`, with the carried object attached as the gate attaches it.
+  - The bodies it names are recoloured magenta with `changeVisualShape`. V-3 highlights the link the named joint moves, V-7 the object, and V-8 the object and the bin.
+- Each finding gets an overview and a close-up aimed at the highlighted bodies, as two square images.
+- **Limitation:** the picture is re-posed, not recorded. For an executed round the approval token proves that the rebuild is the executed trajectory; for a blocked round there is no token, and the rebuild is deterministic only for the same code and configuration. Replay notes when the configuration hashes differ.
+
+**Execution:**
+- The executed round's recorded 60 Hz streams are played back with `replay.replay` (no physics) and rendered at 10 fps into an animated GIF, shown as a data URI.
+- It is not the PyBullet GUI window.
+
+**Replay tab:**
+- **Sources:**
+  - W3.1 run directories: the seed set must match the run's seed-set hash; `--seed-dir` covers a moved seed set;
+  - pilot runs: the cohort's files must match its manifest;
+  - UI recordings, or a folder of them.
+- No configuration or source-drift check refuses a replay, because it is display, not evidence. `replay.replay`'s scene-hash check still ties each played-back record to its scene.
+- **Offline:** replay needs no `.env`, keys, GPU or network.
+  - `GRADIO_ANALYTICS_ENABLED=False` is set before Gradio is imported, so telemetry and the version check are off.
+  - The theme uses system fonts.
+  - The server listens on 127.0.0.1. From WSL in NAT mode, `--host <WSL gateway IP>` reaches it; `0.0.0.0` would expose the planner to the LAN.
+
+**Storyboard (spec §3) covered:** steps 1–9.
+- Plan, Verifier rejection with the offending body and clearance, repaired plan, Cosmos frames and verdicts, execution, Judge, an impossible task with its correct refusal, and keyless replay.
+- Step 10 (headline numbers with intervals) is `vplan report build`'s HTML, not part of the UI.
+
+**Verified:**
+- 72 new tests (`tests/test_ui_*.py`), with no network and no LLM calls. They cover:
+  - view models and escaping;
+  - heuristic attempts with real physics;
+  - highlighted renders (magenta pixel counts);
+  - the outage banner arriving before `execute`;
+  - Cosmos frames with a faked endpoint;
+  - a fake provider client for the LLM path, with the key absent from every output;
+  - replay from W3.1, pilot and UI sources;
+  - CLI wiring, including a `--replay` start with no env file read.
+- A headless Chromium walkthrough of the running app: replay of a repair recording and a rejection recording, a live heuristic success, and a live type-1 refusal.
+- Repair rounds were shown with a scripted test double, not a model.
+- **R8 container** (`docker/run-local.sh`, rebuilt with gradio; image `sha256:ced5f3a9a92a…`, 1.61 GB, up from 1.34 GB):
+  - 1099 passed and 2 skipped: the test that needs `.git`, and the Windows-only `/mnt/` path refusal;
+  - 10/10 pilot tasks prepared, with no network and no env file;
+  - the first build failed 2 tests because of the `app.py` name, fixed by the rename above.
+
+**Not verified or deferred:**
+- Live Nemotron in the UI (no model calls were made).
+- A live Cosmos endpoint (faked in tests).
+- The demo call deadline.
+- A report tab for step 10.
+- Use by several people at once: simulator work is serialized in one Gradio concurrency group.
