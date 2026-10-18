@@ -62,7 +62,8 @@ def test_forced_tool_schema_metadata_and_no_hidden_retries():
     assert len(client.requests) == 1 and client.options == [{"max_retries": 0, "timeout": 60.0}]
     request = client.requests[0]
     assert request["tool_choice"] == {"type": "function", "function": {"name": "submit_plan"}}
-    assert request["tools"][0]["function"]["parameters"] == SubmitPlanArgs.model_json_schema()
+    from vplan.planners.nemotron import plan_schema
+    assert request["tools"][0]["function"]["parameters"] == plan_schema()
     assert result.model == "free-model" and result.response_model == "actual-provider-model"
     assert result.provider == "openrouter" and result.total_tokens == 120 and result.latency_s >= 0
     payload = json.loads(request["messages"][1]["content"])
@@ -218,6 +219,46 @@ def test_the_default_deadline_is_the_spec_per_call_timeout():
     assert nemotron.CALL_DEADLINE_S == 60.0
     assert nemotron.NemotronPlanner(model="m", client=FakeClient([])).call_deadline_s == 60.0
     assert "per-call timeout 60 s" in (Path(__file__).resolve().parents[1] / "docs" / "spec.md").read_text("utf-8")
+
+
+def test_the_schema_the_model_sees_requires_each_plans_kind():
+    # D67: pydantic leaves the defaulted `kind` out of `required`, so the schema told the model it could omit the tag
+    # the parser needs; Nemotron Super did, and its replies ended malformed. Only the required lists change.
+    from vplan.planners.nemotron import plan_schema
+    schema, original = plan_schema(), SubmitPlanArgs.model_json_schema()
+    targets = schema["properties"]["plan"]["discriminator"]["mapping"].values()
+    names = sorted(ref.rsplit("/", 1)[-1] for ref in targets)
+    assert names == ["PickPlacePlan", "Refusal"]
+    for name in names:
+        assert "kind" in schema["$defs"][name]["required"]
+        assert "kind" not in original["$defs"][name].get("required", [])
+        original["$defs"][name]["required"] = ["kind", *original["$defs"][name].get("required", [])]
+    assert schema == original
+    assert plan_schema() is not plan_schema()  # a fresh copy per request: nothing can mutate a shared schema
+
+
+@pytest.mark.parametrize("protocol", ["forced", "content"])
+def test_a_complete_plan_without_kind_is_still_malformed(protocol):
+    # D67 changes only what the model is told; the parser still needs the tag (D64).
+    task, plan = fixture()
+    untagged = json.dumps({"plan": {k: v for k, v in plan.model_dump(mode="json").items() if k != "kind"}})
+    reply = response(content=untagged) if protocol == "content" else response(arguments=untagged)
+    result = planner(FakeClient([reply])).plan(task, protocol=protocol)
+    assert result.outcome == "malformed" and result.errors[0]["type"] == "union_tag_not_found"
+
+
+@pytest.mark.parametrize("protocol", ["forced", "required", "content"])
+def test_every_protocol_sends_the_kind_required_schema(protocol):
+    from vplan.planners.nemotron import plan_schema
+    task, plan = fixture()
+    reply = response(content=SubmitPlanArgs(plan=plan).model_dump_json()) if protocol == "content" else response(plan)
+    client = FakeClient([reply])
+    planner(client).plan(task, protocol=protocol)
+    request = client.requests[0]
+    if protocol == "content":
+        assert json.dumps(plan_schema()) in request["messages"][0]["content"] and "tools" not in request
+    else:
+        assert request["tools"][0]["function"]["parameters"] == plan_schema()
 
 
 def test_a_longer_deadline_also_lengthens_the_sdk_read_timeout():
