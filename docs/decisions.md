@@ -1719,3 +1719,18 @@ Measured before choosing the evaluation model under the $25 Token Factory budget
 - The refusal now applies only to a **Token Factory run on `test`**, the only kind that can be a headline result (spec §14, D59). Any other run on `test`, such as the dry run, may use `--call-deadline 180`. Dev runs are unchanged.
 - This supersedes the title's "dev runs only" and the consequence that headline reports are safe because they need `test`: they are safe because they need a Token Factory run on `test`, which keeps 60 s.
 - Expect the dry run to take several sessions: the free daily cap is 50 or 1,000 requests depending on credits ever bought, and resume keeps every provider failure in the denominator.
+
+## D67. The tool schema requires each plan's `kind` (2026-10-18)
+
+**Found** (free Super run `cmp-1016/c3-super-v3`, Oct 16): Super left out `kind` in 5 of its 13 calls up to task 7, and 2 of its 12 feasible tasks ended `malformed_final` for that reason alone.
+- The cause was ours. `PickPlacePlan.kind` and `Refusal.kind` have defaults, so pydantic's JSON schema leaves them out of `required`, and the tool schema told the model the tag was optional.
+- The parser needs that tag to tell a pick-and-place plan from a refusal (a discriminated union, spec §7), so a reply without it is rejected.
+- The schema-retry message ("Unable to extract tag using discriminator 'kind'") did not help Super reliably.
+
+**Ruling (owner's OK, Oct 18):** `planners/nemotron.plan_schema()` builds the schema sent with every request, in the tool definition and in the content fallback's prompt. It is `SubmitPlanArgs.model_json_schema()` with `kind` added to `required` for every plan type in the discriminator's mapping.
+- Nothing else changes: the records, the parser (a missing `kind` is still malformed, D64) and every other part of the schema.
+- A fresh schema dict is built per request.
+
+**Consequences:**
+- Every model's request changes by that one word, so this is a prompt change. D62 allows it only before the freeze and for all configs equally; both hold. It must land before `test` is generated.
+- Runs before and after this change do not share a byte-identical prompt. The pilots (D35, D46), D60 and the Oct 16 comparison runs stay as recorded.

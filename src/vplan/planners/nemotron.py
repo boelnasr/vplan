@@ -65,6 +65,18 @@ def _no_tools(raw: dict) -> bool:
     return calls is None or calls == []
 
 
+def plan_schema() -> dict:
+    """The submit_plan JSON schema the model sees: SubmitPlanArgs' schema with each plan type's `kind` required (D67).
+    The parser needs that tag to tell a pick-and-place plan from a refusal, but pydantic leaves a defaulted field out
+    of `required`. A fresh dict on every call, so no request can alter another's schema."""
+    schema = SubmitPlanArgs.model_json_schema()
+    for ref in schema["properties"]["plan"]["discriminator"]["mapping"].values():
+        definition = schema["$defs"][ref.rsplit("/", 1)[-1]]
+        if "kind" not in definition.get("required", []):
+            definition["required"] = ["kind", *definition.get("required", [])]
+    return schema
+
+
 def _decode_string_plan(payload: Any) -> Any:
     """D64: Nemotron Super sends {"plan": "<the plan object as a JSON string>"}. Decode that string once when it
     holds a JSON object; anything else is returned unchanged for validation to reject."""
@@ -226,13 +238,13 @@ class NemotronPlanner:
         if protocol == "content":
             system = system.replace('Submit exactly one submit_plan with {"plan": <pick_place or refusal>}. Do not call any other tool.',
                                     'Return one JSON object {"plan": <pick_place or refusal>} in message content. Do not call tools.')
-            system += "\nReturn only a JSON object matching this schema: " + json.dumps(SubmitPlanArgs.model_json_schema())
+            system += "\nReturn only a JSON object matching this schema: " + json.dumps(plan_schema())
         request = {"model": self.model, "temperature": self.temperature, "messages": [
             {"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload)}]}
         if protocol != "content":
             request["tools"] = [{"type": "function", "function": {
                 "name": "submit_plan", "description": "Submit one manipulation plan or refusal.",
-                "parameters": SubmitPlanArgs.model_json_schema()}}]
+                "parameters": plan_schema()}}]
             request["tool_choice"] = "required" if protocol == "required" else {
                 "type": "function", "function": {"name": "submit_plan"}}
         raw_request = _sanitize(request, self._secret)
