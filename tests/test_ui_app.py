@@ -214,6 +214,23 @@ def test_an_attempt_that_outlives_its_page_keeps_the_simulator_until_it_ends(mon
     app.SIM_LOCK.release()
 
 
+def test_launch_pins_loopback_no_share_link_and_no_mcp_server(monkeypatch):
+    seen = {}
+
+    class FakeBlocks:
+        def queue(self, **kwargs):
+            return self
+
+        def launch(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(app, "build_app", lambda settings: FakeBlocks())
+    monkeypatch.setenv("GRADIO_SHARE", "true")  # an explicit False must win over the environment
+    monkeypatch.setenv("GRADIO_MCP_SERVER", "true")
+    app.launch(app.UISettings())
+    assert seen["server_name"] == "127.0.0.1" and seen["share"] is False and seen["mcp_server"] is False
+
+
 def test_replay_paths_outside_the_roots_are_refused(tmp_path, monkeypatch):
     result, _ = basic_result()
     outside = live.save_bundle(tmp_path / "elsewhere", result.task, result.record, planner="h", cosmos_url=None)

@@ -300,7 +300,9 @@ def theme() -> gr.themes.Base:
 
 
 def launch(settings: UISettings) -> None:
-    """Serve until interrupted. 127.0.0.1 by default: anyone who can reach the port can drive the planner."""
+    """Serve until interrupted. 127.0.0.1 by default: anyone who can reach the port can drive the planner. share and
+    mcp_server are pinned off, because None would let GRADIO_SHARE open a public tunnel or GRADIO_MCP_SERVER expose the
+    handlers as tools."""
     build_app(settings).queue(default_concurrency_limit=1).launch(
-        server_name=settings.host, server_port=settings.port, theme=theme(), css=markup.CSS, show_error=True,
-        inbrowser=False)
+        server_name=settings.host, server_port=settings.port, share=False, mcp_server=False, theme=theme(),
+        css=markup.CSS, show_error=True, inbrowser=False)
