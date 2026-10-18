@@ -114,7 +114,7 @@ class PlannerSettings:
     base_url: str | None = None
     base_url_host: str | None = None
     env_file: str | None = None
-    call_deadline_s: float = CALL_DEADLINE_S  # wall-clock limit per planner call (D63); other values dev only (D65)
+    call_deadline_s: float = CALL_DEADLINE_S  # per-call limit (D63); others refused for Token Factory on test (D65)
 
     def describe(self) -> dict:
         """The manifest form, compared on resume."""
