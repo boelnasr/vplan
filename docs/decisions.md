@@ -1791,7 +1791,7 @@ All model and provider text is HTML-escaped.
 - Step 10 (headline numbers with intervals) is `vplan report build`'s HTML, not part of the UI.
 
 **Verified:**
-- 72 new tests (`tests/test_ui_*.py`), with no network and no LLM calls. They cover:
+- 95 new tests (`tests/test_ui_*.py`), with no network and no LLM calls (72 before the review fixes). They cover:
   - view models and escaping;
   - heuristic attempts with real physics;
   - highlighted renders (magenta pixel counts);
