@@ -4,7 +4,7 @@ A language model proposes a pick-and-place plan for a Franka Panda arm. Determin
 
 Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron**: **3.5 Lightning** for the evaluation and **3 Ultra** for the live demo, both served by **Nebius Token Factory** in the final runs (D62).
 
-> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). The singularity threshold is calibrated (D61). Still to come: the freeze, the Gradio UI, and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
+> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). The singularity threshold is calibrated (D61). A Gradio UI shows live attempts and replays recorded ones without keys. Still to come: the freeze and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
 
 ## How it works
 
@@ -32,7 +32,7 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 Requires **Python 3.10**.
 
 ```bash
-pip install "ManipulaPy[simulation]==1.4.2" pybullet==3.2.7 numpy==2.2.6 pydantic==2.13.5 openai==3.24.0 matplotlib==3.10.9 pytest==9.1.1
+pip install "ManipulaPy[simulation]==1.4.2" pybullet==3.2.7 numpy==2.2.6 pydantic==2.13.5 openai==3.24.0 matplotlib==3.10.9 gradio==6.30.0 pytest==9.1.1
 cp .env.example .env   # LLM endpoint and key for the Nemotron planner; never commit .env
 ```
 
@@ -75,6 +75,33 @@ python -m vplan demo-once --cosmos-url http://127.0.0.1:8000/v1
 ```
 
 The gate prints one line per checked stage. A Cosmos `fail` blocks the plan with one visual finding; `uncertain` is re-asked once with a side view and otherwise stops the attempt. If the endpoint is down or errors, the run says so and executes on the physics checks alone. The first live check showed false rejections and 6–16 s per question, so treat its verdicts as advisory.
+
+### Gradio UI (live and replay)
+
+```powershell
+python -m vplan ui                                  # http://127.0.0.1:7860; the template heuristic plans, no key needed
+python -m vplan ui --replay runs/ui                 # open the recorded attempts in the Replay tab
+python -m vplan ui --cosmos-url http://127.0.0.1:8000/v1                      # add the live Cosmos gate
+python -m vplan ui --env-file path\to\llm.env --model <model id> [--allow-paid]  # add the Nemotron planner
+```
+
+- **Live tab.** Pick the basic scene (with or without its wall) and type a template instruction such as "Pick the red cube and place it in the bin.", or pick a generated task by seed and kind (feasible, or impossible types 1–4). One attempt runs with verifier-feedback repair (k ≤ 3), and the panels fill in as it runs:
+  - the plan as JSON;
+  - a check timeline per round (V-1 … V-8), with the offending link or object and the measured clearance;
+  - each finding rendered with the offending bodies in magenta (overview and close-up);
+  - the Cosmos key frames and verdicts, or a banner saying the plan executes on the geometric checks only;
+  - the execution, played back as an animated image;
+  - the Judge's verdict.
+- **Recording.** Every live attempt is saved under `runs/ui/` (`--record-dir`, `--no-record`).
+- **Replay tab.** Opens any of these:
+  - a W3.1 run directory (pass its seed-set directory if the recorded path does not resolve on this machine);
+  - a feedback-pilot run (`<cohort>/runs/<run_id>`);
+  - a UI recording, or a folder of recordings.
+
+  Replay needs no `.env`, no keys, no GPU and no network: Gradio's telemetry is off, and the page loads nothing from the internet.
+  It opens paths only under the working directory, `--record-dir`, `--replay` and `--seed-dir`, and never network (UNC) paths.
+- **Credentials.** They come only from the file named by `--env-file`. Without `--allow-paid`, only free `nvidia/...:free` models on OpenRouter run (D33). Every planner call has the spec's 60 s deadline (D63).
+- **Serving.** The server listens on 127.0.0.1. With Windows Python under WSL2 (NAT networking), a browser inside WSL cannot reach that address. Pass `--host` with the Windows address of the WSL network (the default gateway in WSL's `ip route`) instead of `0.0.0.0`, which would expose the planner to the LAN. `vplan ui` warns whenever `--host` is not a loopback address.
 
 ## Feedback pilot
 
@@ -185,6 +212,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `src/vplan/pipeline.py` | One attempt end to end |
 | `src/vplan/repair.py` | `run_task`: attempts, verifier-feedback repair and resampling within a call budget |
 | `src/vplan/replay.py` | Keyless playback of recorded executions |
+| `src/vplan/ui/` | The Gradio UI: live attempts and keyless replay (view models, renders, recordings, layout) |
 | `src/vplan/tasks/` | Scenes, the task generator (feasible and provably impossible tasks), instruction resolution |
 | `src/vplan/visual/` | Cosmos client, key-frame rendering and the demo-only visual gate |
 | `src/vplan/sim/` | PyBullet scene building and self-collision exclusions |
