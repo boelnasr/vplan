@@ -20,9 +20,11 @@
 - An independent **Judge** scores the executed run [D21].
 - Batch evaluation runs on **Nebius Serverless Jobs** at the final stage [D6, D19].
 
-**Headline claim (fill in with measured values) [D8, D23]**
+**Headline claim (measured on the held-out `test` set, Oct 18) [D8, D23, D70]**
 
-> "Bounded repair with verifier feedback raised Nemotron's task success from X% (verified first attempts) to Y% across N held-out, reference-solvable generated manipulation tasks."
+> "Bounded repair with verifier feedback raised Nemotron 3.5 Lightning's task success from 24.7% (verified first attempts) to 65.0% across 300 held-out, reference-solvable generated manipulation tasks. At equal budget, feedback beat resampling by 29.3 points (95% CI 23–36)."
+
+The 95% intervals are 20.1–29.8% and 59.4–70.2%. Unverified first attempts succeed on 43.3%, because the verifier also blocks some plans the Judge would pass, but 169 of their 346 executions broke a safety predicate; no verified execution did.
 
 **Supporting results:**
 - the margin over equal-budget resampling;

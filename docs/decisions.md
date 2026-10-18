@@ -1888,3 +1888,36 @@ All model and provider text is HTML-escaped.
 **Consequences:**
 - These runs meet D59's headline conditions (Token Factory provider, `test`, configs 2/3/7 complete at 60 s), so the report will not label them "dry run". If the dry run needs no code fix, the owner may keep them as the final runs, and week 4's paid batch is not needed. A fix after the freeze means a new ruling and a new pass.
 - D68's reduced runs stay as recorded: `runs/dryrun/c5-test-n40` complete, `runs/dryrun/c1-test-n40` stopped at 5 of 40. They are not resumed, and `.claude/dryrun_guard.py` is retired.
+
+## D70. The W3.6 runs are the final evaluation; prompt work moves to week 4 (2026-10-18)
+
+**Result:** the four D69 runs completed on Oct 18 (started 17:08 UTC; configs 3 and 7 took about 4 hours). They ran at `main` 22f7bd2 with the frozen source digest `1a023ffc…` (only docs changed after 32cbd6d). 2,510 Token Factory calls cost about $1.61 at catalog prices. `vplan report build` wrote `runs/dryrun-tf/report` (local, not committed). Its status is "headline", titled "DEGRADED: 35 service failures".
+
+| Config | Feasible success (n = 300) | 95% CI | Impossible tasks attempted (n = 100) | Calls |
+|---|---|---|---|---|
+| 5, heuristic baseline | 300 (100%) | 98.7–100% | 25 | 0 |
+| 3, verify + repair (k = 3) | 195 (65.0%) | 59.4–70.2% | 41 | 975 |
+| 1, unverified | 130 (43.3%) | 37.8–49.0% | 57 | 400 |
+| 7, equal-budget resampling | 107 (35.7%) | 30.5–41.2% | 47 | 1,135 |
+| 2, verify only (round 1 of config 3) | 74 (24.7%) | 20.1–29.8% | 58 | 400 |
+
+- Repair gain (3 − 2): +40.3 points (34.7–46.0). Feedback gain (3 − 7, equal budget): +29.3 points (23–36). Both use paired bootstraps over the same 300 tasks. Unlike the pilot (D46), feedback beats retrying at equal budget.
+- Safety: 148 of config 1's 346 executions had a V1 contact violation (43%) and 24 a V3 violation. Every verified config had none (215, 123 and 300 executions).
+- Service failures: 35 of 2,510 calls (11, 13 and 11 for configs 1, 3 and 7). 25 hit the 60 s deadline; the rest were connection errors or connect timeouts. They stay in the denominators.
+
+**Findings (seen on `test`, so they are reported, not tuned against):**
+- **No transport waypoints.** In scenes with obstacles, 212 of config 1's 218 first plans for feasible tasks had an empty `transport_via`, so the carried object moves in a straight line into the obstacles. Config 1 succeeds on 58 of 75 obstacle-free tasks but on 24, 28 and 20 of 75 with 1, 2 and 3 obstacles. Repair holds 45–51 of 75 at every obstacle count; resampling drops to 17, 15 and 12, because a fresh sample repeats the mistake.
+- **Finding attribution.** With no waypoints, the transport segment's collision Finding names `plan_field` `place`, so repair often moves the drop-off point instead of adding waypoints.
+- **Repair is worse without obstacles:** 51 of 75 for config 3 against 63 for config 7. All 15 of config 3's exhausted obstacle-free attempts had a bin-wall collision Finding, 7 of them in every round.
+- **The Verifier is stricter than the Judge.** 27 (config 3) and 37 (config 7) feasible tasks succeeded unverified but used every round under verification, some on clearances just under the 1 cm threshold.
+- **"Leftmost" is undefined in the prompt.** The generator means world +y (`tasks/referents.py`). In config 1, Lightning picked the wrong object on 11 of 49 feasible leftmost tasks (7 the smallest x, 4 the smallest y).
+
+**Ruling (owner, Oct 18):** these runs are the final evaluation, as D69 allowed. Week 4's paid batch (`docs/plan.md` week 4 step 1) is not needed, and the report and README take their numbers from `runs/dryrun-tf/report`.
+
+**Week 4 (owner, Oct 18): improve the planner prompt.**
+- Scope: `SYSTEM_PROMPT` in `planners/nemotron.py`. Candidates from the findings: say that motion between key poses is straight and does not avoid obstacles, so `transport_via` must clear them; define left as world +y. Like Findings (D17), the prompt states facts, not fixes.
+- Developed and measured on `dev` only. It changes a hashed file after the freeze, so it needs its own ruling. The D70 numbers stay the headline. A `test` pass with the new prompt would be reported as tuned after seeing `test`, beside these runs, never in place of them.
+- The live demo (Ultra, D62) uses the same prompt, so the demo benefits too.
+- Not prompt work: the `place` attribution and the 1 cm clearance are Verifier behaviour. They stay as recorded findings unless the owner rules otherwise.
+
+**Headline and README (owner, Oct 19):** the spec §1 headline is filled in with these numbers: 24.7% → 65.0% on 300 tasks, and +29.3 points over equal-budget resampling. The feedback gain at equal budget is what the pilot could not show (D46), so the claim that credits verifier feedback now stands. The spec adds the caveat that unverified first attempts succeed on 43.3% with 169 of 346 executions unsafe. The README gains a Results section, and the report (`report.html`, `metrics.json`) is copied to `docs/results/` so the public repo carries it.

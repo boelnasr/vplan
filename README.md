@@ -4,7 +4,7 @@ A language model proposes a pick-and-place plan for a Franka Panda arm. Determin
 
 Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron**: **3.5 Lightning** for the evaluation and **3 Ultra** for the live demo, both served by **Nebius Token Factory** in the final runs (D62).
 
-> **Status: week 3 of 4 in progress.** The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, and the evaluation pipeline: frozen seed sets, a supervised resumable runner and a self-contained HTML report. The feedback pilot has run against a live model (results below). ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). The singularity threshold is calibrated (D61). A Gradio UI shows live attempts and replays recorded ones without keys. Still to come: the freeze and the final runs on Nebius Token Factory (see [`docs/plans/week3.md`](docs/plans/week3.md)).
+> **Status: week 3 of 4.** The final held-out evaluation ran on Nebius Token Factory on Oct 18 ([results below](#results), D70). The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, the evaluation pipeline (frozen seed sets, a supervised resumable runner and a self-contained HTML report) and a Gradio UI that shows live attempts and replays recorded ones without keys. ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come in week 4: planner-prompt work on the `dev` set, the Cosmos shadow study, the demo video and the submission write-ups.
 
 ## How it works
 
@@ -26,6 +26,28 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 - **Judge:** scores the executed run on its own. It shares no code with the verifier, so the safety numbers are not the verifier grading itself.
 - **Repair:** when the verifier blocks a plan, `run_task` sends its findings back to the planner (fixed-text directions, never a ready-made fix) and tries again within a call budget.
 - **Cosmos gate (demo only, optional):** after the verifier passes a plan, NVIDIA **Cosmos3-Edge** looks at rendered key frames (pre-grasp, grasp, pre-release) and can still block it. It is a learned visual check, not verification: it can add rejections but never approves a geometric failure, and the evaluation uses physics only (D34, D47).
+
+## Results
+
+The held-out `test` seed set holds 300 feasible and 100 provably impossible generated tasks (seed-set hash `834d1931…`). Every Nemotron configuration used **Nemotron 3.5 Lightning on Nebius Token Factory**, with a 60 s deadline per call ([D70](docs/decisions.md)). The full report is [`docs/results/report.html`](docs/results/report.html), a self-contained file to download and open in a browser; its numbers are in [`metrics.json`](docs/results/metrics.json).
+
+> **Bounded repair with verifier feedback raised Nemotron 3.5 Lightning's task success from 24.7% (verified first attempts) to 65.0% across 300 held-out, reference-solvable generated tasks. At equal budget, feedback beat resampling by 29.3 points (95% CI 23–36).**
+
+| Config | Planner and gate | Feasible success (n = 300) | 95% CI | Impossible tasks refused (n = 100) | Executions with a safety violation |
+|---|---|---|---|---|---|
+| 3 | Nemotron, verifier, repair from its findings (≤ 4 calls) | **195 (65.0%)** | 59.4–70.2% | 57 | 0 of 215 |
+| 7 | Nemotron, verifier, independent resamples (≤ 4 calls) | 107 (35.7%) | 30.5–41.2% | 52 | 0 of 123 |
+| 2 | Nemotron, verifier, first attempt only | 74 (24.7%) | 20.1–29.8% | 42 | 0 of 83 |
+| 1 | Nemotron, no verifier | 130 (43.3%) | 37.8–49.0% | 40 | 169 of 346 |
+| 5 | rule-based heuristic, verifier | 300 (100%) | 98.7–100% | 75 | 0 of 300 |
+
+- **Feedback, not just retries.** Repair beats equal-budget resampling by +29.3 points (23–36, paired bootstrap over the same tasks). Its gain over the verified first attempt, +40.3 points (34.7–46.0), also includes the extra attempts.
+- **Verification keeps execution safe.** Without the verifier, 169 of 346 executions broke a safety predicate, 148 of them with a collision (V1). No verified execution did.
+- **The verifier is conservative.** Unverified first attempts succeed more often (43.3%) than verified ones (24.7%), because the verifier also blocks plans the Judge would pass, for example clearances under its 1 cm threshold. Repair more than recovers the gap.
+- **Where Lightning fails.** It almost never gives transport waypoints (212 of 218 unverified plans for feasible tasks with obstacles), and the motion layer does not avoid obstacles by design (spec §2), so the carried object hits them. Unverified success falls from 58 of 75 obstacle-free tasks to 20 of 75 with three obstacles. With repair it stays between 45 and 51 of 75 at every obstacle count.
+- **Refusals are the weak spot.** Lightning refuses 40–57 of the 100 impossible tasks, and no planner refuses an enclosed target (type 3, 0 of 25 in every config). The verifier blocks most of the rest before they move. One wrongly refused feasible task in 900 Lightning attempts on feasible tasks.
+- **Cost and reliability.** 2,510 Token Factory calls cost about $1.61 (median 7.5–8.7 s per call). 35 calls (1.4%) failed at the provider and count as failures, which is why the report title says "DEGRADED".
+- These findings were made on `test`, so the frozen prompt stays as it is for these numbers. Prompt work moves to week 4 on `dev` (D70).
 
 ## Setup
 
@@ -115,7 +137,7 @@ Latest run: hard cohort (`--generator hard`), free Nemotron 3 Ultra on OpenRoute
 | verifier-feedback repair | 17 |
 | equal-budget resampling | 17 |
 
-Both retry strategies roughly double the success rate. Repair used fewer calls (32 vs 41) and never repeated a plan (resampling repeated 3), but the pilot does not separate the two on success. Three provider 503s stay in the denominators. The week-3 batch evaluation decides the comparison.
+Both retry strategies roughly double the success rate. Repair used fewer calls (32 vs 41) and never repeated a plan (resampling repeated 3), but the pilot does not separate the two on success. Three provider 503s stay in the denominators. The held-out evaluation settles it: repair beats equal-budget resampling by 29.3 points ([Results](#results)).
 
 ```powershell
 # 1. Freeze the cohort: local simulation only, no model calls (a few minutes). Refuses a non-empty directory.
@@ -196,7 +218,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 - **Safety:** V1–V4 counts per execution, with the bodies involved grouped by kind. "Zero observed violations in M executions" appears only when every counted execution was measured.
 - **Blocked plans:** counted by verifier check and by outcome. Physical-constraint failures (collision, grounding, joint limits, singularity, grasp, release) are kept apart from solver non-convergence (IK accuracy, continuity) and from malformed or failed model output.
 - **Breakdowns:** by stratum (distractors × obstacles, feasible tasks), by diagnostic attribution (spec §10), and by tokens and latency per configuration. Latency excludes the key-frame rendering.
-- **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Everything else is labelled a dry run or a development result. With the Token Factory credit reserved for the demo (D57), which runs carry the headline is still the owner's decision.
+- **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Everything else is labelled a dry run or a development result. The final runs meet these conditions (D70).
 
 ## Repository layout
 
@@ -219,7 +241,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `src/vplan/evaluate/` | Seed sets, the supervised evaluation runner, the feedback pilot, statistics, metrics and the HTML report |
 | `docker/` | The locked Linux image and the R8 local check |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
-| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [related work](docs/related-work.md), reviews |
+| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [related work](docs/related-work.md), reviews |
 
 ## Conventions
 

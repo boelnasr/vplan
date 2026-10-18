@@ -1,0 +1,3202 @@
+{
+  "schema_version": 1,
+  "dry_run": false,
+  "dry_run_configs": [],
+  "status": {
+    "complete": true,
+    "incomplete": [],
+    "limited": [],
+    "degraded": [
+      {
+        "config": 1,
+        "service_failures": 11,
+        "by_status": {
+          "transport": 11
+        }
+      },
+      {
+        "config": 3,
+        "service_failures": 13,
+        "by_status": {
+          "transport": 13
+        }
+      },
+      {
+        "config": 7,
+        "service_failures": 11,
+        "by_status": {
+          "transport": 11
+        }
+      }
+    ],
+    "title_prefixes": [
+      "DEGRADED: 35 service failures"
+    ]
+  },
+  "headline": {
+    "seed_set": {
+      "name": "test",
+      "hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf"
+    },
+    "headline_source": true,
+    "status": "headline",
+    "dry_run_configs": [],
+    "missing_configs": [],
+    "reason": null,
+    "label": "Nebius Token Factory run (headline source)",
+    "first_try_success": {
+      "config": 2,
+      "k": 74,
+      "n": 300,
+      "rate": 0.24666666666666667,
+      "ci95": [
+        0.20129380271657715,
+        0.2984453027038595
+      ]
+    },
+    "success_with_repair": {
+      "config": 3,
+      "k": 195,
+      "n": 300,
+      "rate": 0.65,
+      "ci95": [
+        0.5944391111549903,
+        0.7017679974776458
+      ]
+    },
+    "repair_gain": {
+      "configs": [
+        3,
+        2
+      ],
+      "n": 300,
+      "unpaired": {
+        "3": 0,
+        "2": 0
+      },
+      "mean": 0.4033333333333333,
+      "ci95": [
+        0.3466666666666667,
+        0.46
+      ],
+      "n_boot": 10000,
+      "seed": 0,
+      "method": "paired percentile bootstrap over tasks, 95% interval",
+      "reading": "Change in feasible success from the verified first attempt (config 2) to up to k = 3 further verified rounds with findings (config 3), on the same tasks. It includes the effect of the extra attempts, so it does not by itself credit the feedback; the feedback gain (3 - 7) addresses that question at equal budget.",
+      "headline_source": true,
+      "dry_run_configs": [],
+      "label": "Nebius Token Factory run (headline source)"
+    },
+    "feedback_gain": {
+      "configs": [
+        3,
+        7
+      ],
+      "n": 300,
+      "unpaired": {
+        "3": 0,
+        "7": 0
+      },
+      "mean": 0.29333333333333333,
+      "ci95": [
+        0.23,
+        0.36
+      ],
+      "n_boot": 10000,
+      "seed": 0,
+      "method": "paired percentile bootstrap over tasks, 95% interval",
+      "reading": "Repair with verifier findings (config 3) minus equal-budget resampling without feedback (config 7), on the same tasks: the comparison that separates the effect of feedback from retrying at the same budget.",
+      "headline_source": true,
+      "dry_run_configs": [],
+      "label": "Nebius Token Factory run (headline source)"
+    },
+    "heuristic_baseline": {
+      "config": 5,
+      "k": 300,
+      "n": 300,
+      "rate": 1.0,
+      "ci95": [
+        0.9873570287754538,
+        1.0
+      ]
+    }
+  },
+  "configurations": [
+    {
+      "config": 1,
+      "name": "Unverified (evaluation-only, simulation)",
+      "planner": "Nemotron / Token Factory",
+      "role": "ablation: the share of raw plans that fail or collide",
+      "present": true,
+      "label": "Nebius Token Factory run (headline source)"
+    },
+    {
+      "config": 2,
+      "name": "Verify only = round 1 of config 3",
+      "planner": "Nemotron / Token Factory",
+      "role": "headline before (paired)",
+      "present": true,
+      "label": "Nebius Token Factory run (headline source)"
+    },
+    {
+      "config": 3,
+      "name": "Verify + repair (k = 3)",
+      "planner": "Nemotron / Token Factory",
+      "role": "headline after",
+      "present": true,
+      "label": "Nebius Token Factory run (headline source)"
+    },
+    {
+      "config": 4,
+      "name": "Cosmos shadow study on config 3's frames",
+      "planner": "Cosmos (local / Nebius endpoint)",
+      "role": "secondary, shadow only",
+      "present": false,
+      "label": "Cosmos shadow study: secondary and shadow only, a separate pass over saved frames (spec \u00a711); it never measures incremental success and is not part of this report"
+    },
+    {
+      "config": 5,
+      "name": "Heuristic baseline (verify, no LLM)",
+      "planner": "none",
+      "role": "baseline",
+      "present": true,
+      "label": "heuristic baseline: template-aware, no LLM; deterministic, so rounds after the first repeat the same plan (D39)"
+    },
+    {
+      "config": 6,
+      "name": "Frontier, no verifier",
+      "planner": "frontier / OpenRouter",
+      "role": "optional reference; excluded from the headline",
+      "present": false,
+      "label": "optional frontier reference without the verifier, on another provider and model; excluded from the headline (spec \u00a714)"
+    },
+    {
+      "config": 7,
+      "name": "Equal-budget resampling (verify, up to 4 independent samples, no feedback)",
+      "planner": "Nemotron / Token Factory",
+      "role": "equal-budget control: separates the effect of feedback from retrying",
+      "present": true,
+      "label": "Nebius Token Factory run (headline source)"
+    }
+  ],
+  "configs": {
+    "1": {
+      "config": 1,
+      "name": "Unverified (evaluation-only, simulation)",
+      "planner": "Nemotron / Token Factory",
+      "role": "ablation: the share of raw plans that fail or collide",
+      "label": "Nebius Token Factory run (headline source)",
+      "provenance": {
+        "providers": [
+          "api.tokenfactory.nebius.com"
+        ],
+        "models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "response_models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "config_hashes": [
+          {
+            "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+            "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674",
+            "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667"
+          }
+        ],
+        "headline_source": true,
+        "dry_run": false,
+        "label": "Nebius Token Factory run (headline source)"
+      },
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "coverage": {
+        "tasks_in_report": 400,
+        "missing": 0
+      },
+      "success": {
+        "k": 130,
+        "n": 300,
+        "rate": 0.43333333333333335,
+        "ci95": [
+          0.3784513181454693,
+          0.48990107801780347
+        ]
+      },
+      "outcomes": {
+        "feasible": {
+          "executed": 292,
+          "refused": 0,
+          "budget_exhausted": 0,
+          "malformed_final": 0,
+          "service_failure": 8,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "impossible": {
+          "executed": 54,
+          "refused": 40,
+          "budget_exhausted": 3,
+          "malformed_final": 0,
+          "service_failure": 3,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "without_record": {}
+      },
+      "refusals": {
+        "confusion": {
+          "feasible": {
+            "refused": 0,
+            "attempted": 292,
+            "no_decision": 8
+          },
+          "impossible": {
+            "refused": 40,
+            "attempted": 57,
+            "no_decision": 3
+          }
+        },
+        "wrongly_attempted_impossible": {
+          "k": 57,
+          "n": 100,
+          "rate": 0.57,
+          "ci95": [
+            0.47215389549212305,
+            0.6626670147588988
+          ]
+        },
+        "wrongly_refused_feasible": {
+          "k": 0,
+          "n": 300,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.012642971224546029
+          ]
+        },
+        "correct_refusals": {
+          "k": 40,
+          "n": 100,
+          "rate": 0.4,
+          "ci95": [
+            0.3094012864324589,
+            0.4979974132089382
+          ]
+        },
+        "attempted_impossible_by_outcome": {
+          "budget_exhausted": 3,
+          "executed": 54
+        },
+        "reason": {
+          "matching_proof": {
+            "k": 40,
+            "n": 40,
+            "rate": 1.0,
+            "ci95": [
+              0.9123783988027133,
+              1.0
+            ]
+          },
+          "by_type": {
+            "1": {
+              "tasks": 25,
+              "refused": 19,
+              "reason_matches": 19,
+              "given": {
+                "target_unreachable": 19
+              }
+            },
+            "2": {
+              "tasks": 25,
+              "refused": 2,
+              "reason_matches": 2,
+              "given": {
+                "destination_unreachable": 2
+              }
+            },
+            "3": {
+              "tasks": 25,
+              "refused": 0,
+              "reason_matches": 0,
+              "given": {}
+            },
+            "4": {
+              "tasks": 25,
+              "refused": 19,
+              "reason_matches": 19,
+              "given": {
+                "no_matching_object": 19
+              }
+            }
+          },
+          "false_refusal_reasons": {}
+        }
+      },
+      "safety": {
+        "executions": 346,
+        "measured": 346,
+        "violations": {
+          "V1": {
+            "k": 148,
+            "n": 346,
+            "rate": 0.4277456647398844,
+            "ci95": [
+              0.37668883225653155,
+              0.48038928487530136
+            ]
+          },
+          "V2": {
+            "k": 1,
+            "n": 346,
+            "rate": 0.002890173410404624,
+            "ci95": [
+              0.000510368890223897,
+              0.01618707697678546
+            ]
+          },
+          "V3": {
+            "k": 24,
+            "n": 346,
+            "rate": 0.06936416184971098,
+            "ci95": [
+              0.04705233390935459,
+              0.10113324419636863
+            ]
+          },
+          "V4": {
+            "k": 1,
+            "n": 346,
+            "rate": 0.002890173410404624,
+            "ci95": [
+              0.000510368890223897,
+              0.01618707697678546
+            ]
+          }
+        },
+        "executions_with_violation": {
+          "k": 169,
+          "n": 346,
+          "rate": 0.4884393063583815,
+          "ci95": [
+            0.43618599351659515,
+            0.5409465052244982
+          ]
+        },
+        "by_body_pair": {
+          "V1": {
+            "bin <-> object": 3,
+            "bin <-> robot": 41,
+            "bin <-> target": 45,
+            "object <-> object": 1,
+            "object <-> obstacle": 11,
+            "object <-> target": 3,
+            "obstacle <-> robot": 95,
+            "obstacle <-> target": 106,
+            "robot <-> target": 6
+          },
+          "V4": {
+            "robot <-> robot": 1
+          }
+        },
+        "statement": "169 of 346 executions had at least one V1-V4 violation."
+      },
+      "blocked_plans": {
+        "planner_rounds": 400,
+        "blocked": 3,
+        "by_check": {
+          "grounding": 3,
+          "ik_accuracy": 0,
+          "joint_limits": 0,
+          "singularity": 0,
+          "continuity": 0,
+          "collision": 0,
+          "grasp_preconditions": 0,
+          "release": 0,
+          "visual": 0
+        },
+        "by_category": {
+          "physical_constraint": 3,
+          "solver_non_convergence": 0,
+          "learned_visual": 0
+        },
+        "malformed_output": 0,
+        "protocol_error": 0,
+        "service_failure": 11,
+        "by_attempt_outcome": {
+          "budget_exhausted": 3
+        },
+        "repeat_plans": 0
+      },
+      "attribution": {
+        "failures": {
+          "feasible": 170,
+          "impossible": 60
+        },
+        "feasible": {
+          "LLM plan": 162,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 8
+        },
+        "impossible": {
+          "LLM plan": 57,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 3
+        },
+        "observable": {
+          "feasible": {
+            "judge:S1": 115,
+            "judge:S2": 113,
+            "judge:V1": 122,
+            "judge:V2": 1,
+            "judge:V4": 1,
+            "service_failure": 8
+          },
+          "impossible": {
+            "grounding:plan": 3,
+            "judge:R": 54,
+            "judge:S1": 52,
+            "judge:S2": 51,
+            "judge:V1": 26,
+            "judge:V3": 24,
+            "service_failure": 3
+          }
+        }
+      },
+      "strata": [
+        {
+          "distractors": 0,
+          "obstacles": 0,
+          "k": 17,
+          "n": 19,
+          "rate": 0.8947368421052632,
+          "ci95": [
+            0.6860591728889099,
+            0.9706414397011297
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 1,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 2,
+          "k": 11,
+          "n": 19,
+          "rate": 0.5789473684210527,
+          "ci95": [
+            0.36275903534255044,
+            0.7685810871754575
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 3,
+          "k": 3,
+          "n": 18,
+          "rate": 0.16666666666666666,
+          "ci95": [
+            0.05836576805861449,
+            0.39222038103915724
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 0,
+          "k": 14,
+          "n": 18,
+          "rate": 0.7777777777777778,
+          "ci95": [
+            0.5478541568378738,
+            0.909990718913983
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 1,
+          "k": 7,
+          "n": 19,
+          "rate": 0.3684210526315789,
+          "ci95": [
+            0.19149512745135072,
+            0.5896046683519691
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 2,
+          "k": 4,
+          "n": 19,
+          "rate": 0.21052631578947367,
+          "ci95": [
+            0.0850767663291625,
+            0.43334278443814156
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 3,
+          "k": 7,
+          "n": 19,
+          "rate": 0.3684210526315789,
+          "ci95": [
+            0.19149512745135072,
+            0.5896046683519691
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 0,
+          "k": 11,
+          "n": 19,
+          "rate": 0.5789473684210527,
+          "ci95": [
+            0.36275903534255044,
+            0.7685810871754575
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 1,
+          "k": 4,
+          "n": 18,
+          "rate": 0.2222222222222222,
+          "ci95": [
+            0.09000928108601694,
+            0.45214584316212614
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 2,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 3,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 0,
+          "k": 16,
+          "n": 19,
+          "rate": 0.8421052631578947,
+          "ci95": [
+            0.6243452472967093,
+            0.9447952836146585
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 1,
+          "k": 8,
+          "n": 19,
+          "rate": 0.42105263157894735,
+          "ci95": [
+            0.23141891282454247,
+            0.6372409646574495
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 2,
+          "k": 8,
+          "n": 18,
+          "rate": 0.4444444444444444,
+          "ci95": [
+            0.24559518127005642,
+            0.6628358435795721
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 3,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        }
+      ],
+      "cost": {
+        "llm": true,
+        "attempts": 400,
+        "attempts_without_record": 0,
+        "planner_calls": 400,
+        "calls_per_attempt_mean": 1.0,
+        "calls_to_success_mean": 1.0,
+        "calls_per_feasible_success": 2.3076923076923075,
+        "tokens": {
+          "known_total": 1705278,
+          "missing_usage_calls": 11,
+          "per_attempt_median": 4370.0,
+          "per_feasible_success": 9875.73076923077
+        }
+      },
+      "latency_s": {
+        "planner_total": 4408.282815099938,
+        "planner_per_attempt_median": 8.430440199997975,
+        "planner_per_call_median": 8.430440199997975,
+        "wall_total": 5384.579999999987,
+        "wall_per_attempt_median": 10.750000000001819,
+        "wall_attempts": 400
+      },
+      "run": {
+        "config": 1,
+        "run_id": "c1-test",
+        "planned": 400,
+        "prepared": 400,
+        "recorded": 400,
+        "incomplete": false,
+        "limited": false
+      }
+    },
+    "2": {
+      "config": 2,
+      "name": "Verify only = round 1 of config 3",
+      "planner": "Nemotron / Token Factory",
+      "role": "headline before (paired)",
+      "label": "Nebius Token Factory run (headline source)",
+      "provenance": {
+        "providers": [
+          "api.tokenfactory.nebius.com"
+        ],
+        "models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "response_models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "config_hashes": [
+          {
+            "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+            "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674",
+            "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667"
+          }
+        ],
+        "headline_source": true,
+        "dry_run": false,
+        "label": "Nebius Token Factory run (headline source)"
+      },
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "coverage": {
+        "tasks_in_report": 400,
+        "missing": 0
+      },
+      "success": {
+        "k": 74,
+        "n": 300,
+        "rate": 0.24666666666666667,
+        "ci95": [
+          0.20129380271657715,
+          0.2984453027038595
+        ]
+      },
+      "outcomes": {
+        "feasible": {
+          "executed": 80,
+          "refused": 0,
+          "budget_exhausted": 212,
+          "malformed_final": 0,
+          "service_failure": 8,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "impossible": {
+          "executed": 3,
+          "refused": 42,
+          "budget_exhausted": 55,
+          "malformed_final": 0,
+          "service_failure": 0,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "without_record": {}
+      },
+      "refusals": {
+        "confusion": {
+          "feasible": {
+            "refused": 0,
+            "attempted": 292,
+            "no_decision": 8
+          },
+          "impossible": {
+            "refused": 42,
+            "attempted": 58,
+            "no_decision": 0
+          }
+        },
+        "wrongly_attempted_impossible": {
+          "k": 58,
+          "n": 100,
+          "rate": 0.58,
+          "ci95": [
+            0.4820648670304296,
+            0.6720161732564526
+          ]
+        },
+        "wrongly_refused_feasible": {
+          "k": 0,
+          "n": 300,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.012642971224546029
+          ]
+        },
+        "correct_refusals": {
+          "k": 42,
+          "n": 100,
+          "rate": 0.42,
+          "ci95": [
+            0.3279838267435473,
+            0.5179351329695703
+          ]
+        },
+        "attempted_impossible_by_outcome": {
+          "budget_exhausted": 55,
+          "executed": 3
+        },
+        "reason": {
+          "matching_proof": {
+            "k": 42,
+            "n": 42,
+            "rate": 1.0,
+            "ci95": [
+              0.916201209134296,
+              1.0
+            ]
+          },
+          "by_type": {
+            "1": {
+              "tasks": 25,
+              "refused": 20,
+              "reason_matches": 20,
+              "given": {
+                "target_unreachable": 20
+              }
+            },
+            "2": {
+              "tasks": 25,
+              "refused": 1,
+              "reason_matches": 1,
+              "given": {
+                "destination_unreachable": 1
+              }
+            },
+            "3": {
+              "tasks": 25,
+              "refused": 0,
+              "reason_matches": 0,
+              "given": {}
+            },
+            "4": {
+              "tasks": 25,
+              "refused": 21,
+              "reason_matches": 21,
+              "given": {
+                "no_matching_object": 21
+              }
+            }
+          },
+          "false_refusal_reasons": {}
+        }
+      },
+      "safety": {
+        "executions": 83,
+        "measured": 83,
+        "violations": {
+          "V1": {
+            "k": 0,
+            "n": 83,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.04423530964197382
+            ]
+          },
+          "V2": {
+            "k": 0,
+            "n": 83,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.04423530964197382
+            ]
+          },
+          "V3": {
+            "k": 0,
+            "n": 83,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.04423530964197382
+            ]
+          },
+          "V4": {
+            "k": 0,
+            "n": 83,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.04423530964197382
+            ]
+          }
+        },
+        "executions_with_violation": {
+          "k": 0,
+          "n": 83,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.04423530964197382
+          ]
+        },
+        "by_body_pair": {
+          "V1": {},
+          "V4": {}
+        },
+        "statement": "Zero observed violations in 83 executions."
+      },
+      "blocked_plans": {
+        "planner_rounds": 400,
+        "blocked": 267,
+        "by_check": {
+          "grounding": 2,
+          "ik_accuracy": 26,
+          "joint_limits": 0,
+          "singularity": 0,
+          "continuity": 25,
+          "collision": 188,
+          "grasp_preconditions": 0,
+          "release": 91,
+          "visual": 0
+        },
+        "by_category": {
+          "physical_constraint": 241,
+          "solver_non_convergence": 26,
+          "learned_visual": 0
+        },
+        "malformed_output": 0,
+        "protocol_error": 0,
+        "service_failure": 8,
+        "by_attempt_outcome": {
+          "budget_exhausted": 267
+        },
+        "repeat_plans": 0
+      },
+      "attribution": {
+        "failures": {
+          "feasible": 226,
+          "impossible": 58
+        },
+        "feasible": {
+          "LLM plan": 217,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 1,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 8
+        },
+        "impossible": {
+          "LLM plan": 58,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 0
+        },
+        "observable": {
+          "feasible": {
+            "collision:approach": 3,
+            "collision:descend": 1,
+            "collision:transport": 156,
+            "continuity:transport": 2,
+            "grounding:plan": 1,
+            "ik_accuracy:transport": 2,
+            "judge:S1": 6,
+            "judge:S2": 5,
+            "release:descend_place": 72,
+            "service_failure": 8
+          },
+          "impossible": {
+            "collision:approach": 15,
+            "collision:descend": 8,
+            "collision:transport": 5,
+            "continuity:transport": 23,
+            "grounding:plan": 1,
+            "ik_accuracy:transport": 24,
+            "judge:R": 3,
+            "judge:S1": 3,
+            "judge:S2": 3,
+            "release:descend_place": 19
+          }
+        }
+      },
+      "strata": [
+        {
+          "distractors": 0,
+          "obstacles": 0,
+          "k": 9,
+          "n": 19,
+          "rate": 0.47368421052631576,
+          "ci95": [
+            0.27329805161179566,
+            0.6829219075488682
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 1,
+          "k": 2,
+          "n": 19,
+          "rate": 0.10526315789473684,
+          "ci95": [
+            0.029358560298870184,
+            0.31394082711108995
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 2,
+          "k": 6,
+          "n": 19,
+          "rate": 0.3157894736842105,
+          "ci95": [
+            0.15364379087792282,
+            0.5398959232467252
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 3,
+          "k": 2,
+          "n": 18,
+          "rate": 0.1111111111111111,
+          "ci95": [
+            0.03101952264561239,
+            0.32799765130178793
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 0,
+          "k": 10,
+          "n": 18,
+          "rate": 0.5555555555555556,
+          "ci95": [
+            0.33716415642042785,
+            0.7544048187299436
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 1,
+          "k": 2,
+          "n": 19,
+          "rate": 0.10526315789473684,
+          "ci95": [
+            0.029358560298870184,
+            0.31394082711108995
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 2,
+          "k": 2,
+          "n": 19,
+          "rate": 0.10526315789473684,
+          "ci95": [
+            0.029358560298870184,
+            0.31394082711108995
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 3,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 0,
+          "k": 9,
+          "n": 19,
+          "rate": 0.47368421052631576,
+          "ci95": [
+            0.27329805161179566,
+            0.6829219075488682
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 1,
+          "k": 3,
+          "n": 18,
+          "rate": 0.16666666666666666,
+          "ci95": [
+            0.05836576805861449,
+            0.39222038103915724
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 2,
+          "k": 4,
+          "n": 19,
+          "rate": 0.21052631578947367,
+          "ci95": [
+            0.0850767663291625,
+            0.43334278443814156
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 3,
+          "k": 3,
+          "n": 19,
+          "rate": 0.15789473684210525,
+          "ci95": [
+            0.05520471638534141,
+            0.3756547527032907
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 0,
+          "k": 6,
+          "n": 19,
+          "rate": 0.3157894736842105,
+          "ci95": [
+            0.15364379087792282,
+            0.5398959232467252
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 1,
+          "k": 8,
+          "n": 19,
+          "rate": 0.42105263157894735,
+          "ci95": [
+            0.23141891282454247,
+            0.6372409646574495
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 2,
+          "k": 3,
+          "n": 18,
+          "rate": 0.16666666666666666,
+          "ci95": [
+            0.05836576805861449,
+            0.39222038103915724
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 3,
+          "k": 0,
+          "n": 19,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.16817922405261618
+          ]
+        }
+      ],
+      "cost": {
+        "llm": true,
+        "attempts": 400,
+        "attempts_without_record": 0,
+        "planner_calls": 400,
+        "calls_per_attempt_mean": 1.0,
+        "calls_to_success_mean": 1.0,
+        "calls_per_feasible_success": 4.054054054054054,
+        "tokens": {
+          "known_total": 1715180,
+          "missing_usage_calls": 8,
+          "per_attempt_median": 4344.5,
+          "per_feasible_success": 17431.662162162163
+        }
+      },
+      "latency_s": {
+        "planner_total": 3835.829378599996,
+        "planner_per_attempt_median": 7.896233000003122,
+        "planner_per_call_median": 7.896233000003122,
+        "wall_total": null,
+        "wall_per_attempt_median": null,
+        "wall_attempts": 0
+      },
+      "run": {
+        "config": 3,
+        "run_id": "c3-test",
+        "planned": 400,
+        "prepared": 400,
+        "recorded": 400,
+        "incomplete": false,
+        "limited": false
+      }
+    },
+    "3": {
+      "config": 3,
+      "name": "Verify + repair (k = 3)",
+      "planner": "Nemotron / Token Factory",
+      "role": "headline after",
+      "label": "Nebius Token Factory run (headline source)",
+      "provenance": {
+        "providers": [
+          "api.tokenfactory.nebius.com"
+        ],
+        "models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "response_models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "config_hashes": [
+          {
+            "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+            "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674",
+            "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667"
+          }
+        ],
+        "headline_source": true,
+        "dry_run": false,
+        "label": "Nebius Token Factory run (headline source)"
+      },
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "coverage": {
+        "tasks_in_report": 400,
+        "missing": 0
+      },
+      "success": {
+        "k": 195,
+        "n": 300,
+        "rate": 0.65,
+        "ci95": [
+          0.5944391111549903,
+          0.7017679974776458
+        ]
+      },
+      "outcomes": {
+        "feasible": {
+          "executed": 210,
+          "refused": 1,
+          "budget_exhausted": 78,
+          "malformed_final": 0,
+          "service_failure": 11,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "impossible": {
+          "executed": 5,
+          "refused": 57,
+          "budget_exhausted": 36,
+          "malformed_final": 0,
+          "service_failure": 2,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "without_record": {}
+      },
+      "refusals": {
+        "confusion": {
+          "feasible": {
+            "refused": 1,
+            "attempted": 287,
+            "no_decision": 12
+          },
+          "impossible": {
+            "refused": 57,
+            "attempted": 41,
+            "no_decision": 2
+          }
+        },
+        "wrongly_attempted_impossible": {
+          "k": 41,
+          "n": 100,
+          "rate": 0.41,
+          "ci95": [
+            0.3186731302113651,
+            0.5079856994658921
+          ]
+        },
+        "wrongly_refused_feasible": {
+          "k": 1,
+          "n": 300,
+          "rate": 0.0033333333333333335,
+          "ci95": [
+            0.0005886577218511581,
+            0.01863669369453123
+          ]
+        },
+        "correct_refusals": {
+          "k": 57,
+          "n": 100,
+          "rate": 0.57,
+          "ci95": [
+            0.47215389549212305,
+            0.6626670147588988
+          ]
+        },
+        "attempted_impossible_by_outcome": {
+          "budget_exhausted": 36,
+          "executed": 5
+        },
+        "reason": {
+          "matching_proof": {
+            "k": 55,
+            "n": 57,
+            "rate": 0.9649122807017544,
+            "ci95": [
+              0.880792186323742,
+              0.9903243356550673
+            ]
+          },
+          "by_type": {
+            "1": {
+              "tasks": 25,
+              "refused": 20,
+              "reason_matches": 20,
+              "given": {
+                "target_unreachable": 20
+              }
+            },
+            "2": {
+              "tasks": 25,
+              "refused": 16,
+              "reason_matches": 14,
+              "given": {
+                "destination_unreachable": 14,
+                "other": 2
+              }
+            },
+            "3": {
+              "tasks": 25,
+              "refused": 0,
+              "reason_matches": 0,
+              "given": {}
+            },
+            "4": {
+              "tasks": 25,
+              "refused": 21,
+              "reason_matches": 21,
+              "given": {
+                "no_matching_object": 21
+              }
+            }
+          },
+          "false_refusal_reasons": {
+            "other": 1
+          }
+        }
+      },
+      "safety": {
+        "executions": 215,
+        "measured": 215,
+        "violations": {
+          "V1": {
+            "k": 0,
+            "n": 215,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.017553615486732746
+            ]
+          },
+          "V2": {
+            "k": 0,
+            "n": 215,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.017553615486732746
+            ]
+          },
+          "V3": {
+            "k": 0,
+            "n": 215,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.017553615486732746
+            ]
+          },
+          "V4": {
+            "k": 0,
+            "n": 215,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.017553615486732746
+            ]
+          }
+        },
+        "executions_with_violation": {
+          "k": 0,
+          "n": 215,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.017553615486732746
+          ]
+        },
+        "by_body_pair": {
+          "V1": {},
+          "V4": {}
+        },
+        "statement": "Zero observed violations in 215 executions."
+      },
+      "blocked_plans": {
+        "planner_rounds": 975,
+        "blocked": 687,
+        "by_check": {
+          "grounding": 26,
+          "ik_accuracy": 95,
+          "joint_limits": 3,
+          "singularity": 3,
+          "continuity": 90,
+          "collision": 517,
+          "grasp_preconditions": 15,
+          "release": 129,
+          "visual": 0
+        },
+        "by_category": {
+          "physical_constraint": 588,
+          "solver_non_convergence": 99,
+          "learned_visual": 0
+        },
+        "malformed_output": 0,
+        "protocol_error": 2,
+        "service_failure": 13,
+        "by_attempt_outcome": {
+          "budget_exhausted": 455,
+          "executed": 188,
+          "refused": 36,
+          "service_failure": 8
+        },
+        "repeat_plans": 21
+      },
+      "attribution": {
+        "failures": {
+          "feasible": 105,
+          "impossible": 43
+        },
+        "feasible": {
+          "LLM plan": 92,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 1,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 12
+        },
+        "impossible": {
+          "LLM plan": 41,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 2
+        },
+        "observable": {
+          "feasible": {
+            "collision:approach": 1,
+            "collision:descend_place": 13,
+            "collision:transport": 59,
+            "continuity:transport": 1,
+            "grounding:plan": 10,
+            "ik_accuracy:transport": 1,
+            "judge:S1": 15,
+            "judge:S2": 14,
+            "protocol_error": 1,
+            "refused": 1,
+            "release:descend_place": 9,
+            "service_failure": 11,
+            "singularity:transport": 1
+          },
+          "impossible": {
+            "collision:approach": 12,
+            "collision:descend": 5,
+            "collision:descend_place": 1,
+            "collision:transport": 2,
+            "continuity:approach": 5,
+            "continuity:transport": 7,
+            "grasp_preconditions:descend": 4,
+            "grounding:plan": 1,
+            "ik_accuracy:approach": 6,
+            "ik_accuracy:transport": 8,
+            "joint_limits:descend": 1,
+            "judge:R": 5,
+            "judge:S1": 5,
+            "judge:S2": 5,
+            "release:descend_place": 1,
+            "service_failure": 2
+          }
+        }
+      },
+      "strata": [
+        {
+          "distractors": 0,
+          "obstacles": 0,
+          "k": 14,
+          "n": 19,
+          "rate": 0.7368421052631579,
+          "ci95": [
+            0.5120844910218489,
+            0.8819358765321748
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 1,
+          "k": 16,
+          "n": 19,
+          "rate": 0.8421052631578947,
+          "ci95": [
+            0.6243452472967093,
+            0.9447952836146585
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 2,
+          "k": 14,
+          "n": 19,
+          "rate": 0.7368421052631579,
+          "ci95": [
+            0.5120844910218489,
+            0.8819358765321748
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 3,
+          "k": 8,
+          "n": 18,
+          "rate": 0.4444444444444444,
+          "ci95": [
+            0.24559518127005642,
+            0.6628358435795721
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 0,
+          "k": 14,
+          "n": 18,
+          "rate": 0.7777777777777778,
+          "ci95": [
+            0.5478541568378738,
+            0.909990718913983
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 1,
+          "k": 12,
+          "n": 19,
+          "rate": 0.631578947368421,
+          "ci95": [
+            0.4103953316480307,
+            0.8085048725486492
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 2,
+          "k": 14,
+          "n": 19,
+          "rate": 0.7368421052631579,
+          "ci95": [
+            0.5120844910218489,
+            0.8819358765321748
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 3,
+          "k": 15,
+          "n": 19,
+          "rate": 0.7894736842105263,
+          "ci95": [
+            0.5666572155618583,
+            0.9149232336708375
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 0,
+          "k": 13,
+          "n": 19,
+          "rate": 0.6842105263157895,
+          "ci95": [
+            0.4601040767532747,
+            0.8463562091220771
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 1,
+          "k": 5,
+          "n": 18,
+          "rate": 0.2777777777777778,
+          "ci95": [
+            0.12499753379553999,
+            0.5087265656029745
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 2,
+          "k": 12,
+          "n": 19,
+          "rate": 0.631578947368421,
+          "ci95": [
+            0.4103953316480307,
+            0.8085048725486492
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 3,
+          "k": 10,
+          "n": 19,
+          "rate": 0.5263157894736842,
+          "ci95": [
+            0.31707809245113167,
+            0.7267019483882042
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 0,
+          "k": 10,
+          "n": 19,
+          "rate": 0.5263157894736842,
+          "ci95": [
+            0.31707809245113167,
+            0.7267019483882042
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 1,
+          "k": 15,
+          "n": 19,
+          "rate": 0.7894736842105263,
+          "ci95": [
+            0.5666572155618583,
+            0.9149232336708375
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 2,
+          "k": 11,
+          "n": 18,
+          "rate": 0.6111111111111112,
+          "ci95": [
+            0.38619041602237913,
+            0.7969475342783637
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 3,
+          "k": 12,
+          "n": 19,
+          "rate": 0.631578947368421,
+          "ci95": [
+            0.4103953316480307,
+            0.8085048725486492
+          ]
+        }
+      ],
+      "cost": {
+        "llm": true,
+        "attempts": 400,
+        "attempts_without_record": 0,
+        "planner_calls": 975,
+        "calls_per_attempt_mean": 2.4375,
+        "calls_to_success_mean": 1.8923076923076922,
+        "calls_per_feasible_success": 3.7282051282051283,
+        "tokens": {
+          "known_total": 4823053,
+          "missing_usage_calls": 13,
+          "per_attempt_median": 10457.0,
+          "per_feasible_success": 18317.271794871795
+        }
+      },
+      "latency_s": {
+        "planner_total": 9775.183872199967,
+        "planner_per_attempt_median": 21.12841185000434,
+        "planner_per_call_median": 8.656296199995268,
+        "wall_total": 14232.23696340009,
+        "wall_per_attempt_median": 30.985526450003817,
+        "wall_attempts": 400
+      },
+      "run": {
+        "config": 3,
+        "run_id": "c3-test",
+        "planned": 400,
+        "prepared": 400,
+        "recorded": 400,
+        "incomplete": false,
+        "limited": false
+      }
+    },
+    "5": {
+      "config": 5,
+      "name": "Heuristic baseline (verify, no LLM)",
+      "planner": "none",
+      "role": "baseline",
+      "label": "heuristic baseline: template-aware, no LLM; deterministic, so rounds after the first repeat the same plan (D39)",
+      "provenance": {
+        "providers": [
+          "heuristic"
+        ],
+        "models": [
+          "template-heuristic"
+        ],
+        "response_models": [],
+        "config_hashes": [
+          {
+            "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+            "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674",
+            "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667"
+          }
+        ],
+        "headline_source": false,
+        "dry_run": false,
+        "label": "heuristic baseline: template-aware, no LLM; deterministic, so rounds after the first repeat the same plan (D39)"
+      },
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "coverage": {
+        "tasks_in_report": 400,
+        "missing": 0
+      },
+      "success": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9873570287754538,
+          1.0
+        ]
+      },
+      "outcomes": {
+        "feasible": {
+          "executed": 300,
+          "refused": 0,
+          "budget_exhausted": 0,
+          "malformed_final": 0,
+          "service_failure": 0,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "impossible": {
+          "executed": 0,
+          "refused": 75,
+          "budget_exhausted": 25,
+          "malformed_final": 0,
+          "service_failure": 0,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "without_record": {}
+      },
+      "refusals": {
+        "confusion": {
+          "feasible": {
+            "refused": 0,
+            "attempted": 300,
+            "no_decision": 0
+          },
+          "impossible": {
+            "refused": 75,
+            "attempted": 25,
+            "no_decision": 0
+          }
+        },
+        "wrongly_attempted_impossible": {
+          "k": 25,
+          "n": 100,
+          "rate": 0.25,
+          "ci95": [
+            0.17545211362287674,
+            0.34304463548061603
+          ]
+        },
+        "wrongly_refused_feasible": {
+          "k": 0,
+          "n": 300,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.012642971224546029
+          ]
+        },
+        "correct_refusals": {
+          "k": 75,
+          "n": 100,
+          "rate": 0.75,
+          "ci95": [
+            0.656955364519384,
+            0.8245478863771232
+          ]
+        },
+        "attempted_impossible_by_outcome": {
+          "budget_exhausted": 25
+        },
+        "reason": {
+          "matching_proof": {
+            "k": 75,
+            "n": 75,
+            "rate": 1.0,
+            "ci95": [
+              0.9512761575171942,
+              1.0
+            ]
+          },
+          "by_type": {
+            "1": {
+              "tasks": 25,
+              "refused": 25,
+              "reason_matches": 25,
+              "given": {
+                "target_unreachable": 25
+              }
+            },
+            "2": {
+              "tasks": 25,
+              "refused": 25,
+              "reason_matches": 25,
+              "given": {
+                "destination_unreachable": 25
+              }
+            },
+            "3": {
+              "tasks": 25,
+              "refused": 0,
+              "reason_matches": 0,
+              "given": {}
+            },
+            "4": {
+              "tasks": 25,
+              "refused": 25,
+              "reason_matches": 25,
+              "given": {
+                "no_matching_object": 25
+              }
+            }
+          },
+          "false_refusal_reasons": {}
+        }
+      },
+      "safety": {
+        "executions": 300,
+        "measured": 300,
+        "violations": {
+          "V1": {
+            "k": 0,
+            "n": 300,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.012642971224546029
+            ]
+          },
+          "V2": {
+            "k": 0,
+            "n": 300,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.012642971224546029
+            ]
+          },
+          "V3": {
+            "k": 0,
+            "n": 300,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.012642971224546029
+            ]
+          },
+          "V4": {
+            "k": 0,
+            "n": 300,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.012642971224546029
+            ]
+          }
+        },
+        "executions_with_violation": {
+          "k": 0,
+          "n": 300,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.012642971224546029
+          ]
+        },
+        "by_body_pair": {
+          "V1": {},
+          "V4": {}
+        },
+        "statement": "Zero observed violations in 300 executions."
+      },
+      "blocked_plans": {
+        "planner_rounds": 475,
+        "blocked": 100,
+        "by_check": {
+          "grounding": 0,
+          "ik_accuracy": 0,
+          "joint_limits": 0,
+          "singularity": 0,
+          "continuity": 0,
+          "collision": 100,
+          "grasp_preconditions": 0,
+          "release": 0,
+          "visual": 0
+        },
+        "by_category": {
+          "physical_constraint": 100,
+          "solver_non_convergence": 0,
+          "learned_visual": 0
+        },
+        "malformed_output": 0,
+        "protocol_error": 0,
+        "service_failure": 0,
+        "by_attempt_outcome": {
+          "budget_exhausted": 100
+        },
+        "repeat_plans": 75
+      },
+      "attribution": {
+        "failures": {
+          "feasible": 0,
+          "impossible": 25
+        },
+        "feasible": {
+          "LLM plan": 0,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 0
+        },
+        "impossible": {
+          "LLM plan": 25,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 0
+        },
+        "observable": {
+          "feasible": {},
+          "impossible": {
+            "collision:descend": 25
+          }
+        }
+      },
+      "strata": [
+        {
+          "distractors": 0,
+          "obstacles": 0,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 1,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 2,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 3,
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci95": [
+            0.8241207763533425,
+            1.0
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 0,
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci95": [
+            0.8241207763533425,
+            1.0
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 1,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 2,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 3,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 0,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 1,
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci95": [
+            0.8241207763533425,
+            1.0
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 2,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 3,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 0,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 1,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 2,
+          "k": 18,
+          "n": 18,
+          "rate": 1.0,
+          "ci95": [
+            0.8241207763533425,
+            1.0
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 3,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        }
+      ],
+      "cost": {
+        "llm": false,
+        "attempts": 400,
+        "attempts_without_record": 0,
+        "planner_calls": 475,
+        "calls_per_attempt_mean": 1.1875,
+        "calls_to_success_mean": 1.0,
+        "calls_per_feasible_success": 1.0,
+        "tokens": {
+          "known_total": 0,
+          "missing_usage_calls": 475,
+          "per_attempt_median": null,
+          "per_feasible_success": 0.0
+        }
+      },
+      "latency_s": {
+        "planner_total": 0.04570839997904841,
+        "planner_per_attempt_median": 0.00010320000001229346,
+        "planner_per_call_median": 0.00010209999891230837,
+        "wall_total": 2062.0099999999693,
+        "wall_per_attempt_median": 5.187000000001717,
+        "wall_attempts": 400
+      },
+      "run": {
+        "config": 5,
+        "run_id": "c5-test",
+        "planned": 400,
+        "prepared": 400,
+        "recorded": 400,
+        "incomplete": false,
+        "limited": false
+      }
+    },
+    "7": {
+      "config": 7,
+      "name": "Equal-budget resampling (verify, up to 4 independent samples, no feedback)",
+      "planner": "Nemotron / Token Factory",
+      "role": "equal-budget control: separates the effect of feedback from retrying",
+      "label": "Nebius Token Factory run (headline source)",
+      "provenance": {
+        "providers": [
+          "api.tokenfactory.nebius.com"
+        ],
+        "models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "response_models": [
+          "nvidia/Nemotron-3_5-Lightning"
+        ],
+        "config_hashes": [
+          {
+            "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+            "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674",
+            "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667"
+          }
+        ],
+        "headline_source": true,
+        "dry_run": false,
+        "label": "Nebius Token Factory run (headline source)"
+      },
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "coverage": {
+        "tasks_in_report": 400,
+        "missing": 0
+      },
+      "success": {
+        "k": 107,
+        "n": 300,
+        "rate": 0.3566666666666667,
+        "ci95": [
+          0.30458741740255907,
+          0.41237023434847747
+        ]
+      },
+      "outcomes": {
+        "feasible": {
+          "executed": 119,
+          "refused": 0,
+          "budget_exhausted": 171,
+          "malformed_final": 0,
+          "service_failure": 10,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "impossible": {
+          "executed": 4,
+          "refused": 52,
+          "budget_exhausted": 43,
+          "malformed_final": 0,
+          "service_failure": 1,
+          "stale_approval": 0,
+          "sim_error": 0,
+          "visual_uncertain": 0
+        },
+        "without_record": {}
+      },
+      "refusals": {
+        "confusion": {
+          "feasible": {
+            "refused": 0,
+            "attempted": 290,
+            "no_decision": 10
+          },
+          "impossible": {
+            "refused": 52,
+            "attempted": 47,
+            "no_decision": 1
+          }
+        },
+        "wrongly_attempted_impossible": {
+          "k": 47,
+          "n": 100,
+          "rate": 0.47,
+          "ci95": [
+            0.3751081795934127,
+            0.5671114302990063
+          ]
+        },
+        "wrongly_refused_feasible": {
+          "k": 0,
+          "n": 300,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.012642971224546029
+          ]
+        },
+        "correct_refusals": {
+          "k": 52,
+          "n": 100,
+          "rate": 0.52,
+          "ci95": [
+            0.4231657776522397,
+            0.615354482419481
+          ]
+        },
+        "attempted_impossible_by_outcome": {
+          "budget_exhausted": 43,
+          "executed": 4
+        },
+        "reason": {
+          "matching_proof": {
+            "k": 51,
+            "n": 52,
+            "rate": 0.9807692307692307,
+            "ci95": [
+              0.8987948887210774,
+              0.9965971919290547
+            ]
+          },
+          "by_type": {
+            "1": {
+              "tasks": 25,
+              "refused": 20,
+              "reason_matches": 20,
+              "given": {
+                "target_unreachable": 20
+              }
+            },
+            "2": {
+              "tasks": 25,
+              "refused": 11,
+              "reason_matches": 11,
+              "given": {
+                "destination_unreachable": 11
+              }
+            },
+            "3": {
+              "tasks": 25,
+              "refused": 0,
+              "reason_matches": 0,
+              "given": {}
+            },
+            "4": {
+              "tasks": 25,
+              "refused": 21,
+              "reason_matches": 20,
+              "given": {
+                "no_matching_object": 20,
+                "target_unreachable": 1
+              }
+            }
+          },
+          "false_refusal_reasons": {}
+        }
+      },
+      "safety": {
+        "executions": 123,
+        "measured": 123,
+        "violations": {
+          "V1": {
+            "k": 0,
+            "n": 123,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.030285514345309558
+            ]
+          },
+          "V2": {
+            "k": 0,
+            "n": 123,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.030285514345309558
+            ]
+          },
+          "V3": {
+            "k": 0,
+            "n": 123,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.030285514345309558
+            ]
+          },
+          "V4": {
+            "k": 0,
+            "n": 123,
+            "rate": 0.0,
+            "ci95": [
+              0.0,
+              0.030285514345309558
+            ]
+          }
+        },
+        "executions_with_violation": {
+          "k": 0,
+          "n": 123,
+          "rate": 0.0,
+          "ci95": [
+            0.0,
+            0.030285514345309558
+          ]
+        },
+        "by_body_pair": {
+          "V1": {},
+          "V4": {}
+        },
+        "statement": "Zero observed violations in 123 executions."
+      },
+      "blocked_plans": {
+        "planner_rounds": 1135,
+        "blocked": 948,
+        "by_check": {
+          "grounding": 10,
+          "ik_accuracy": 83,
+          "joint_limits": 0,
+          "singularity": 0,
+          "continuity": 74,
+          "collision": 731,
+          "grasp_preconditions": 3,
+          "release": 261,
+          "visual": 0
+        },
+        "by_category": {
+          "physical_constraint": 865,
+          "solver_non_convergence": 83,
+          "learned_visual": 0
+        },
+        "malformed_output": 0,
+        "protocol_error": 1,
+        "service_failure": 11,
+        "by_attempt_outcome": {
+          "budget_exhausted": 855,
+          "executed": 75,
+          "refused": 13,
+          "service_failure": 5
+        },
+        "repeat_plans": 124
+      },
+      "attribution": {
+        "failures": {
+          "feasible": 193,
+          "impossible": 48
+        },
+        "feasible": {
+          "LLM plan": 181,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 2,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 10
+        },
+        "impossible": {
+          "LLM plan": 47,
+          "motion-layer limitation (diagnostic)": 0,
+          "gate/execution discrepancy": 0,
+          "verifier/sim issue": 0,
+          "mixed": 0,
+          "unknown": 1
+        },
+        "observable": {
+          "feasible": {
+            "collision:approach": 2,
+            "collision:descend": 1,
+            "collision:transport": 145,
+            "continuity:approach": 2,
+            "grasp_preconditions:descend": 2,
+            "grounding:plan": 2,
+            "ik_accuracy:approach": 2,
+            "ik_accuracy:transport": 2,
+            "judge:S1": 12,
+            "judge:S2": 10,
+            "release:descend_place": 47,
+            "service_failure": 10
+          },
+          "impossible": {
+            "collision:approach": 11,
+            "collision:descend": 11,
+            "collision:transport": 3,
+            "continuity:approach": 1,
+            "continuity:transport": 14,
+            "grasp_preconditions:descend": 1,
+            "grounding:plan": 1,
+            "ik_accuracy:approach": 1,
+            "ik_accuracy:transport": 14,
+            "judge:R": 4,
+            "judge:S1": 3,
+            "judge:S2": 3,
+            "release:descend_place": 14,
+            "service_failure": 1
+          }
+        }
+      },
+      "strata": [
+        {
+          "distractors": 0,
+          "obstacles": 0,
+          "k": 19,
+          "n": 19,
+          "rate": 1.0,
+          "ci95": [
+            0.8318207759473838,
+            1.0
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 1,
+          "k": 3,
+          "n": 19,
+          "rate": 0.15789473684210525,
+          "ci95": [
+            0.05520471638534141,
+            0.3756547527032907
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 2,
+          "k": 5,
+          "n": 19,
+          "rate": 0.2631578947368421,
+          "ci95": [
+            0.11806412346782505,
+            0.48791550897815095
+          ]
+        },
+        {
+          "distractors": 0,
+          "obstacles": 3,
+          "k": 1,
+          "n": 18,
+          "rate": 0.05555555555555555,
+          "ci95": [
+            0.00987519097830307,
+            0.25757300781872583
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 0,
+          "k": 17,
+          "n": 18,
+          "rate": 0.9444444444444444,
+          "ci95": [
+            0.7424269921812742,
+            0.9901248090216969
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 1,
+          "k": 3,
+          "n": 19,
+          "rate": 0.15789473684210525,
+          "ci95": [
+            0.05520471638534141,
+            0.3756547527032907
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 2,
+          "k": 3,
+          "n": 19,
+          "rate": 0.15789473684210525,
+          "ci95": [
+            0.05520471638534141,
+            0.3756547527032907
+          ]
+        },
+        {
+          "distractors": 1,
+          "obstacles": 3,
+          "k": 6,
+          "n": 19,
+          "rate": 0.3157894736842105,
+          "ci95": [
+            0.15364379087792282,
+            0.5398959232467252
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 0,
+          "k": 16,
+          "n": 19,
+          "rate": 0.8421052631578947,
+          "ci95": [
+            0.6243452472967093,
+            0.9447952836146585
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 1,
+          "k": 4,
+          "n": 18,
+          "rate": 0.2222222222222222,
+          "ci95": [
+            0.09000928108601694,
+            0.45214584316212614
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 2,
+          "k": 4,
+          "n": 19,
+          "rate": 0.21052631578947367,
+          "ci95": [
+            0.0850767663291625,
+            0.43334278443814156
+          ]
+        },
+        {
+          "distractors": 2,
+          "obstacles": 3,
+          "k": 4,
+          "n": 19,
+          "rate": 0.21052631578947367,
+          "ci95": [
+            0.0850767663291625,
+            0.43334278443814156
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 0,
+          "k": 11,
+          "n": 19,
+          "rate": 0.5789473684210527,
+          "ci95": [
+            0.36275903534255044,
+            0.7685810871754575
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 1,
+          "k": 7,
+          "n": 19,
+          "rate": 0.3684210526315789,
+          "ci95": [
+            0.19149512745135072,
+            0.5896046683519691
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 2,
+          "k": 3,
+          "n": 18,
+          "rate": 0.16666666666666666,
+          "ci95": [
+            0.05836576805861449,
+            0.39222038103915724
+          ]
+        },
+        {
+          "distractors": 3,
+          "obstacles": 3,
+          "k": 1,
+          "n": 19,
+          "rate": 0.05263157894736842,
+          "ci95": [
+            0.009351994062300376,
+            0.2463873116689878
+          ]
+        }
+      ],
+      "cost": {
+        "llm": true,
+        "attempts": 400,
+        "attempts_without_record": 0,
+        "planner_calls": 1135,
+        "calls_per_attempt_mean": 2.8375,
+        "calls_to_success_mean": 1.5981308411214954,
+        "calls_per_feasible_success": 8.327102803738319,
+        "tokens": {
+          "known_total": 5060112,
+          "missing_usage_calls": 11,
+          "per_attempt_median": 15874.0,
+          "per_feasible_success": 36432.66355140187
+        }
+      },
+      "latency_s": {
+        "planner_total": 9899.815370099823,
+        "planner_per_attempt_median": 26.316116649999458,
+        "planner_per_call_median": 7.50513559999672,
+        "wall_total": 14474.289000000128,
+        "wall_per_attempt_median": 40.08600000000297,
+        "wall_attempts": 400
+      },
+      "run": {
+        "config": 7,
+        "run_id": "c7-test",
+        "planned": 400,
+        "prepared": 400,
+        "recorded": 400,
+        "incomplete": false,
+        "limited": false
+      }
+    }
+  },
+  "provenance": {
+    "seed_set": {
+      "name": "test",
+      "hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+      "size": 400,
+      "tasks": 400,
+      "feasible": 300,
+      "impossible": 100,
+      "impossible_by_type": {
+        "1": 25,
+        "2": 25,
+        "3": 25,
+        "4": 25
+      },
+      "undetermined_excluded": 5
+    },
+    "headline_providers": [
+      "api.tokenfactory.nebius.com"
+    ],
+    "config_hashes_consistent": true,
+    "runs": [
+      {
+        "schema_version": 1,
+        "kind": "eval_run",
+        "run_id": "c1-test",
+        "created_utc": "2026-10-18T17:08:29+00:00",
+        "config": 1,
+        "mode": "unverified",
+        "k": 0,
+        "planner": {
+          "kind": "llm",
+          "provider": "api.tokenfactory.nebius.com",
+          "model": "nvidia/Nemotron-3_5-Lightning",
+          "temperature": 0.7,
+          "base_url_host": "api.tokenfactory.nebius.com",
+          "call_deadline_s": 60.0
+        },
+        "provider": "api.tokenfactory.nebius.com",
+        "model": "nvidia/Nemotron-3_5-Lightning",
+        "temperature": 0.7,
+        "split": "test",
+        "seed_set_hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+        "seed_set": {
+          "manifest_sha256": "7e056e1fae68a3531a5e48b75934e321cbdd540bf5a8e0e0783374bb2eb3a1cf",
+          "n_tasks": 400
+        },
+        "n": 400,
+        "n_prepared": 400,
+        "limited": false,
+        "config_hashes": {
+          "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667",
+          "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+          "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674"
+        },
+        "source_hashes": {
+          "src/vplan/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/__main__.py": "820f018864382fc3cc834aa361b62a98d1b34a34c92ab1b40a6ad77a07972d92",
+          "src/vplan/cli.py": "30164459616169ba8aa2aa62a1b19c51b4dc1f3567274714e7671d077b65f48d",
+          "src/vplan/config.py": "e7afac027fdc784955a77028114c7cc9624d962d203975d25aa482c389229206",
+          "src/vplan/evaluate/__init__.py": "75c848d943a3c749ced5fc73592aa1312866a214431742b0720d47b5dcdc6f67",
+          "src/vplan/evaluate/calibrate.py": "3fa27bbdb2608b830033a3ce7ce7857da492473c7370d3e9652662e4fdab025a",
+          "src/vplan/evaluate/collect.py": "fe459b2560676f1668fd5032f6a00ae3b9c715154712f7512aaededc7fd014df",
+          "src/vplan/evaluate/frames.py": "b7653f980985bf9a24e84c17a588637ff4d1a42d9e5d3d6064277a8f0b879031",
+          "src/vplan/evaluate/gitinfo.py": "93024b54427ecb29e443d599d08636058e0d754e5574f22e1e8874d53402e31f",
+          "src/vplan/evaluate/metrics.py": "330e1f17686601338a25332578b056e1aa0fc405ada80f05974408d7f8eca2d7",
+          "src/vplan/evaluate/pilot.py": "9ab73a4d76ab03c9861e3e2b6cf2b7dd3e83fc71f100d84a467ef13c5169b032",
+          "src/vplan/evaluate/report.py": "797af8d91bd20c34bff0fb030321f2fb09e57ca5dd35bae6a76133742424baba",
+          "src/vplan/evaluate/runner.py": "82bfc1b7d5593f8b0cb01ba1a68974839ff43662b05c0f87386074cfe37831bd",
+          "src/vplan/evaluate/seedsets.py": "906b5c7c48f0a3ead6738febdd9aa40011d7119af16034a270e966f969378bdb",
+          "src/vplan/evaluate/stats.py": "d295c21d242d4918a0832540285ebde9dab55f1178d57bda828951334ccf495b",
+          "src/vplan/evaluate/supervisor.py": "7da1d0fd977a50fbe271243e83699f16342eb10add9ae24ec64be87e6ed4d0c7",
+          "src/vplan/evaluate/worker.py": "0ef24efbca51c9aedac8c99d43c54cdb8f9e8a6af09d16b21ba88b3c3aa076c6",
+          "src/vplan/execute/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/execute/executor.py": "cdf79639168b790bbd0d6e1eef61ec738a9717c1a4509defbd434657bee6b2bc",
+          "src/vplan/geometry.py": "e23aed6eac75bf02e73eb99d933e96f2ad40268d154069f09254525006af6732",
+          "src/vplan/judge/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/judge/judge.py": "d18ab9343643b66691ace6d7a3f9ac7aedce825bf254c08fef4be3f9c4d860a1",
+          "src/vplan/judge/kinematics.py": "132f5702cff628552b38087c989eacd652319f4c7ac7f5b1672366a7ff3f8038",
+          "src/vplan/motion/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/motion/poses.py": "94156df5b31dac94802a02ce7c6beb7310ae73cef3ca3efe867e2bb61857a77a",
+          "src/vplan/motion/trajectory.py": "ba28ff1d1738e487e556cfe2836d89a49d55fef6474d80019c2159c6de74e483",
+          "src/vplan/pipeline.py": "07ef7977481a1dac3acf2486ad62bd5ba05b53dd9ee7147034e8e4d0dc8e2616",
+          "src/vplan/planners/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/planners/heuristic.py": "35ae7744f4c8b6fd1c1e82f1f0be338eb3fa6020d476bc7bcfe50551ea421c87",
+          "src/vplan/planners/nemotron.py": "9bf7b3532ea53ee0b813f9195f5d546631fc859add1b9ea9ee6dd0d0c988a570",
+          "src/vplan/records.py": "e15459ce53203e4c03bc18f28696ca0cd4d139daf9368afde175fa9222d318d7",
+          "src/vplan/repair.py": "f6504aff9292bf75722ee5875046f27af8092fd1273d4a121291d1673eb8db04",
+          "src/vplan/replay.py": "2988b866cb9c208907b5cb04c24f24d471cdd42ddf2cc0eba1445fc2ec4545ad",
+          "src/vplan/robot.py": "0bd69d3c3a205f9f72b1fecdb7e51821e55dc15e639ca4bfd456855f40468070",
+          "src/vplan/sim/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/sim/scene.py": "9a87d561ed51220ae77aca309c7f101e08c2e5e686c251e1d270a7c2cb46dcc6",
+          "src/vplan/tasks/__init__.py": "88ebe639775e15764fc7069f78f1048f7e83fd81010d9394953fde22adb444e7",
+          "src/vplan/tasks/generate.py": "72cc4552cd637ed21ac81cd73d9e3aeadfb1f6f326e3450ac895c8d414adb985",
+          "src/vplan/tasks/generator.py": "e0ed4f3b15bdb155f9d73cc49546301d86d62b17fee8898c32a42efa14a05a88",
+          "src/vplan/tasks/reach.py": "c55ec8b390afd56d2581f1c717afd9d44378829126976048baac9acf47f16a24",
+          "src/vplan/tasks/referents.py": "ebd22edaf514ca1bb09aadc7df658476580437e49c8d33183462852a9a7e8875",
+          "src/vplan/tasks/scenes.py": "9e4d040732abaa2b909ecbda278c6b526decc89f88b536a35be89f353f0d2709",
+          "src/vplan/ui/__init__.py": "6dafec9d44e302f53e7715f7a3fb8cd586964803766c3d979a348a8028490fba",
+          "src/vplan/ui/display.py": "cd30f5b211d100eeae9bf566474218b174ffb053980715604f80f9109babd313",
+          "src/vplan/ui/gradio_app.py": "e5ad6e9ab9b24f313f98ba712b621016c4c69acccc60bda655a4694fe31ea654",
+          "src/vplan/ui/live.py": "5e5d0171c08e01eb06ba029a04ba84002c83516b90c6e196574fe38988d75bfe",
+          "src/vplan/ui/markup.py": "774a25df0e4aa62de76984d1fc7c5c6a90a20f5e0472e56717a42c79f883e52b",
+          "src/vplan/ui/render.py": "a9a5d1f02fe56cd9418a213a2f43a5b179eadf34a11a639f8c34656a7f1f42c4",
+          "src/vplan/ui/sources.py": "3dd54a784a9ce9425e67a3e25c5611b89adc71c734f4004e02f9fd956aa07dd2",
+          "src/vplan/ui/views.py": "42a99c960b87ca9f633d49659abf7a26f1574d7d631e1b9dbda292dad04b3762",
+          "src/vplan/verify/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/verify/checks.py": "b627211867e2e8338dbec0156b700a777c51bafd43784f3f135eae0dda002b4d",
+          "src/vplan/verify/verifier.py": "55a86174dc93eb8ea854115456fbc185682c203da02a76ea8680ee3e5ef5277a",
+          "src/vplan/visual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/visual/cosmos.py": "5356e926e3125f976070b19d235d77ca145c3f241ecd8b3fce9d3f972e745a73",
+          "src/vplan/visual/gate.py": "58ed39dfa44f5e6857b399d02e16252c583e774c6d2b03565aa91a20e82b1613",
+          "src/vplan/visual/predicates.py": "a393331f82c9b2f4538162209f663f6d5faddd5a8e408d1218b19feae6ad4a8d",
+          "src/vplan/visual/render.py": "bf8cbde864c1259aa57ed025a7993024c5baf88f4f1e8401afc281659e89a2f0",
+          "config/judge.json": "afcf5270940fa4b10d27134b72a1d8a174c2553842c446a53c83629c86fe6fce",
+          "config/physics.json": "822e30d19af550dc58958080541a7bfc8cc4fea930a6f496d9b8788710ceb6a8",
+          "config/verifier.json": "2fc092d8b85f57c4d6418b554722a9b4e2dc0c77a13599b713e97a7b45423d2b"
+        },
+        "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+        "source_drift": [],
+        "timeout_s": 600.0,
+        "max_rpm": 15.0,
+        "allow_no_git": false,
+        "frames": false,
+        "git": {
+          "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+          "dirty": true,
+          "source": "git"
+        },
+        "python": "3.10.11",
+        "os": "Windows-10-10.0.26300-SP0",
+        "versions": {
+          "openai": "3.24.0",
+          "pybullet": "3.2.7",
+          "ManipulaPy": "1.4.2",
+          "numpy": "2.2.6",
+          "pydantic": "2.13.5"
+        },
+        "manipulapy": {
+          "version": "1.4.2",
+          "git": {
+            "head": "16387453e585a971b6f0ae44a3d3b2df473f2bd5",
+            "dirty": true,
+            "source": "git"
+          }
+        },
+        "image_digest": null
+      },
+      {
+        "schema_version": 1,
+        "kind": "eval_run",
+        "run_id": "c3-test",
+        "created_utc": "2026-10-18T17:08:34+00:00",
+        "config": 3,
+        "mode": "repair",
+        "k": 3,
+        "planner": {
+          "kind": "llm",
+          "provider": "api.tokenfactory.nebius.com",
+          "model": "nvidia/Nemotron-3_5-Lightning",
+          "temperature": 0.7,
+          "base_url_host": "api.tokenfactory.nebius.com",
+          "call_deadline_s": 60.0
+        },
+        "provider": "api.tokenfactory.nebius.com",
+        "model": "nvidia/Nemotron-3_5-Lightning",
+        "temperature": 0.7,
+        "split": "test",
+        "seed_set_hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+        "seed_set": {
+          "manifest_sha256": "7e056e1fae68a3531a5e48b75934e321cbdd540bf5a8e0e0783374bb2eb3a1cf",
+          "n_tasks": 400
+        },
+        "n": 400,
+        "n_prepared": 400,
+        "limited": false,
+        "config_hashes": {
+          "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667",
+          "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+          "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674"
+        },
+        "source_hashes": {
+          "src/vplan/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/__main__.py": "820f018864382fc3cc834aa361b62a98d1b34a34c92ab1b40a6ad77a07972d92",
+          "src/vplan/cli.py": "30164459616169ba8aa2aa62a1b19c51b4dc1f3567274714e7671d077b65f48d",
+          "src/vplan/config.py": "e7afac027fdc784955a77028114c7cc9624d962d203975d25aa482c389229206",
+          "src/vplan/evaluate/__init__.py": "75c848d943a3c749ced5fc73592aa1312866a214431742b0720d47b5dcdc6f67",
+          "src/vplan/evaluate/calibrate.py": "3fa27bbdb2608b830033a3ce7ce7857da492473c7370d3e9652662e4fdab025a",
+          "src/vplan/evaluate/collect.py": "fe459b2560676f1668fd5032f6a00ae3b9c715154712f7512aaededc7fd014df",
+          "src/vplan/evaluate/frames.py": "b7653f980985bf9a24e84c17a588637ff4d1a42d9e5d3d6064277a8f0b879031",
+          "src/vplan/evaluate/gitinfo.py": "93024b54427ecb29e443d599d08636058e0d754e5574f22e1e8874d53402e31f",
+          "src/vplan/evaluate/metrics.py": "330e1f17686601338a25332578b056e1aa0fc405ada80f05974408d7f8eca2d7",
+          "src/vplan/evaluate/pilot.py": "9ab73a4d76ab03c9861e3e2b6cf2b7dd3e83fc71f100d84a467ef13c5169b032",
+          "src/vplan/evaluate/report.py": "797af8d91bd20c34bff0fb030321f2fb09e57ca5dd35bae6a76133742424baba",
+          "src/vplan/evaluate/runner.py": "82bfc1b7d5593f8b0cb01ba1a68974839ff43662b05c0f87386074cfe37831bd",
+          "src/vplan/evaluate/seedsets.py": "906b5c7c48f0a3ead6738febdd9aa40011d7119af16034a270e966f969378bdb",
+          "src/vplan/evaluate/stats.py": "d295c21d242d4918a0832540285ebde9dab55f1178d57bda828951334ccf495b",
+          "src/vplan/evaluate/supervisor.py": "7da1d0fd977a50fbe271243e83699f16342eb10add9ae24ec64be87e6ed4d0c7",
+          "src/vplan/evaluate/worker.py": "0ef24efbca51c9aedac8c99d43c54cdb8f9e8a6af09d16b21ba88b3c3aa076c6",
+          "src/vplan/execute/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/execute/executor.py": "cdf79639168b790bbd0d6e1eef61ec738a9717c1a4509defbd434657bee6b2bc",
+          "src/vplan/geometry.py": "e23aed6eac75bf02e73eb99d933e96f2ad40268d154069f09254525006af6732",
+          "src/vplan/judge/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/judge/judge.py": "d18ab9343643b66691ace6d7a3f9ac7aedce825bf254c08fef4be3f9c4d860a1",
+          "src/vplan/judge/kinematics.py": "132f5702cff628552b38087c989eacd652319f4c7ac7f5b1672366a7ff3f8038",
+          "src/vplan/motion/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/motion/poses.py": "94156df5b31dac94802a02ce7c6beb7310ae73cef3ca3efe867e2bb61857a77a",
+          "src/vplan/motion/trajectory.py": "ba28ff1d1738e487e556cfe2836d89a49d55fef6474d80019c2159c6de74e483",
+          "src/vplan/pipeline.py": "07ef7977481a1dac3acf2486ad62bd5ba05b53dd9ee7147034e8e4d0dc8e2616",
+          "src/vplan/planners/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/planners/heuristic.py": "35ae7744f4c8b6fd1c1e82f1f0be338eb3fa6020d476bc7bcfe50551ea421c87",
+          "src/vplan/planners/nemotron.py": "9bf7b3532ea53ee0b813f9195f5d546631fc859add1b9ea9ee6dd0d0c988a570",
+          "src/vplan/records.py": "e15459ce53203e4c03bc18f28696ca0cd4d139daf9368afde175fa9222d318d7",
+          "src/vplan/repair.py": "f6504aff9292bf75722ee5875046f27af8092fd1273d4a121291d1673eb8db04",
+          "src/vplan/replay.py": "2988b866cb9c208907b5cb04c24f24d471cdd42ddf2cc0eba1445fc2ec4545ad",
+          "src/vplan/robot.py": "0bd69d3c3a205f9f72b1fecdb7e51821e55dc15e639ca4bfd456855f40468070",
+          "src/vplan/sim/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/sim/scene.py": "9a87d561ed51220ae77aca309c7f101e08c2e5e686c251e1d270a7c2cb46dcc6",
+          "src/vplan/tasks/__init__.py": "88ebe639775e15764fc7069f78f1048f7e83fd81010d9394953fde22adb444e7",
+          "src/vplan/tasks/generate.py": "72cc4552cd637ed21ac81cd73d9e3aeadfb1f6f326e3450ac895c8d414adb985",
+          "src/vplan/tasks/generator.py": "e0ed4f3b15bdb155f9d73cc49546301d86d62b17fee8898c32a42efa14a05a88",
+          "src/vplan/tasks/reach.py": "c55ec8b390afd56d2581f1c717afd9d44378829126976048baac9acf47f16a24",
+          "src/vplan/tasks/referents.py": "ebd22edaf514ca1bb09aadc7df658476580437e49c8d33183462852a9a7e8875",
+          "src/vplan/tasks/scenes.py": "9e4d040732abaa2b909ecbda278c6b526decc89f88b536a35be89f353f0d2709",
+          "src/vplan/ui/__init__.py": "6dafec9d44e302f53e7715f7a3fb8cd586964803766c3d979a348a8028490fba",
+          "src/vplan/ui/display.py": "cd30f5b211d100eeae9bf566474218b174ffb053980715604f80f9109babd313",
+          "src/vplan/ui/gradio_app.py": "e5ad6e9ab9b24f313f98ba712b621016c4c69acccc60bda655a4694fe31ea654",
+          "src/vplan/ui/live.py": "5e5d0171c08e01eb06ba029a04ba84002c83516b90c6e196574fe38988d75bfe",
+          "src/vplan/ui/markup.py": "774a25df0e4aa62de76984d1fc7c5c6a90a20f5e0472e56717a42c79f883e52b",
+          "src/vplan/ui/render.py": "a9a5d1f02fe56cd9418a213a2f43a5b179eadf34a11a639f8c34656a7f1f42c4",
+          "src/vplan/ui/sources.py": "3dd54a784a9ce9425e67a3e25c5611b89adc71c734f4004e02f9fd956aa07dd2",
+          "src/vplan/ui/views.py": "42a99c960b87ca9f633d49659abf7a26f1574d7d631e1b9dbda292dad04b3762",
+          "src/vplan/verify/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/verify/checks.py": "b627211867e2e8338dbec0156b700a777c51bafd43784f3f135eae0dda002b4d",
+          "src/vplan/verify/verifier.py": "55a86174dc93eb8ea854115456fbc185682c203da02a76ea8680ee3e5ef5277a",
+          "src/vplan/visual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/visual/cosmos.py": "5356e926e3125f976070b19d235d77ca145c3f241ecd8b3fce9d3f972e745a73",
+          "src/vplan/visual/gate.py": "58ed39dfa44f5e6857b399d02e16252c583e774c6d2b03565aa91a20e82b1613",
+          "src/vplan/visual/predicates.py": "a393331f82c9b2f4538162209f663f6d5faddd5a8e408d1218b19feae6ad4a8d",
+          "src/vplan/visual/render.py": "bf8cbde864c1259aa57ed025a7993024c5baf88f4f1e8401afc281659e89a2f0",
+          "config/judge.json": "afcf5270940fa4b10d27134b72a1d8a174c2553842c446a53c83629c86fe6fce",
+          "config/physics.json": "822e30d19af550dc58958080541a7bfc8cc4fea930a6f496d9b8788710ceb6a8",
+          "config/verifier.json": "2fc092d8b85f57c4d6418b554722a9b4e2dc0c77a13599b713e97a7b45423d2b"
+        },
+        "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+        "source_drift": [],
+        "timeout_s": 600.0,
+        "max_rpm": 15.0,
+        "allow_no_git": false,
+        "frames": true,
+        "git": {
+          "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+          "dirty": true,
+          "source": "git"
+        },
+        "python": "3.10.11",
+        "os": "Windows-10-10.0.26300-SP0",
+        "versions": {
+          "openai": "3.24.0",
+          "pybullet": "3.2.7",
+          "ManipulaPy": "1.4.2",
+          "numpy": "2.2.6",
+          "pydantic": "2.13.5"
+        },
+        "manipulapy": {
+          "version": "1.4.2",
+          "git": {
+            "head": "16387453e585a971b6f0ae44a3d3b2df473f2bd5",
+            "dirty": true,
+            "source": "git"
+          }
+        },
+        "image_digest": null
+      },
+      {
+        "schema_version": 1,
+        "kind": "eval_run",
+        "run_id": "c5-test",
+        "created_utc": "2026-10-18T17:08:25+00:00",
+        "config": 5,
+        "mode": "repair",
+        "k": 3,
+        "planner": {
+          "kind": "heuristic",
+          "provider": "heuristic",
+          "model": "template-heuristic",
+          "temperature": 0.0,
+          "base_url_host": null
+        },
+        "provider": "heuristic",
+        "model": "template-heuristic",
+        "temperature": 0.0,
+        "split": "test",
+        "seed_set_hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+        "seed_set": {
+          "manifest_sha256": "7e056e1fae68a3531a5e48b75934e321cbdd540bf5a8e0e0783374bb2eb3a1cf",
+          "n_tasks": 400
+        },
+        "n": 400,
+        "n_prepared": 400,
+        "limited": false,
+        "config_hashes": {
+          "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667",
+          "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+          "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674"
+        },
+        "source_hashes": {
+          "src/vplan/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/__main__.py": "820f018864382fc3cc834aa361b62a98d1b34a34c92ab1b40a6ad77a07972d92",
+          "src/vplan/cli.py": "30164459616169ba8aa2aa62a1b19c51b4dc1f3567274714e7671d077b65f48d",
+          "src/vplan/config.py": "e7afac027fdc784955a77028114c7cc9624d962d203975d25aa482c389229206",
+          "src/vplan/evaluate/__init__.py": "75c848d943a3c749ced5fc73592aa1312866a214431742b0720d47b5dcdc6f67",
+          "src/vplan/evaluate/calibrate.py": "3fa27bbdb2608b830033a3ce7ce7857da492473c7370d3e9652662e4fdab025a",
+          "src/vplan/evaluate/collect.py": "fe459b2560676f1668fd5032f6a00ae3b9c715154712f7512aaededc7fd014df",
+          "src/vplan/evaluate/frames.py": "b7653f980985bf9a24e84c17a588637ff4d1a42d9e5d3d6064277a8f0b879031",
+          "src/vplan/evaluate/gitinfo.py": "93024b54427ecb29e443d599d08636058e0d754e5574f22e1e8874d53402e31f",
+          "src/vplan/evaluate/metrics.py": "330e1f17686601338a25332578b056e1aa0fc405ada80f05974408d7f8eca2d7",
+          "src/vplan/evaluate/pilot.py": "9ab73a4d76ab03c9861e3e2b6cf2b7dd3e83fc71f100d84a467ef13c5169b032",
+          "src/vplan/evaluate/report.py": "797af8d91bd20c34bff0fb030321f2fb09e57ca5dd35bae6a76133742424baba",
+          "src/vplan/evaluate/runner.py": "82bfc1b7d5593f8b0cb01ba1a68974839ff43662b05c0f87386074cfe37831bd",
+          "src/vplan/evaluate/seedsets.py": "906b5c7c48f0a3ead6738febdd9aa40011d7119af16034a270e966f969378bdb",
+          "src/vplan/evaluate/stats.py": "d295c21d242d4918a0832540285ebde9dab55f1178d57bda828951334ccf495b",
+          "src/vplan/evaluate/supervisor.py": "7da1d0fd977a50fbe271243e83699f16342eb10add9ae24ec64be87e6ed4d0c7",
+          "src/vplan/evaluate/worker.py": "0ef24efbca51c9aedac8c99d43c54cdb8f9e8a6af09d16b21ba88b3c3aa076c6",
+          "src/vplan/execute/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/execute/executor.py": "cdf79639168b790bbd0d6e1eef61ec738a9717c1a4509defbd434657bee6b2bc",
+          "src/vplan/geometry.py": "e23aed6eac75bf02e73eb99d933e96f2ad40268d154069f09254525006af6732",
+          "src/vplan/judge/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/judge/judge.py": "d18ab9343643b66691ace6d7a3f9ac7aedce825bf254c08fef4be3f9c4d860a1",
+          "src/vplan/judge/kinematics.py": "132f5702cff628552b38087c989eacd652319f4c7ac7f5b1672366a7ff3f8038",
+          "src/vplan/motion/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/motion/poses.py": "94156df5b31dac94802a02ce7c6beb7310ae73cef3ca3efe867e2bb61857a77a",
+          "src/vplan/motion/trajectory.py": "ba28ff1d1738e487e556cfe2836d89a49d55fef6474d80019c2159c6de74e483",
+          "src/vplan/pipeline.py": "07ef7977481a1dac3acf2486ad62bd5ba05b53dd9ee7147034e8e4d0dc8e2616",
+          "src/vplan/planners/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/planners/heuristic.py": "35ae7744f4c8b6fd1c1e82f1f0be338eb3fa6020d476bc7bcfe50551ea421c87",
+          "src/vplan/planners/nemotron.py": "9bf7b3532ea53ee0b813f9195f5d546631fc859add1b9ea9ee6dd0d0c988a570",
+          "src/vplan/records.py": "e15459ce53203e4c03bc18f28696ca0cd4d139daf9368afde175fa9222d318d7",
+          "src/vplan/repair.py": "f6504aff9292bf75722ee5875046f27af8092fd1273d4a121291d1673eb8db04",
+          "src/vplan/replay.py": "2988b866cb9c208907b5cb04c24f24d471cdd42ddf2cc0eba1445fc2ec4545ad",
+          "src/vplan/robot.py": "0bd69d3c3a205f9f72b1fecdb7e51821e55dc15e639ca4bfd456855f40468070",
+          "src/vplan/sim/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/sim/scene.py": "9a87d561ed51220ae77aca309c7f101e08c2e5e686c251e1d270a7c2cb46dcc6",
+          "src/vplan/tasks/__init__.py": "88ebe639775e15764fc7069f78f1048f7e83fd81010d9394953fde22adb444e7",
+          "src/vplan/tasks/generate.py": "72cc4552cd637ed21ac81cd73d9e3aeadfb1f6f326e3450ac895c8d414adb985",
+          "src/vplan/tasks/generator.py": "e0ed4f3b15bdb155f9d73cc49546301d86d62b17fee8898c32a42efa14a05a88",
+          "src/vplan/tasks/reach.py": "c55ec8b390afd56d2581f1c717afd9d44378829126976048baac9acf47f16a24",
+          "src/vplan/tasks/referents.py": "ebd22edaf514ca1bb09aadc7df658476580437e49c8d33183462852a9a7e8875",
+          "src/vplan/tasks/scenes.py": "9e4d040732abaa2b909ecbda278c6b526decc89f88b536a35be89f353f0d2709",
+          "src/vplan/ui/__init__.py": "6dafec9d44e302f53e7715f7a3fb8cd586964803766c3d979a348a8028490fba",
+          "src/vplan/ui/display.py": "cd30f5b211d100eeae9bf566474218b174ffb053980715604f80f9109babd313",
+          "src/vplan/ui/gradio_app.py": "e5ad6e9ab9b24f313f98ba712b621016c4c69acccc60bda655a4694fe31ea654",
+          "src/vplan/ui/live.py": "5e5d0171c08e01eb06ba029a04ba84002c83516b90c6e196574fe38988d75bfe",
+          "src/vplan/ui/markup.py": "774a25df0e4aa62de76984d1fc7c5c6a90a20f5e0472e56717a42c79f883e52b",
+          "src/vplan/ui/render.py": "a9a5d1f02fe56cd9418a213a2f43a5b179eadf34a11a639f8c34656a7f1f42c4",
+          "src/vplan/ui/sources.py": "3dd54a784a9ce9425e67a3e25c5611b89adc71c734f4004e02f9fd956aa07dd2",
+          "src/vplan/ui/views.py": "42a99c960b87ca9f633d49659abf7a26f1574d7d631e1b9dbda292dad04b3762",
+          "src/vplan/verify/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/verify/checks.py": "b627211867e2e8338dbec0156b700a777c51bafd43784f3f135eae0dda002b4d",
+          "src/vplan/verify/verifier.py": "55a86174dc93eb8ea854115456fbc185682c203da02a76ea8680ee3e5ef5277a",
+          "src/vplan/visual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/visual/cosmos.py": "5356e926e3125f976070b19d235d77ca145c3f241ecd8b3fce9d3f972e745a73",
+          "src/vplan/visual/gate.py": "58ed39dfa44f5e6857b399d02e16252c583e774c6d2b03565aa91a20e82b1613",
+          "src/vplan/visual/predicates.py": "a393331f82c9b2f4538162209f663f6d5faddd5a8e408d1218b19feae6ad4a8d",
+          "src/vplan/visual/render.py": "bf8cbde864c1259aa57ed025a7993024c5baf88f4f1e8401afc281659e89a2f0",
+          "config/judge.json": "afcf5270940fa4b10d27134b72a1d8a174c2553842c446a53c83629c86fe6fce",
+          "config/physics.json": "822e30d19af550dc58958080541a7bfc8cc4fea930a6f496d9b8788710ceb6a8",
+          "config/verifier.json": "2fc092d8b85f57c4d6418b554722a9b4e2dc0c77a13599b713e97a7b45423d2b"
+        },
+        "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+        "source_drift": [],
+        "timeout_s": 600.0,
+        "max_rpm": null,
+        "allow_no_git": false,
+        "frames": false,
+        "git": {
+          "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+          "dirty": true,
+          "source": "git"
+        },
+        "python": "3.10.11",
+        "os": "Windows-10-10.0.26300-SP0",
+        "versions": {
+          "openai": "3.24.0",
+          "pybullet": "3.2.7",
+          "ManipulaPy": "1.4.2",
+          "numpy": "2.2.6",
+          "pydantic": "2.13.5"
+        },
+        "manipulapy": {
+          "version": "1.4.2",
+          "git": {
+            "head": "16387453e585a971b6f0ae44a3d3b2df473f2bd5",
+            "dirty": true,
+            "source": "git"
+          }
+        },
+        "image_digest": null
+      },
+      {
+        "schema_version": 1,
+        "kind": "eval_run",
+        "run_id": "c7-test",
+        "created_utc": "2026-10-18T17:08:38+00:00",
+        "config": 7,
+        "mode": "resample",
+        "k": 3,
+        "planner": {
+          "kind": "llm",
+          "provider": "api.tokenfactory.nebius.com",
+          "model": "nvidia/Nemotron-3_5-Lightning",
+          "temperature": 0.7,
+          "base_url_host": "api.tokenfactory.nebius.com",
+          "call_deadline_s": 60.0
+        },
+        "provider": "api.tokenfactory.nebius.com",
+        "model": "nvidia/Nemotron-3_5-Lightning",
+        "temperature": 0.7,
+        "split": "test",
+        "seed_set_hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+        "seed_set": {
+          "manifest_sha256": "7e056e1fae68a3531a5e48b75934e321cbdd540bf5a8e0e0783374bb2eb3a1cf",
+          "n_tasks": 400
+        },
+        "n": 400,
+        "n_prepared": 400,
+        "limited": false,
+        "config_hashes": {
+          "verifier": "bb44a346dfa5de5b372301d473f9c7c3a385661edcd21dfdd0b1017bbcd7e667",
+          "judge": "5f3d1f6ad4fe63c9ebe19196e2cf170857918fdd214730de4850dcac65f95d34",
+          "physics": "b0688457b503548f467fdc2e71b72b56489e110429c987a885478c414348c674"
+        },
+        "source_hashes": {
+          "src/vplan/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/__main__.py": "820f018864382fc3cc834aa361b62a98d1b34a34c92ab1b40a6ad77a07972d92",
+          "src/vplan/cli.py": "30164459616169ba8aa2aa62a1b19c51b4dc1f3567274714e7671d077b65f48d",
+          "src/vplan/config.py": "e7afac027fdc784955a77028114c7cc9624d962d203975d25aa482c389229206",
+          "src/vplan/evaluate/__init__.py": "75c848d943a3c749ced5fc73592aa1312866a214431742b0720d47b5dcdc6f67",
+          "src/vplan/evaluate/calibrate.py": "3fa27bbdb2608b830033a3ce7ce7857da492473c7370d3e9652662e4fdab025a",
+          "src/vplan/evaluate/collect.py": "fe459b2560676f1668fd5032f6a00ae3b9c715154712f7512aaededc7fd014df",
+          "src/vplan/evaluate/frames.py": "b7653f980985bf9a24e84c17a588637ff4d1a42d9e5d3d6064277a8f0b879031",
+          "src/vplan/evaluate/gitinfo.py": "93024b54427ecb29e443d599d08636058e0d754e5574f22e1e8874d53402e31f",
+          "src/vplan/evaluate/metrics.py": "330e1f17686601338a25332578b056e1aa0fc405ada80f05974408d7f8eca2d7",
+          "src/vplan/evaluate/pilot.py": "9ab73a4d76ab03c9861e3e2b6cf2b7dd3e83fc71f100d84a467ef13c5169b032",
+          "src/vplan/evaluate/report.py": "797af8d91bd20c34bff0fb030321f2fb09e57ca5dd35bae6a76133742424baba",
+          "src/vplan/evaluate/runner.py": "82bfc1b7d5593f8b0cb01ba1a68974839ff43662b05c0f87386074cfe37831bd",
+          "src/vplan/evaluate/seedsets.py": "906b5c7c48f0a3ead6738febdd9aa40011d7119af16034a270e966f969378bdb",
+          "src/vplan/evaluate/stats.py": "d295c21d242d4918a0832540285ebde9dab55f1178d57bda828951334ccf495b",
+          "src/vplan/evaluate/supervisor.py": "7da1d0fd977a50fbe271243e83699f16342eb10add9ae24ec64be87e6ed4d0c7",
+          "src/vplan/evaluate/worker.py": "0ef24efbca51c9aedac8c99d43c54cdb8f9e8a6af09d16b21ba88b3c3aa076c6",
+          "src/vplan/execute/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/execute/executor.py": "cdf79639168b790bbd0d6e1eef61ec738a9717c1a4509defbd434657bee6b2bc",
+          "src/vplan/geometry.py": "e23aed6eac75bf02e73eb99d933e96f2ad40268d154069f09254525006af6732",
+          "src/vplan/judge/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/judge/judge.py": "d18ab9343643b66691ace6d7a3f9ac7aedce825bf254c08fef4be3f9c4d860a1",
+          "src/vplan/judge/kinematics.py": "132f5702cff628552b38087c989eacd652319f4c7ac7f5b1672366a7ff3f8038",
+          "src/vplan/motion/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/motion/poses.py": "94156df5b31dac94802a02ce7c6beb7310ae73cef3ca3efe867e2bb61857a77a",
+          "src/vplan/motion/trajectory.py": "ba28ff1d1738e487e556cfe2836d89a49d55fef6474d80019c2159c6de74e483",
+          "src/vplan/pipeline.py": "07ef7977481a1dac3acf2486ad62bd5ba05b53dd9ee7147034e8e4d0dc8e2616",
+          "src/vplan/planners/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/planners/heuristic.py": "35ae7744f4c8b6fd1c1e82f1f0be338eb3fa6020d476bc7bcfe50551ea421c87",
+          "src/vplan/planners/nemotron.py": "9bf7b3532ea53ee0b813f9195f5d546631fc859add1b9ea9ee6dd0d0c988a570",
+          "src/vplan/records.py": "e15459ce53203e4c03bc18f28696ca0cd4d139daf9368afde175fa9222d318d7",
+          "src/vplan/repair.py": "f6504aff9292bf75722ee5875046f27af8092fd1273d4a121291d1673eb8db04",
+          "src/vplan/replay.py": "2988b866cb9c208907b5cb04c24f24d471cdd42ddf2cc0eba1445fc2ec4545ad",
+          "src/vplan/robot.py": "0bd69d3c3a205f9f72b1fecdb7e51821e55dc15e639ca4bfd456855f40468070",
+          "src/vplan/sim/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/sim/scene.py": "9a87d561ed51220ae77aca309c7f101e08c2e5e686c251e1d270a7c2cb46dcc6",
+          "src/vplan/tasks/__init__.py": "88ebe639775e15764fc7069f78f1048f7e83fd81010d9394953fde22adb444e7",
+          "src/vplan/tasks/generate.py": "72cc4552cd637ed21ac81cd73d9e3aeadfb1f6f326e3450ac895c8d414adb985",
+          "src/vplan/tasks/generator.py": "e0ed4f3b15bdb155f9d73cc49546301d86d62b17fee8898c32a42efa14a05a88",
+          "src/vplan/tasks/reach.py": "c55ec8b390afd56d2581f1c717afd9d44378829126976048baac9acf47f16a24",
+          "src/vplan/tasks/referents.py": "ebd22edaf514ca1bb09aadc7df658476580437e49c8d33183462852a9a7e8875",
+          "src/vplan/tasks/scenes.py": "9e4d040732abaa2b909ecbda278c6b526decc89f88b536a35be89f353f0d2709",
+          "src/vplan/ui/__init__.py": "6dafec9d44e302f53e7715f7a3fb8cd586964803766c3d979a348a8028490fba",
+          "src/vplan/ui/display.py": "cd30f5b211d100eeae9bf566474218b174ffb053980715604f80f9109babd313",
+          "src/vplan/ui/gradio_app.py": "e5ad6e9ab9b24f313f98ba712b621016c4c69acccc60bda655a4694fe31ea654",
+          "src/vplan/ui/live.py": "5e5d0171c08e01eb06ba029a04ba84002c83516b90c6e196574fe38988d75bfe",
+          "src/vplan/ui/markup.py": "774a25df0e4aa62de76984d1fc7c5c6a90a20f5e0472e56717a42c79f883e52b",
+          "src/vplan/ui/render.py": "a9a5d1f02fe56cd9418a213a2f43a5b179eadf34a11a639f8c34656a7f1f42c4",
+          "src/vplan/ui/sources.py": "3dd54a784a9ce9425e67a3e25c5611b89adc71c734f4004e02f9fd956aa07dd2",
+          "src/vplan/ui/views.py": "42a99c960b87ca9f633d49659abf7a26f1574d7d631e1b9dbda292dad04b3762",
+          "src/vplan/verify/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/verify/checks.py": "b627211867e2e8338dbec0156b700a777c51bafd43784f3f135eae0dda002b4d",
+          "src/vplan/verify/verifier.py": "55a86174dc93eb8ea854115456fbc185682c203da02a76ea8680ee3e5ef5277a",
+          "src/vplan/visual/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "src/vplan/visual/cosmos.py": "5356e926e3125f976070b19d235d77ca145c3f241ecd8b3fce9d3f972e745a73",
+          "src/vplan/visual/gate.py": "58ed39dfa44f5e6857b399d02e16252c583e774c6d2b03565aa91a20e82b1613",
+          "src/vplan/visual/predicates.py": "a393331f82c9b2f4538162209f663f6d5faddd5a8e408d1218b19feae6ad4a8d",
+          "src/vplan/visual/render.py": "bf8cbde864c1259aa57ed025a7993024c5baf88f4f1e8401afc281659e89a2f0",
+          "config/judge.json": "afcf5270940fa4b10d27134b72a1d8a174c2553842c446a53c83629c86fe6fce",
+          "config/physics.json": "822e30d19af550dc58958080541a7bfc8cc4fea930a6f496d9b8788710ceb6a8",
+          "config/verifier.json": "2fc092d8b85f57c4d6418b554722a9b4e2dc0c77a13599b713e97a7b45423d2b"
+        },
+        "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+        "source_drift": [],
+        "timeout_s": 600.0,
+        "max_rpm": 15.0,
+        "allow_no_git": false,
+        "frames": false,
+        "git": {
+          "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+          "dirty": true,
+          "source": "git"
+        },
+        "python": "3.10.11",
+        "os": "Windows-10-10.0.26300-SP0",
+        "versions": {
+          "openai": "3.24.0",
+          "pybullet": "3.2.7",
+          "ManipulaPy": "1.4.2",
+          "numpy": "2.2.6",
+          "pydantic": "2.13.5"
+        },
+        "manipulapy": {
+          "version": "1.4.2",
+          "git": {
+            "head": "16387453e585a971b6f0ae44a3d3b2df473f2bd5",
+            "dirty": true,
+            "source": "git"
+          }
+        },
+        "image_digest": null
+      }
+    ]
+  }
+}
