@@ -1,0 +1,168 @@
+"""W3.5 replay mode (spec §15, D41): recorded attempts from W3.1 runs, pilot runs and UI recordings, replayed with no
+keys, no GPU and no network."""
+import json
+
+import pytest
+
+from tests.ui_fixtures import basic_result, basic_task, enclosed_result, magenta_pixels, write_eval_run
+from vplan import records
+from vplan.ui import display, live, render, sources
+
+
+@pytest.fixture
+def recording(tmp_path):
+    result, _ = basic_result()
+    return live.save_bundle(tmp_path / "ui", result.task, result.record, planner=live.heuristic_option().label,
+                            cosmos_url=None)
+
+
+def test_a_recording_round_trips(recording):
+    result, _ = basic_result()
+    assert sources.source_kind(recording) == "recording"
+    (ref,) = sources.list_cases(recording)
+    case = sources.load_case(recording)
+    assert ref.case_id == recording.name and case.record == result.record
+    assert case.task == result.task.task and case.oracle == result.task.oracle and case.seed == 0
+    assert dict(case.provenance)["Cosmos gate"] == "off"
+
+
+def test_a_folder_of_recordings_lists_newest_first_and_skips_other_json(recording, tmp_path):
+    result, _ = enclosed_result()
+    second = live.save_bundle(recording.parent, result.task, result.record, planner="heuristic", cosmos_url=None)
+    (recording.parent / "notes.json").write_text("{}", encoding="utf-8")
+    refs = sources.list_cases(recording.parent)
+    assert [r.case_id for r in refs] == [second.name, recording.name]
+    assert sources.load_case(recording.parent, second.name).record.outcome == "budget_exhausted"
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(recording.parent, "../escape.json")
+
+
+def test_replay_display_plays_back_the_recorded_execution(recording):
+    shown = display.replay_display(sources.load_case(recording))
+    assert "data:image/gif;base64," in shown.execution_html and "no physics, no keys" in shown.execution_html
+    assert "SUCCESS" in shown.judge_html and "without the Cosmos gate" in shown.banner_html
+    assert "UI recording" in shown.status_html and "Ground truth" in shown.status_html
+    assert shown.status_html.count("Pick the red cube and place it in the bin.") == 1  # the label already holds it
+
+
+def test_replay_rerenders_highlights_for_blocked_rounds(tmp_path):
+    result, _ = enclosed_result()
+    path = live.save_bundle(tmp_path, result.task, result.record, planner="heuristic", cosmos_url=None)
+    shown = display.replay_display(sources.load_case(path))
+    assert shown.findings and any(magenta_pixels(img) > 50 for img, _ in shown.findings)
+    assert "nothing was executed" in shown.execution_html and "Budget exhausted" in shown.status_html
+
+
+def test_replay_shows_a_cosmos_report_and_rerenders_its_frames(tmp_path):
+    result, _ = basic_result()
+    check = records.VisualCheck(stage="grasp", views=("front_oblique", "top"), verdict=records.VisualVerdict(
+        verdict="pass", reason="between the fingers", latency_s=1.2, raw=""))
+    report = records.VisualGateReport(status="pass", checks=(check,))
+    rnd = result.record.rounds[0]
+    with_gate = result.record.model_copy(update={"rounds": (rnd.model_copy(update={
+        "evaluation": rnd.evaluation.model_copy(update={"visual": report})}),)})
+    path = live.save_bundle(tmp_path, result.task, with_gate, planner="heuristic", cosmos_url="http://127.0.0.1:8000")
+    shown = display.replay_display(sources.load_case(path), render_execution=False)
+    assert [c for _, c in shown.cosmos] == ["round 0 grasp front_oblique: pass (learned check) (re-rendered)",
+                                           "round 0 grasp top: pass (learned check) (re-rendered)"]
+    assert "not verification" in shown.banner_html and "between the fingers" in shown.timeline_html
+
+
+def test_a_w31_run_directory_replays_with_its_seed_set(tmp_path):
+    result, _ = basic_result()
+    run, seeds = write_eval_run(tmp_path, basic_task(), result.record)
+    (ref,) = sources.list_cases(run)
+    assert ref.case_id == "5:dev:0" and "(success)" in ref.label
+    case = sources.load_case(run, "5:dev:0")
+    assert case.task == basic_task().task and case.record.outcome == "executed" and case.seed == 0
+    assert dict(case.provenance)["source"] == "W3.1 run run"
+    shown = display.replay_display(case, render_execution=False)
+    assert "SUCCESS" in shown.judge_html and "5:dev:0" in shown.status_html
+
+
+def test_a_w31_run_refuses_a_seed_set_that_does_not_hash_to_the_run(tmp_path):
+    result, _ = basic_result()
+    run, seeds = write_eval_run(tmp_path, basic_task(), result.record)
+    (seeds / "oracle.jsonl").write_text((seeds / "oracle.jsonl").read_text(encoding="utf-8") + "\n",
+                                        encoding="utf-8")
+    with pytest.raises(sources.ReplayError, match="hash"):
+        sources.load_case(run)
+
+
+def test_a_w31_run_takes_an_explicit_seed_dir(tmp_path):
+    result, _ = basic_result()
+    run, seeds = write_eval_run(tmp_path, basic_task(), result.record)
+    moved = seeds.rename(tmp_path / "elsewhere")
+    with pytest.raises(sources.ReplayError, match="seed set"):
+        sources.load_case(run)
+    assert sources.load_case(run, seed_dir=moved).record.outcome == "executed"
+
+
+def test_a_w31_row_without_a_record_cannot_be_replayed(tmp_path):
+    result, _ = basic_result()
+    run, _ = write_eval_run(tmp_path, basic_task(), result.record)
+    crash = records.EvalAttempt(attempt_id="5:dev:0", config=5, split="dev", task_index=0, task_id="dev_00000000",
+                                session=0, outcome="sim_error", tries=1, wall_s=600.0, error_type="worker_timeout")
+    (run / "attempts.jsonl").write_text(crash.model_dump_json() + "\n", encoding="utf-8")
+    with pytest.raises(sources.ReplayError, match="worker_timeout"):
+        sources.load_case(run)
+
+
+def test_a_pilot_run_replays_each_arm(tmp_path):
+    result, _ = basic_result()
+    task = basic_task()
+    cohort = tmp_path / "cohort"
+    run = cohort / "runs" / "r1"
+    run.mkdir(parents=True)
+    (cohort / "tasks.jsonl").write_text(json.dumps({"task_id": "t1", "seed": 7, "stratum": "obstacle",
+                                                    "task": task.task.model_dump(mode="json")}) + "\n",
+                                        encoding="utf-8")
+    (cohort / "oracle.jsonl").write_text(json.dumps({"task_id": "t1", "oracle": task.oracle.model_dump(mode="json")})
+                                         + "\n", encoding="utf-8")
+    import hashlib
+    files = {n: hashlib.sha256((cohort / n).read_bytes()).hexdigest() for n in ("tasks.jsonl", "oracle.jsonl")}
+    (cohort / "manifest.json").write_text(json.dumps({"files": files}), encoding="utf-8")
+    (run / "run.json").write_text(json.dumps({"provider": "openrouter", "model": "nvidia/ultra:free"}),
+                                  encoding="utf-8")
+    first = result.record.rounds[0]
+    arm = {"outcome": "executed", "rounds": (first,), "call_count": 1, "total_tokens": None, "known_total_tokens": 0,
+           "missing_usage_calls": 1, "latency_s": 0.0}
+    paired = records.PairedResult(task_id="t1", initial=first, repair=records.ArmResult(arm="repair", **arm),
+                                  resample=records.ArmResult(arm="resample", **arm), unique_call_count=1,
+                                  unique_total_tokens=None, unique_known_total_tokens=0, unique_missing_usage_calls=1,
+                                  unique_latency_s=0.0, config_hashes=result.record.config_hashes)
+    (run / "results.jsonl").write_text(paired.model_dump_json() + "\n", encoding="utf-8")
+    assert [r.case_id for r in sources.list_cases(run)] == ["t1:repair", "t1:resample"]
+    case = sources.load_case(run, "t1:resample")
+    assert case.record.mode == "resample" and case.record.success and case.seed == 7
+    assert dict(case.provenance)["planner"] == "openrouter/nvidia/ultra:free"
+
+
+@pytest.mark.parametrize("make", ["missing", "seed_set", "empty_dir"])
+def test_unreplayable_paths_are_refused_with_a_message(tmp_path, make):
+    path = tmp_path / "x"
+    if make == "seed_set":
+        path.mkdir()
+        (path / "manifest.json").write_text(json.dumps({"kind": "seed_set"}), encoding="utf-8")
+    elif make == "empty_dir":
+        path.mkdir()
+    with pytest.raises(sources.ReplayError):
+        sources.list_cases(path)
+
+
+def test_replay_of_a_record_from_another_scene_reports_instead_of_crashing(recording):
+    case = sources.load_case(recording)
+    other = live.generated_task(1, "impossible 3: target enclosed")
+    moved = sources.ReplayCase(case.case_id, case.label, other.task, None, case.record, 0, "test")
+    shown = display.replay_display(moved)
+    assert "cannot play back" in shown.execution_html and "different scene" in shown.execution_html
+
+
+def test_execution_frames_sample_the_recording_at_the_gif_rate():
+    result, _ = basic_result()
+    rec = result.record.rounds[-1].evaluation.record
+    frames = render.execution_frames(rec, basic_task().task.scene, fps=10)
+    n = len(rec.q_replay)
+    assert len(frames) == len(range(0, n, 6)) + ((n - 1) % 6 != 0)
+    assert frames[0].shape == (render.UI_SIZE_PX, render.UI_SIZE_PX, 3)
+    assert render.gif_bytes(frames[:3]).startswith(b"GIF89a")
