@@ -1,6 +1,7 @@
 """W3.5 Gradio wiring and `vplan ui`: the app builds without a browser, its handlers drive both modes, the replay
 starts with no .env, and LLM credentials come only from --env-file behind the free-model guard (D33)."""
 import os
+import threading
 
 import numpy as np
 import pytest
@@ -180,6 +181,37 @@ def test_an_unexpected_failure_is_shown_without_the_key(monkeypatch):
 # ---- review fixes: the simulator lock, launch pins, replay roots, host warning ----------------------------------
 
 KIND3 = "impossible 3: target enclosed"
+
+
+def test_an_attempt_that_outlives_its_page_keeps_the_simulator_until_it_ends(monkeypatch, tmp_path):
+    """Gradio frees its concurrency slot when the browser goes away, but the worker thread keeps simulating; new
+    simulator work must wait for it, not run beside it (global numpy RNG, shared Panda model)."""
+    result, _ = basic_result()
+    recording = live.save_bundle(tmp_path, result.task, result.record, planner="h", cosmos_url=None)
+    started, release = threading.Event(), threading.Event()
+
+    def slow_run_live(task, option, **kwargs):
+        started.set()
+        release.wait(30)
+        raise RuntimeError("ended by the test")
+
+    monkeypatch.setattr(live, "run_live", slow_run_live)
+    monkeypatch.setattr(app, "BUSY_WAIT_S", 0.1)
+    settings = app.UISettings(record_dir=None, replay=str(tmp_path))
+    state = (app.task_key(app.SOURCES[2], 1, KIND3, ""), live.generated_task(1, KIND3))
+    first = app.run_attempt(settings, state, app.SOURCES[2], 1, KIND3, "", settings.planners[0].label, 1)
+    next(first)
+    assert started.wait(10)
+    first.close()  # the page closed: the event ends, the worker does not
+    try:
+        (busy,) = app.run_attempt(settings, state, app.SOURCES[2], 1, KIND3, "", settings.planners[0].label, 1)
+        assert "still running" in busy[0]
+        assert "still running" in app.load_task(app.SOURCES[0], 0, "feasible", live.BASIC_INSTRUCTION)[1]
+        assert "still running" in app.replay_show(settings, str(recording), None)[0]
+    finally:
+        release.set()
+    assert app.SIM_LOCK.acquire(timeout=10)  # the worker released it when run_live ended
+    app.SIM_LOCK.release()
 
 
 def test_replay_paths_outside_the_roots_are_refused(tmp_path, monkeypatch):

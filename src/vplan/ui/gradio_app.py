@@ -1,8 +1,10 @@
 """The Gradio layer of the W3.5 UI (spec §15, D22): two tabs, Live and Replay, laid out from ui.display panels.
 
 Handlers are plain module functions (load_task, run_attempt, replay_open, replay_show) so tests drive them without a
-browser; build_app only wires them to components. Everything that touches PyBullet runs in one Gradio concurrency
-group of size one, so two browser tabs never interleave simulator work. Telemetry and Gradio's version check are off
+browser; build_app only wires them to components. Simulator work is serialized by SIM_LOCK, a process-wide lock: a
+live attempt's worker thread holds it until run_live returns, even after its page closed and Gradio freed the event's
+concurrency slot, so a second attempt, a scene load or a replay waits briefly and is then refused with a message
+instead of running beside it (motion/trajectory.py reseeds numpy's global RNG; the Panda model is shared). Telemetry and Gradio's version check are off
 (GRADIO_ANALYTICS_ENABLED), and the theme uses system fonts, so the page loads nothing from the internet: replay works
 offline, with no keys and no GPU."""
 from __future__ import annotations
@@ -22,7 +24,11 @@ from vplan.ui import display, live, markup, render, sources
 from vplan.ui.display import Display
 
 TITLE = "vplan: LLMs plan, physics verifies"
-SIM = "sim"  # the concurrency group of every handler that drives PyBullet
+SIM = "sim"  # the Gradio concurrency group of every handler that drives PyBullet (one at a time per event queue)
+SIM_LOCK = threading.Lock()  # the simulator itself; released by the live worker thread, not by the Gradio event
+BUSY_WAIT_S = 2.0
+BUSY = ("the simulator is still running an earlier attempt (it continues after its page closes, until its planner "
+        "calls and execution finish); try again when it is done")
 SOURCES = ("basic scene", "basic scene with wall", "generated task (seed)")
 FONTS = ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"]
 MONO = ["ui-monospace", "Consolas", "Menlo", "monospace"]
@@ -72,6 +78,15 @@ def make_task(source: str, seed, kind: str, instruction: str) -> live.LiveTask:
 
 def load_task(source: str, seed, kind: str, instruction: str):
     """(scene image, task panel, instruction, task state). A generated task fills in its own instruction."""
+    if not SIM_LOCK.acquire(timeout=BUSY_WAIT_S):
+        return None, markup.banner_html(display.Banner("warning", BUSY)), instruction, None
+    try:
+        return _load_task(source, seed, kind, instruction)
+    finally:
+        SIM_LOCK.release()
+
+
+def _load_task(source: str, seed, kind: str, instruction: str):
     try:
         task = make_task(source, seed, kind, instruction)
     except live.LiveError as exc:
@@ -90,33 +105,43 @@ def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instr
     if option is None:
         yield error_values(f"unknown planner {planner_label!r}")
         return
-    key = task_key(source, seed, kind, instruction if source != SOURCES[2] else "")
-    task = state[1] if state is not None and state[0] == key else None
-    if task is None:
-        try:
-            task = make_task(source, seed, kind, instruction)
-        except live.LiveError as exc:
-            yield error_values(str(exc))
-            return
-    if source == SOURCES[2] and instruction.strip() and instruction.strip() != task.task.instruction:
-        yield error_values("a generated task's instruction is fixed by its oracle; choose a basic scene to type your "
-                           "own instruction")
+    if not SIM_LOCK.acquire(timeout=BUSY_WAIT_S):
+        yield error_values(BUSY)
         return
-    k = int(k)
-    progress = display.LiveProgress(task, option.label, settings.cosmos_url, k)
-    events: queue.Queue = queue.Queue()
-    outcome: dict = {}
+    handed_over = False  # once the worker starts, it alone releases SIM_LOCK
+    try:
+        key = task_key(source, seed, kind, instruction if source != SOURCES[2] else "")
+        task = state[1] if state is not None and state[0] == key else None
+        if task is None:
+            try:
+                task = make_task(source, seed, kind, instruction)
+            except live.LiveError as exc:
+                yield error_values(str(exc))
+                return
+        if source == SOURCES[2] and instruction.strip() and instruction.strip() != task.task.instruction:
+            yield error_values("a generated task's instruction is fixed by its oracle; choose a basic scene to type "
+                               "your own instruction")
+            return
+        k = int(k)
+        progress = display.LiveProgress(task, option.label, settings.cosmos_url, k)
+        events: queue.Queue = queue.Queue()
+        outcome: dict = {}
 
-    def work() -> None:
-        try:
-            outcome["result"] = live.run_live(task, option, k=k, cosmos_url=settings.cosmos_url,
-                                              record_dir=settings.record_dir, on_event=events.put)
-        except Exception as exc:  # shown in the UI; the attempt's own failures are outcomes, not exceptions
-            outcome["error"] = exc
-        finally:
-            events.put(None)
+        def work() -> None:
+            try:
+                outcome["result"] = live.run_live(task, option, k=k, cosmos_url=settings.cosmos_url,
+                                                  record_dir=settings.record_dir, on_event=events.put)
+            except Exception as exc:  # shown in the UI; the attempt's own failures are outcomes, not exceptions
+                outcome["error"] = exc
+            finally:
+                SIM_LOCK.release()  # here, not in the event: a closed page must not free the simulator early
+                events.put(None)
 
-    threading.Thread(target=work, name="vplan-live", daemon=True).start()
+        threading.Thread(target=work, name="vplan-live", daemon=True).start()
+        handed_over = True
+    finally:
+        if not handed_over:
+            SIM_LOCK.release()
     yield progress.display().values()
     while (event := events.get()) is not None:
         progress.apply(event)
@@ -160,11 +185,16 @@ def replay_show(settings: UISettings, path: str, case_id: str | None, seed_dir: 
     for value in (path, seed_dir):
         if value and (problem := _path_error(value)):
             return error_values(problem)
+    if not SIM_LOCK.acquire(timeout=BUSY_WAIT_S):
+        return error_values(BUSY)
     try:
-        case = sources.load_case(path, case_id or None, seed_dir=seed_dir, roots=settings.replay_roots())
-    except sources.ReplayError as exc:
-        return error_values(str(exc))
-    return display.replay_display(case).values()
+        try:
+            case = sources.load_case(path, case_id or None, seed_dir=seed_dir, roots=settings.replay_roots())
+        except sources.ReplayError as exc:
+            return error_values(str(exc))
+        return display.replay_display(case).values()
+    finally:
+        SIM_LOCK.release()
 
 
 # ---- layout -------------------------------------------------------------------------------------------------------
