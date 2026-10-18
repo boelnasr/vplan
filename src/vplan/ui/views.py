@@ -40,6 +40,8 @@ PREDICATES: tuple[tuple[str, str], ...] = (
 COSMOS_OFF = ("Cosmos visual check off (no --cosmos-url): approved plans execute on the geometric checks only.")
 COSMOS_DOWN = "COSMOS UNAVAILABLE - proceeding on the geometric checks only"
 COSMOS_ON = "Cosmos: learned visual check (not verification; D34 pilot balanced accuracy 0.70)"
+COSMOS_SKIPPED = ("Cosmos gate skipped (the instruction names no single object to ask about): approved plans execute on "
+                  "the geometric checks only.")
 COSMOS_NONE = ("This attempt ran without the Cosmos gate: on the geometric checks only (the evaluation path never "
                "uses Cosmos, spec §5.1).")
 
@@ -320,10 +322,13 @@ def cosmos_banner(cosmos_url: str | None, reports: Iterable[VisualGateReport | N
     the geometric checks only, and the banner must say so; a working gate is labelled a learned check."""
     if not cosmos_url:
         return Banner("warning", COSMOS_OFF)
-    down = [r for r in reports if r is not None and r.status == "unavailable"]
+    reports = [r for r in reports if r is not None]
+    down = [r for r in reports if r.status == "unavailable"]
     if down:
         note = down[-1].note
         return Banner("warning", f"{COSMOS_DOWN} ({note})" if note else COSMOS_DOWN)
+    if reports and all(r.status == "skipped" for r in reports):  # no stage was asked: same as no gate
+        return Banner("warning", COSMOS_SKIPPED)
     return Banner("info", COSMOS_ON)
 
 

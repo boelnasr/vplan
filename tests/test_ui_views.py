@@ -223,3 +223,12 @@ def test_banner_markup_is_escaped_and_marked_by_level():
     html = markup.banner_html(views.Banner("warning", "COSMOS UNAVAILABLE - <offline>"))
     assert "&lt;offline&gt;" in html and "warning" in html
     assert markup.banner_html(None) == ""
+
+
+def test_a_skipped_gate_reads_like_the_gate_being_off():
+    skipped = records.VisualGateReport(status="skipped", note="no single instructed object")
+    banner = views.cosmos_banner("http://127.0.0.1:8000/v1", [skipped])
+    assert banner.level == "warning" and "geometric checks only" in banner.text and "skipped" in banner.text
+    assert "learned visual check" not in banner.text
+    record = attempt(rnd(0, PLAN, executed(visual=skipped)))
+    assert "geometric checks only" in views.replay_cosmos_banner(record).text
