@@ -52,8 +52,8 @@ def test_replay_starts_without_any_env_file_and_never_reads_one(tmp_path, monkey
     (settings,) = launched
     assert settings.replay == relative and [o.llm for o in settings.planners] == [False]
     app.build_app(settings)  # the layout builds without a browser
-    case, _ = app.replay_open(settings.replay)
-    values = app.replay_show(settings.replay, case["value"])
+    case, _ = app.replay_open(settings, settings.replay)
+    values = app.replay_show(settings, settings.replay, case["value"])
     shown = dict(zip(("banner", "status", "plan", "timeline", "findings", "cosmos", "execution", "judge"), values))
     assert "data:image/gif;base64," in shown["execution"] and "SUCCESS" in shown["judge"]
     assert SECRET not in capsys.readouterr().out
@@ -96,7 +96,7 @@ def test_a_bad_replay_path_is_refused_before_the_server_starts(tmp_path, launche
 def test_wsl_paths_are_refused_on_windows(launched, capsys):
     assert cli.main(["ui", "--replay", "/mnt/c/runs/x"]) == 2 and not launched
     assert "WSL path" in capsys.readouterr().err
-    assert "WSL path" in app.replay_open("/mnt/c/runs/x")[1]
+    assert "WSL path" in app.replay_open(app.UISettings(), "/mnt/c/runs/x")[1]
 
 
 def test_cli_settings_carry_cosmos_host_port_and_recording(tmp_path, launched):
@@ -133,11 +133,12 @@ def test_live_handlers_report_bad_input_in_the_banner():
 
 
 def test_replay_handlers_report_problems_in_the_panels(tmp_path):
-    case, info = app.replay_open("")
+    settings = app.UISettings(replay=str(tmp_path))
+    case, info = app.replay_open(settings, "")
     assert case["choices"] == [] and "enter a path" in info
-    case, info = app.replay_open(str(tmp_path / "missing"))
+    case, info = app.replay_open(settings, str(tmp_path / "missing"))
     assert "does not exist" in info
-    assert "does not exist" in app.replay_show(str(tmp_path / "missing"), None)[0]
+    assert "does not exist" in app.replay_show(settings, str(tmp_path / "missing"), None)[0]
 
 
 def test_the_app_builds_with_both_tabs_and_the_llm_planner_preselected(tmp_path):
@@ -173,3 +174,44 @@ def test_an_unexpected_failure_is_shown_without_the_key(monkeypatch):
                                  option.label, 1))
     banner = steps[-1][0]
     assert "the attempt stopped: RuntimeError" in banner and SECRET not in banner and "[REDACTED]" in banner
+
+
+
+# ---- review fixes: the simulator lock, launch pins, replay roots, host warning ----------------------------------
+
+KIND3 = "impossible 3: target enclosed"
+
+
+def test_replay_paths_outside_the_roots_are_refused(tmp_path, monkeypatch):
+    result, _ = basic_result()
+    outside = live.save_bundle(tmp_path / "elsewhere", result.task, result.record, planner="h", cosmos_url=None)
+    inside = tmp_path / "work"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+    settings = app.UISettings(record_dir="runs/ui")
+    case, info = app.replay_open(settings, str(outside))
+    assert case["choices"] == [] and "outside" in info
+    assert "outside" in app.replay_show(settings, str(outside), outside.name)[0]
+    assert "outside" in app.replay_show(settings, "runs/ui", None, str(tmp_path / "elsewhere"))[0]  # seed dir too
+    allowed = app.UISettings(record_dir="runs/ui", replay=str(outside.parent))
+    case, _ = app.replay_open(allowed, str(outside))
+    assert case["value"] == outside.name
+
+
+@pytest.mark.parametrize("path", ["\\\\server\\share\\runs", "//server/share/runs"])
+def test_network_paths_are_refused(path):
+    settings = app.UISettings(replay=path)
+    assert "network" in app.replay_open(settings, path)[1]
+    assert "network" in app.replay_show(settings, path, None)[0]
+
+
+def test_cli_refuses_a_network_replay_path(launched, capsys):
+    assert cli.main(["ui", "--replay", "//server/share/runs"]) == 2 and not launched
+    assert "network" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("host, warned", [("127.0.0.1", False), ("localhost", False), ("::1", False),
+                                          ("0.0.0.0", True), ("172.18.80.1", True)])
+def test_a_non_loopback_host_prints_a_warning(host, warned, launched, capsys):
+    assert cli.main(["ui", "--host", host]) == 0
+    assert ("not a loopback address" in capsys.readouterr().err) is warned

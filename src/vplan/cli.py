@@ -190,6 +190,7 @@ def _report(args) -> int:
 
 def _ui(args) -> int:
     """vplan ui: exit code 2 when refused before the server starts. Credentials only from --env-file (D33)."""
+    import ipaddress
     import math
 
     from vplan.evaluate import pilot
@@ -198,6 +199,8 @@ def _ui(args) -> int:
         for name in ("replay", "seed_dir", "env_file", "record_dir"):
             if getattr(args, name, None):
                 pilot.check_path_arg(getattr(args, name))
+                if name != "env_file":
+                    sources.check_path(getattr(args, name))  # refuses network (UNC) paths
         given = [flag for flag, on in (("--model", args.model), ("--allow-paid", args.allow_paid),
                                        ("--temperature", args.temperature is not None)) if on]
         if given and not args.env_file:
@@ -218,6 +221,13 @@ def _ui(args) -> int:
     settings = app.UISettings(planners=tuple(planners), cosmos_url=args.cosmos_url, replay=args.replay,
                               seed_dir=args.seed_dir, record_dir=None if args.no_record else args.record_dir,
                               host=args.host, port=args.port)
+    try:
+        loopback = args.host == "localhost" or ipaddress.ip_address(args.host).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        print(f"warning: --host {args.host} is not a loopback address: anyone who can reach this port can run the "
+              "planner (with its credentials) and replay files under the replay roots", file=sys.stderr, flush=True)
     cosmos = f"Cosmos gate at {args.cosmos_url}" if args.cosmos_url else "no Cosmos gate (geometric checks only)"
     print(f"vplan ui: http://{args.host}:{args.port} - planners: {'; '.join(o.label for o in planners)}; {cosmos}",
           flush=True)

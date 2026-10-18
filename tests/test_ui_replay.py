@@ -166,3 +166,70 @@ def test_execution_frames_sample_the_recording_at_the_gif_rate():
     assert len(frames) == len(range(0, n, 6)) + ((n - 1) % 6 != 0)
     assert frames[0].shape == (render.UI_SIZE_PX, render.UI_SIZE_PX, 3)
     assert render.gif_bytes(frames[:3]).startswith(b"GIF89a")
+
+
+# ---- damaged files: always a ReplayError with a message, never a crash -------------------------------------------
+
+def _damage_attempts(tmp_path, line):
+    result, _ = basic_result()
+    run, _ = write_eval_run(tmp_path, basic_task(), result.record)
+    (run / "attempts.jsonl").write_text(line + "\n", encoding="utf-8")
+    return run
+
+
+@pytest.mark.parametrize("line", ["[1]", '{"outcome": "executed"}', '"text"', '{"attempt_id": 5, "outcome": 1}'])
+def test_damaged_attempt_rows_are_refused_with_a_message(tmp_path, line):
+    run = _damage_attempts(tmp_path, line)
+    with pytest.raises(sources.ReplayError):
+        sources.list_cases(run)
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(run)
+
+
+def test_a_damaged_run_manifest_is_refused(tmp_path):
+    result, _ = basic_result()
+    run, _ = write_eval_run(tmp_path, basic_task(), result.record)
+    manifest = json.loads((run / "manifest.json").read_text(encoding="utf-8"))
+    (run / "manifest.json").write_text(json.dumps({**manifest, "seed_set": [1]}), encoding="utf-8")
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(run)
+
+
+def test_a_pilot_row_without_a_task_id_is_refused(tmp_path):
+    run = tmp_path / "cohort" / "runs" / "r1"
+    run.mkdir(parents=True)
+    (run / "run.json").write_text("{}", encoding="utf-8")
+    (run / "results.jsonl").write_text('{"repair": {"outcome": "executed"}}\n', encoding="utf-8")
+    with pytest.raises(sources.ReplayError):
+        sources.list_cases(run)
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(run, "t1:repair")
+
+
+def _recording_with(tmp_path, **changes):
+    result, _ = basic_result()
+    path = live.save_bundle(tmp_path / "ui", result.task, result.record, planner="h", cosmos_url=None)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**data, **changes}), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("changes", [{"record": [1]}, {"seed": "x"}, {"task": "scene"}, {"label": ["x"]}])
+def test_damaged_recordings_are_refused_with_a_message(tmp_path, changes):
+    path = _recording_with(tmp_path, **changes)
+    sources.list_cases(path.parent)  # a listing still names the file
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(path)
+    with pytest.raises(sources.ReplayError):
+        sources.load_case(path.parent, path.name)
+
+
+def test_the_ui_and_the_cli_report_a_damaged_source_cleanly(tmp_path, capsys, monkeypatch):
+    from vplan import cli
+    from vplan.ui import gradio_app as app
+    run = _damage_attempts(tmp_path, "[1]")
+    case, info = app.replay_open(app.UISettings(replay=str(run)), str(run))
+    assert case["choices"] == [] and "line 1" in info
+    monkeypatch.setattr(app, "launch", lambda settings: None)
+    assert cli.main(["ui", "--replay", str(run)]) == 2
+    assert "error:" in capsys.readouterr().err

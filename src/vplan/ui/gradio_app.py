@@ -40,6 +40,11 @@ class UISettings:
     host: str = "127.0.0.1"
     port: int = 7860
 
+    def replay_roots(self) -> tuple[str, ...]:
+        """Where the Replay tab may read (sources.check_path): the working directory and the paths the operator
+        named on the command line."""
+        return tuple(str(r) for r in (os.getcwd(), self.record_dir, self.replay, self.seed_dir) if r)
+
 
 def _path_error(value: str) -> str | None:
     from vplan.evaluate.pilot import PilotError, check_path_arg
@@ -132,13 +137,14 @@ def error_values(message: str) -> tuple:
 
 # ---- replay -------------------------------------------------------------------------------------------------------
 
-def replay_open(path: str):
-    """(case dropdown update, info panel) for a run directory, pilot run, recording or folder of recordings."""
+def replay_open(settings: UISettings, path: str):
+    """(case dropdown update, info panel) for a run directory, pilot run, recording or folder of recordings under
+    the replay roots."""
     path = (path or "").strip()
     problem = _path_error(path) if path else "enter a path"
     if problem is None:
         try:
-            cases = sources.list_cases(path)
+            cases = sources.list_cases(path, roots=settings.replay_roots())
         except sources.ReplayError as exc:
             problem = str(exc)
     if problem is not None:
@@ -148,14 +154,14 @@ def replay_open(path: str):
             markup.status_html([("Source", f"{path}: {len(cases)} recorded attempt(s)")]))
 
 
-def replay_show(path: str, case_id: str | None, seed_dir: str | None = None) -> tuple:
+def replay_show(settings: UISettings, path: str, case_id: str | None, seed_dir: str | None = None) -> tuple:
     path = (path or "").strip()
     seed_dir = (seed_dir or "").strip() or None
     for value in (path, seed_dir):
         if value and (problem := _path_error(value)):
             return error_values(problem)
     try:
-        case = sources.load_case(path, case_id or None, seed_dir=seed_dir)
+        case = sources.load_case(path, case_id or None, seed_dir=seed_dir, roots=settings.replay_roots())
     except sources.ReplayError as exc:
         return error_values(str(exc))
     return display.replay_display(case).values()
@@ -248,11 +254,14 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 show = gr.Button("Replay", variant="primary")
                 replay_info = gr.HTML()
                 replay_panels = _panels()
-                open_.click(replay_open, [path], [case, replay_info])
-                show.click(lambda *args: shown(replay_show(*args)), [path, case, seed_dir], replay_panels.outputs(),
-                           concurrency_id=SIM, concurrency_limit=1)
+                def open_replay(value):
+                    return replay_open(settings, value)
+
+                open_.click(open_replay, [path], [case, replay_info])
+                show.click(lambda *args: shown(replay_show(settings, *args)), [path, case, seed_dir],
+                           replay_panels.outputs(), concurrency_id=SIM, concurrency_limit=1)
                 if settings.replay:
-                    demo.load(replay_open, [path], [case, replay_info])
+                    demo.load(open_replay, [path], [case, replay_info])
     return demo
 
 
