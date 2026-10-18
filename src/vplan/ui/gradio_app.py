@@ -118,7 +118,10 @@ def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instr
         yield progress.display().values()
     if "error" in outcome:
         exc = outcome["error"]
-        yield error_values(f"the attempt stopped: {type(exc).__name__}: {exc}"[:500])
+        text = f"the attempt stopped: {type(exc).__name__}: {exc}"
+        if option.secret:  # an unexpected exception must not carry the key onto the page
+            text = text.replace(option.secret, "[REDACTED]")
+        yield error_values(text[:500])
         return
     yield display.live_result_display(outcome["result"], progress.outage).values()
 

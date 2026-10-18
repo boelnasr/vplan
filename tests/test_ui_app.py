@@ -159,3 +159,17 @@ def test_empty_galleries_are_hidden_and_filled_ones_shown():
     assert out["findings"]["visible"] is False and out["cosmos"]["visible"] is True
     assert out["judge_html"] == "" and out["plan_json"] == ""
 
+
+def test_an_unexpected_failure_is_shown_without_the_key(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError(f"transport failed with Authorization: Bearer {SECRET}")
+
+    monkeypatch.setattr(live, "run_live", boom)
+    option = live.PlannerOption("Nemotron: test", object(), llm=True, secret=SECRET)
+    settings = app.UISettings(planners=(live.heuristic_option(), option), record_dir=None)
+    state = (app.task_key(app.SOURCES[2], 1, "impossible 3: target enclosed", ""),
+             live.generated_task(1, "impossible 3: target enclosed"))
+    steps = list(app.run_attempt(settings, state, app.SOURCES[2], 1, "impossible 3: target enclosed", "",
+                                 option.label, 1))
+    banner = steps[-1][0]
+    assert "the attempt stopped: RuntimeError" in banner and SECRET not in banner and "[REDACTED]" in banner
