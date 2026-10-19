@@ -202,6 +202,34 @@ def test_the_summary_reports_natural_and_injected_negatives_separately(studied):
     assert "not verification" in md and "incremental" in md
 
 
+def test_an_injected_pose_that_misses_its_ik_target_is_skipped_not_asked(run_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import shadow
+    real = shadow._goal
+
+    def raised(traj, stage):  # 5 cm above what the trajectory was solved for: the posed TCP cannot be there
+        goal = real(traj, stage).copy()
+        goal[2, 3] += 0.05
+        return goal
+    monkeypatch.setattr(shadow, "_goal", raised)
+    result, ask = shadow_run(run_dir, tmp_path / "shadow", ["pass"] * 4)
+    got = {r.source: r for r in lines(tmp_path / "shadow")}
+    assert result.status == "complete" and len(ask.sent) == 4  # 3 natural, and the misaligned grasp solved anew
+    wrong = [r for r in lines(tmp_path / "shadow") if r.source == "wrong_object"]
+    assert len(wrong) == 3 and all(r.skipped == "the pose missed its IK target" and not r.checks for r in wrong)
+    assert got["misaligned_grasp"].verdict == "pass"
+    assert result.summary["questions"]["skipped"] == {"the pose missed its IK target": 3}
+    assert result.summary["classes"]["wrong_object"]["all"]["n"] == 0
+
+
+def test_an_injected_frame_whose_predicate_holds_is_skipped_not_asked(run_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import shadow
+    monkeypatch.setattr(shadow, "OFFSET_M", (0.0, 0.0))  # no offset: the grasp is the executed one, in the band
+    result, ask = shadow_run(run_dir, tmp_path / "shadow", ["pass"] * 6)
+    (misaligned,) = [r for r in lines(tmp_path / "shadow") if r.source == "misaligned_grasp"]
+    assert misaligned.truth is True and misaligned.skipped == "the state predicate holds" and len(ask.sent) == 6
+    assert result.summary["classes"]["misaligned_grasp"]["all"]["n"] == 0
+
+
 # ---- outages and reruns ---------------------------------------------------------------------------------------
 def test_an_outage_stops_after_three_errors_in_a_row_and_a_rerun_asks_only_what_is_missing(run_dir, tmp_path):
     out = tmp_path / "shadow"
