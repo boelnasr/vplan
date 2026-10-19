@@ -18,7 +18,7 @@
 - **Cosmos 3** adds a learned visual consistency check in the demo [D5, D20].
 - Approved plans execute in PyBullet under position control [D21].
 - An independent **Judge** scores the executed run [D21].
-- Batch evaluation runs on **Nebius Serverless Jobs** at the final stage [D6, D19].
+- Batch evaluation runs locally against Nemotron on **Nebius Token Factory**; Serverless Jobs were dropped [D6, D19, D57, D70].
 
 **Headline claim (measured on the held-out `test` set, Oct 18) [D8, D23, D70]**
 
