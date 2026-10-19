@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from vplan.records import (AttemptRecord, EvalAttempt, PairedResult, SeedSetOracle, SeedSetTask, TaskOracle,
                            TaskSpec)
+from vplan.ui.views import OUTCOME_WORDS, planner_name
 
 BUNDLE_KIND = "vplan_ui_attempt"  # ui.live writes it
 EVAL_KIND = "eval_run"  # evaluate.runner.KIND
@@ -122,6 +123,26 @@ def _dict(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _result_words(record: dict) -> str:
+    """An attempt's outcome for a case list: 'Executed · success', 'Refused · failure', 'No plan passed'."""
+    outcome = record.get("outcome", "")
+    words = OUTCOME_WORDS.get(outcome, str(outcome).replace("_", " "))
+    judge = record.get("judge")
+    if outcome in ("executed", "refused") and isinstance(judge, dict):
+        words += " · success" if judge.get("success") else " · failure"
+    return words
+
+
+# Recordings made before W4.1 name the rule-based planner by its old label
+_OLD_PLANNER_LABELS = {"Template heuristic (no LLM, no key)": "Rule-based baseline (no LLM)"}
+
+
+def _when(created: object) -> str:
+    """'2026-10-18T12:47:43+00:00' as '2026-10-18 12:47 UTC'."""
+    text = str(created or "")
+    return f"{text[:10]} {text[11:16]} UTC" if len(text) >= 16 and text[10] == "T" else text
+
+
 def source_kind(path: str | Path) -> str:
     path = Path(path)
     if path.is_file():
@@ -131,8 +152,8 @@ def source_kind(path: str | Path) -> str:
     if (path / "manifest.json").is_file():
         if _json(path / "manifest.json").get("kind") == EVAL_KIND:
             return "eval"
-        raise ReplayError(f"{path} has a manifest.json but is not a W3.1 run directory (a seed set or cohort holds "
-                          "tasks, not attempts)")
+        raise ReplayError(f"{path} has a manifest.json but is not an evaluation run directory (a seed set or cohort "
+                          "holds tasks, not attempts)")
     if (path / "run.json").is_file() and (path / "results.jsonl").is_file():
         return "pilot"
     if any(path.glob("*.json")):
@@ -146,10 +167,9 @@ def _eval_cases(run_dir: Path) -> list[CaseRef]:
     out = []
     for number, _, row in _lines(run_dir / "attempts.jsonl"):
         attempt_id = _text(row, "attempt_id", f"attempts.jsonl line {number}")
-        record = _dict(row.get("record"))
-        success = record.get("outcome") in ("executed", "refused") and _dict(record.get("judge")).get("success")
-        out.append(CaseRef(attempt_id, f"{attempt_id}  {row.get('task_id', '')}  {row.get('outcome', '')}"
-                                       + ("  (success)" if success else "")))
+        record = _dict(row.get("record")) or {"outcome": row.get("outcome", "")}
+        out.append(CaseRef(attempt_id, f"Task {row.get('task_index', '?')} ({row.get('split', '')} set) · "
+                                       f"{_result_words(record)}"))
     return out
 
 
@@ -207,13 +227,11 @@ def _eval_case(run_dir: Path, case_id: str | None, seed_dir: str | Path | None, 
     if where is None:
         raise ReplayError(f"{run_dir.name} does not record its seed set; pass the seed-set directory")
     task, oracle = _seed_set_task(where, attempt.task_index, attempt.task_id, str(manifest.get("seed_set_hash")))
-    provenance = (("source", f"W3.1 run {run_dir.name}"),
-                  ("config", f"{manifest.get('config')} ({manifest.get('mode')}, k={manifest.get('k')})"),
-                  ("planner", f"{manifest.get('provider')}/{manifest.get('model')}"),
-                  ("seed set", f"{manifest.get('split')} {str(manifest.get('seed_set_hash'))[:12]}, task "
-                               f"{attempt.task_index} ({attempt.task_id})"))
+    provenance = (("Source", f"evaluation run {run_dir.name}, config {manifest.get('config')}"),
+                  ("Planner", planner_name(str(manifest.get("provider") or ""), str(manifest.get("model") or ""))),
+                  ("Task set", f"{manifest.get('split')} set, task {attempt.task_index}"))
     return ReplayCase(attempt.attempt_id, f"{attempt.attempt_id} {attempt.task_id}", task.task, oracle,
-                      attempt.record, task.seed, "W3.1 evaluation run", provenance)
+                      attempt.record, task.seed, "evaluation run", provenance)
 
 
 # ---- feedback pilot runs --------------------------------------------------------------------------------------------
@@ -223,7 +241,7 @@ def _pilot_cases(run_dir: Path) -> list[CaseRef]:
     for number, _, row in _lines(run_dir / "results.jsonl"):
         task_id = _text(row, "task_id", f"results.jsonl line {number}")
         for arm in ("repair", "resample"):
-            out.append(CaseRef(f"{task_id}:{arm}", f"{task_id}  {arm}: {_dict(row.get(arm)).get('outcome', '')}"))
+            out.append(CaseRef(f"{task_id}:{arm}", f"{task_id} · {arm} · {_result_words(_dict(row.get(arm)))}"))
     return out
 
 
@@ -266,8 +284,8 @@ def _pilot_case(run_dir: Path, case_id: str | None, roots: Roots) -> ReplayCase:
                            missing_usage_calls=a.missing_usage_calls, latency_s=a.latency_s,
                            config_hashes=result.config_hashes)
     entry = tasks[result.task_id]
-    provenance = (("source", f"pilot run {run_dir.name} (development pilot, feasible tasks only)"),
-                  ("arm", arm), ("planner", f"{meta.get('provider')}/{meta.get('model')}"))
+    provenance = (("Source", f"feedback pilot run {run_dir.name} (development, solvable tasks only)"),
+                  ("Planner", planner_name(str(meta.get("provider") or ""), str(meta.get("model") or ""))))
     oracle = TaskOracle.model_validate(oracles[result.task_id]["oracle"]) if result.task_id in oracles else None
     return ReplayCase(f"{result.task_id}:{arm}", f"{result.task_id} {arm}", TaskSpec.model_validate(entry["task"]),
                       oracle, record, int(entry["seed"]), "feedback pilot run", provenance)
@@ -288,8 +306,8 @@ def _recording_cases(folder: Path) -> list[CaseRef]:
     for path in sorted(folder.glob("*.json"), reverse=True):  # newest first: names carry a UTC time
         data = _recording(path)
         if data is not None:  # a damaged recording is still listed; loading it explains what is wrong
-            out.append(CaseRef(path.name, f"{path.name}  {data.get('label', '')}  "
-                                          f"{_dict(data.get('record')).get('outcome', '')}"))
+            out.append(CaseRef(path.name, f"{_when(data.get('created_utc')) or path.name} · {data.get('label', '')} · "
+                                          f"{_result_words(_dict(data.get('record')))}"))
     return out
 
 
@@ -308,10 +326,11 @@ def _recording_case(path: Path) -> ReplayCase:
         record = AttemptRecord.model_validate(data["record"])
     except (KeyError, ValidationError) as exc:
         raise ReplayError(f"{path.name} does not validate ({type(exc).__name__})") from None
-    provenance = (("source", f"UI recording {path.name} ({data.get('created_utc', 'unknown time')})"),
-                  ("planner", str(data.get("planner", ""))),
-                  ("Cosmos gate", f"on ({data['cosmos_host']})" if data.get("cosmos_host") else "off"))
-    return ReplayCase(path.name, label, task, oracle, record, seed, "UI recording", provenance)
+    planner = str(data.get("planner", ""))
+    provenance = (("Source", f"saved live attempt {path.name} ({_when(data.get('created_utc')) or 'unknown time'})"),
+                  ("Planner", _OLD_PLANNER_LABELS.get(planner, planner)),
+                  ("Cosmos visual check", f"on ({data['cosmos_host']})" if data.get("cosmos_host") else "off"))
+    return ReplayCase(path.name, label, task, oracle, record, seed, "saved live attempt", provenance)
 
 
 # ---- entry points ---------------------------------------------------------------------------------------------------
@@ -331,7 +350,8 @@ def list_cases(path: str | Path, *, roots: Roots = None) -> tuple[CaseRef, ...]:
             data = _recording(path)
             if data is None:
                 raise ReplayError(f"{path.name} is not a UI recording")
-            cases = [CaseRef(path.name, f"{path.name}  {data.get('label', '')}")]
+            cases = [CaseRef(path.name, f"{_when(data.get('created_utc')) or path.name} · {data.get('label', '')} · "
+                                        f"{_result_words(_dict(data.get('record')))}")]
     except DAMAGED as exc:
         raise ReplayError(f"{path} is not in the expected format ({type(exc).__name__}: {exc})"[:300]) from None
     if not cases:

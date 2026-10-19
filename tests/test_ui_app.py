@@ -6,7 +6,7 @@ import threading
 import numpy as np
 import pytest
 
-from tests.ui_fixtures import SECRET, basic_result
+from tests.ui_fixtures import JARGON, SECRET, basic_result, visible
 from vplan import cli
 from vplan.evaluate import pilot
 from vplan.ui import gradio_app as app, live
@@ -56,7 +56,7 @@ def test_replay_starts_without_any_env_file_and_never_reads_one(tmp_path, monkey
     case, _ = app.replay_open(settings, settings.replay)
     values = app.replay_show(settings, settings.replay, case["value"])
     shown = dict(zip(("banner", "status", "plan", "timeline", "findings", "cosmos", "execution", "judge"), values))
-    assert "data:image/gif;base64," in shown["execution"] and "SUCCESS" in shown["judge"]
+    assert "data:image/gif;base64," in shown["execution"] and "Success" in shown["judge"]
     assert SECRET not in capsys.readouterr().out
     assert os.environ.get("GRADIO_ANALYTICS_ENABLED") == "False"  # no telemetry or version check (offline replay)
 
@@ -112,13 +112,16 @@ def test_cli_settings_carry_cosmos_host_port_and_recording(tmp_path, launched):
 
 def test_live_handlers_load_a_scene_and_stream_an_attempt_to_the_judge():
     image, info, instruction, state = app.load_task(app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION)
-    assert isinstance(image, np.ndarray) and image.shape[2] == 3 and "feasible" in info
+    assert isinstance(image, np.ndarray) and image.shape[2] == 3
+    text = visible(info)
+    assert "Task Pick the red cube and place it in the bin." in text and "Objects red cube, green cube" in text
+    assert "Ground truth (hidden from the planner) solvable" in text and "Obstacles 1 wall" in text
     settings = app.UISettings(record_dir=None)
     steps = list(app.run_attempt(settings, state, app.SOURCES[1], 0, "feasible", instruction,
                                  settings.planners[0].label, 3))
     assert len(steps) >= 4  # start, request, plan, round, status ... final
     final = dict(zip(app.display.Display.FIELDS, steps[-1]))
-    assert "SUCCESS" in final["judge_html"] and "data:image/gif;base64," in final["execution_html"]
+    assert "Success" in final["judge_html"] and "data:image/gif;base64," in final["execution_html"]
     assert "geometric checks only" in final["banner_html"]
 
 
@@ -126,11 +129,61 @@ def test_live_handlers_report_bad_input_in_the_banner():
     _, info, _, state = app.load_task(app.SOURCES[0], 0, "feasible", "Pick the blue cube and place it in the bin.")
     assert state is None and "exactly one object" in info
     settings = app.UISettings(record_dir=None)
-    (values,) = app.run_attempt(settings, None, app.SOURCES[2], 1, "impossible 3: target enclosed",
-                                "Pick the red cube and place it in the bin.", settings.planners[0].label, 1)
-    assert "fixed by its oracle" in values[0]
     (values,) = app.run_attempt(settings, None, app.SOURCES[0], 0, "feasible", live.BASIC_INSTRUCTION, "nope", 1)
     assert "unknown planner" in values[0]
+
+
+def test_a_generated_task_runs_with_its_own_instruction_whatever_the_box_holds(monkeypatch):
+    """W4.1: pressing run on a generated task without loading it first used to trip the 'instruction is fixed'
+    warning, because the box still held the basic scene's text. The box is locked for generated tasks, and the
+    attempt always uses the task's own instruction."""
+    seen = []
+
+    def fake_run_live(task, option, **kwargs):
+        seen.append(task)
+        raise RuntimeError("stopped by the test")
+
+    monkeypatch.setattr(live, "run_live", fake_run_live)
+    settings = app.UISettings(record_dir=None)
+    steps = list(app.run_attempt(settings, None, app.SOURCES[2], 1, KIND3, live.BASIC_INSTRUCTION,
+                                 settings.planners[0].label, 1))
+    assert "the attempt stopped: RuntimeError" in steps[-1][0]  # it ran; no instruction warning
+    assert seen and seen[0].task.instruction == live.generated_task(1, KIND3).task.instruction
+
+
+def test_choosing_a_generated_task_fills_and_locks_the_instruction_and_clears_warnings():
+    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[2], 1, KIND3, live.BASIC_INSTRUCTION)))
+    task = live.generated_task(1, KIND3)
+    assert out["generated_row"]["visible"] is True
+    assert out["instruction"]["value"] == task.task.instruction and out["instruction"]["interactive"] is False
+    assert out["instruction"]["info"] == app.GENERATED_INFO
+    assert out["state"][1].task.instruction == task.task.instruction
+    assert isinstance(out["scene"], np.ndarray) and "a closed box around the object" in visible(out["info"])
+    assert out["banner"] == "" and "appear here" in out["timeline"]  # a stale warning or result is gone
+    assert out["findings"]["visible"] is False and out["cosmos"]["visible"] is False
+
+
+def test_choosing_a_basic_scene_unlocks_the_instruction_and_restores_the_typed_text():
+    typed = "Pick the green cube and place it in the bin."
+    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[0], 1, KIND3, typed)))
+    assert out["generated_row"]["visible"] is False
+    assert out["instruction"]["value"] == typed and out["instruction"]["interactive"] is True
+    assert out["instruction"]["info"] == app.BASIC_INFO
+    assert out["state"][1].task.instruction == typed and out["banner"] == ""
+    bad = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[0], 1, KIND3, "Pick the blue cube.")))
+    assert bad["state"] is None and "exactly one object" in bad["info"] and bad["banner"] == ""
+
+
+def test_changing_the_seed_or_type_reloads_the_generated_task():
+    out = dict(zip(app.TASK_CHANGE_OUTPUTS, app.task_change(app.SOURCES[2], 2, KIND3)))
+    assert out["instruction"] == live.generated_task(2, KIND3).task.instruction and out["banner"] == ""
+    out = dict(zip(app.TASK_CHANGE_OUTPUTS, app.task_change(app.SOURCES[2], 0, "feasible")))
+    assert out["state"] is None and out["instruction"] == "" and "Try another seed" in out["info"]
+    assert app.task_change(app.SOURCES[0], 2, KIND3) == tuple(app.gr.skip() for _ in app.TASK_CHANGE_OUTPUTS)
+
+
+def test_the_default_generated_task_exists():
+    assert live.generated_task(app.DEFAULT_SEED, "feasible").oracle.feasibility == "feasible"
 
 
 def test_replay_handlers_report_problems_in_the_panels(tmp_path):
@@ -149,10 +202,33 @@ def test_the_app_builds_with_both_tabs_and_the_llm_planner_preselected(tmp_path)
     assert isinstance(demo, gr.Blocks)
     config = demo.get_config_file()
     labels = {c.get("props", {}).get("label") for c in config["components"]}
-    assert {"Live", "Replay", "Planner", "Check timeline (per repair round)"} <= labels
+    assert {"Live", "Replay", "Scene", "Task seed", "Task type", "Instruction", "Planner", "Repair rounds (up to 3)",
+            "What failed: problem parts in magenta"} <= labels
     radio = next(c for c in config["components"] if c.get("props", {}).get("label") == "Planner")
     assert radio["props"]["value"] == llm.label
+    scene = next(c for c in config["components"] if c.get("props", {}).get("label") == "Scene"
+                 and c["type"] == "radio")
+    assert [choice[0] for choice in scene["props"]["choices"]] == ["Basic scene", "Basic scene with wall",
+                                                                   "Generated task"]
+    kinds = next(c for c in config["components"] if c.get("props", {}).get("label") == "Task type")
+    assert [choice[0] for choice in kinds["props"]["choices"]][0] == "Solvable"
     assert SECRET not in str(config)
+
+
+def test_no_internal_terms_on_the_page():
+    """W4.1: labels, help texts, choices, headings and placeholders a viewer sees carry no spec or decision
+    references, check codes, oracle/witness/heuristic jargon or raw ids."""
+    config = app.build_app(app.UISettings()).get_config_file()
+    texts = []
+    for c in config["components"]:
+        props = c.get("props", {})
+        texts += [str(props[key]) for key in ("label", "info", "placeholder") if props.get(key)]
+        texts += [str(choice[0]) for choice in props.get("choices") or []]
+        if c["type"] in ("html", "markdown") and isinstance(props.get("value"), str):
+            texts.append(visible(props["value"]))
+    assert "An LLM proposes a pick-and-place plan for a Panda arm." in " ".join(texts)
+    found = [t for t in texts if JARGON.search(t)]
+    assert not found, found
 
 
 def test_empty_galleries_are_hidden_and_filled_ones_shown():

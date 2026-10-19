@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import html as html_lib
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +16,17 @@ from vplan.ui import live
 
 SECRET = "sk-or-v1-UI-TEST-SECRET-0123456789abcdef"  # a fake key; it must never reach any UI output
 MAGENTA = (255, 0, 255)
+
+# Internal project terms that must not reach the screen (W4.1): spec and decision references, check and predicate
+# codes as labels, oracle/witness/heuristic jargon and raw body ids.
+JARGON = re.compile(r"spec §|§ ?\d|\bD\d{2}\b|\bV-\d\b|\b[SV]\d\b|\boracle\b|\bwitness\b|heuristic|\bW3\.\d|cube_red|"
+                    r"cube_green|wall_1|\bo_[0-9a-f]{6,}|robot:|panda_link|panda_joint|--cosmos-url", re.IGNORECASE)
+
+
+def visible(markup_html: str) -> str:
+    """The text a viewer reads: tags (and their tooltip attributes) removed, entities decoded."""
+    text = re.sub(r"<pre[^>]*>.*?</pre>", " ", markup_html, flags=re.S)  # recorded plan JSON keeps its values
+    return re.sub(r"\s+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", text)))
 
 
 @functools.lru_cache(maxsize=None)

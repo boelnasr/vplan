@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tests.ui_fixtures import basic_result, basic_task, enclosed_result, magenta_pixels, write_eval_run
+from tests.ui_fixtures import JARGON, basic_result, basic_task, enclosed_result, magenta_pixels, visible, write_eval_run
 from vplan import records
 from vplan.ui import display, live, render, sources
 
@@ -23,7 +23,9 @@ def test_a_recording_round_trips(recording):
     case = sources.load_case(recording)
     assert ref.case_id == recording.name and case.record == result.record
     assert case.task == result.task.task and case.oracle == result.task.oracle and case.seed == 0
-    assert dict(case.provenance)["Cosmos gate"] == "off"
+    assert dict(case.provenance)["Cosmos visual check"] == "off"
+    assert dict(case.provenance)["Planner"] == "Rule-based baseline (no LLM)"
+    assert ref.label.endswith(" · Basic scene with wall: Pick the red cube and place it in the bin. · Executed · success")
 
 
 def test_a_folder_of_recordings_lists_newest_first_and_skips_other_json(recording, tmp_path):
@@ -39,10 +41,19 @@ def test_a_folder_of_recordings_lists_newest_first_and_skips_other_json(recordin
 
 def test_replay_display_plays_back_the_recorded_execution(recording):
     shown = display.replay_display(sources.load_case(recording))
-    assert "data:image/gif;base64," in shown.execution_html and "no physics, no keys" in shown.execution_html
-    assert "SUCCESS" in shown.judge_html and "without the Cosmos gate" in shown.banner_html
-    assert "UI recording" in shown.status_html and "Ground truth" in shown.status_html
-    assert shown.status_html.count("Pick the red cube and place it in the bin.") == 1  # the label already holds it
+    assert "data:image/gif;base64," in shown.execution_html and "no physics rerun" in shown.execution_html
+    assert "Success" in shown.judge_html and "without the Cosmos visual check" in shown.banner_html
+    assert "saved live attempt" in shown.status_html and "Ground truth (hidden from the planner)" in shown.status_html
+    assert shown.status_html.count("Pick the red cube and place it in the bin.") == 1  # the Task line only
+    for name in ("banner_html", "status_html", "timeline_html", "execution_html", "judge_html"):
+        assert not JARGON.search(visible(getattr(shown, name))), name
+
+
+def test_recordings_made_before_the_rename_show_the_new_planner_label(tmp_path):
+    result, _ = basic_result()
+    path = live.save_bundle(tmp_path, result.task, result.record, planner="Template heuristic (no LLM, no key)",
+                            cosmos_url=None)
+    assert dict(sources.load_case(path).provenance)["Planner"] == "Rule-based baseline (no LLM)"
 
 
 def test_replay_rerenders_highlights_for_blocked_rounds(tmp_path):
@@ -50,7 +61,10 @@ def test_replay_rerenders_highlights_for_blocked_rounds(tmp_path):
     path = live.save_bundle(tmp_path, result.task, result.record, planner="heuristic", cosmos_url=None)
     shown = display.replay_display(sources.load_case(path))
     assert shown.findings and any(magenta_pixels(img) > 50 for img, _ in shown.findings)
-    assert "nothing was executed" in shown.execution_html and "Budget exhausted" in shown.status_html
+    assert all(c.startswith("Round ") and not JARGON.search(c) for _, c in shown.findings)
+    assert "Nothing was executed" in shown.execution_html and "no plan passed the checks" in shown.status_html
+    text = visible(shown.timeline_html)
+    assert "enclosure" in text and not JARGON.search(text), JARGON.search(text)
 
 
 def test_replay_shows_a_cosmos_report_and_rerenders_its_frames(tmp_path):
@@ -63,8 +77,8 @@ def test_replay_shows_a_cosmos_report_and_rerenders_its_frames(tmp_path):
         "evaluation": rnd.evaluation.model_copy(update={"visual": report})}),)})
     path = live.save_bundle(tmp_path, result.task, with_gate, planner="heuristic", cosmos_url="http://127.0.0.1:8000")
     shown = display.replay_display(sources.load_case(path), render_execution=False)
-    assert [c for _, c in shown.cosmos] == ["round 0 grasp front_oblique: pass (learned check) (re-rendered)",
-                                           "round 0 grasp top: pass (learned check) (re-rendered)"]
+    assert [c for _, c in shown.cosmos] == ["Round 1 · grasp, front oblique view: pass (learned check) (redrawn)",
+                                           "Round 1 · grasp, top view: pass (learned check) (redrawn)"]
     assert "not verification" in shown.banner_html and "between the fingers" in shown.timeline_html
 
 
@@ -72,12 +86,13 @@ def test_a_w31_run_directory_replays_with_its_seed_set(tmp_path):
     result, _ = basic_result()
     run, seeds = write_eval_run(tmp_path, basic_task(), result.record)
     (ref,) = sources.list_cases(run)
-    assert ref.case_id == "5:dev:0" and "(success)" in ref.label
+    assert ref.case_id == "5:dev:0" and ref.label == "Task 0 (dev set) · Executed · success"
     case = sources.load_case(run, "5:dev:0")
     assert case.task == basic_task().task and case.record.outcome == "executed" and case.seed == 0
-    assert dict(case.provenance)["source"] == "W3.1 run run"
+    assert dict(case.provenance)["Source"] == "evaluation run run, config 5"
+    assert dict(case.provenance)["Planner"] == "Rule-based baseline"
     shown = display.replay_display(case, render_execution=False)
-    assert "SUCCESS" in shown.judge_html and "5:dev:0" in shown.status_html
+    assert "Success" in shown.judge_html and "Attempt id: 5:dev:0" in shown.status_html
 
 
 def test_a_w31_run_refuses_a_seed_set_that_does_not_hash_to_the_run(tmp_path):
@@ -135,7 +150,8 @@ def test_a_pilot_run_replays_each_arm(tmp_path):
     assert [r.case_id for r in sources.list_cases(run)] == ["t1:repair", "t1:resample"]
     case = sources.load_case(run, "t1:resample")
     assert case.record.mode == "resample" and case.record.success and case.seed == 7
-    assert dict(case.provenance)["planner"] == "openrouter/nvidia/ultra:free"
+    assert dict(case.provenance)["Planner"] == "nvidia/ultra:free via openrouter"
+    assert "fresh samples" in display.replay_display(case, render_execution=False).status_html
 
 
 @pytest.mark.parametrize("make", ["missing", "seed_set", "empty_dir"])
@@ -155,7 +171,7 @@ def test_replay_of_a_record_from_another_scene_reports_instead_of_crashing(recor
     other = live.generated_task(1, "impossible 3: target enclosed")
     moved = sources.ReplayCase(case.case_id, case.label, other.task, None, case.record, 0, "test")
     shown = display.replay_display(moved)
-    assert "cannot play back" in shown.execution_html and "different scene" in shown.execution_html
+    assert "Cannot play back" in shown.execution_html and "different scene" in shown.execution_html
 
 
 def test_execution_frames_sample_the_recording_at_the_gif_rate():

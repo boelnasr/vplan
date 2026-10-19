@@ -4,8 +4,12 @@ import pytest
 
 from tests.test_repair import generated
 from tests.test_run_task import call
+from tests.ui_fixtures import JARGON, visible
 from vplan import records
+from vplan.tasks import make_basic_scene
 from vplan.ui import markup, views
+
+WALL_SCENE = views.scene_names(make_basic_scene(with_obstacle=True))
 
 
 def finding(check="collision", stage="transport", **kw):
@@ -53,16 +57,19 @@ def statuses(round_view):
 # ---- check timeline --------------------------------------------------------------------------------
 
 def test_a_collision_round_fails_v6_with_the_offending_bodies_and_the_measured_clearance():
-    view = views.round_view(rnd(0, PLAN, blocked(finding())), mode="repair")
+    view = views.round_view(rnd(0, PLAN, blocked(finding())), mode="repair", names=WALL_SCENE)
     row = next(r for r in view.checks if r.check == "collision")
-    assert (row.code, row.status) == ("V-6", "fail")
-    assert "robot:panda_link5" in row.evidence and "wall_1" in row.evidence
+    assert (row.code, row.title, row.status) == ("V-6", "Collision", "fail")
+    assert "arm link 5 ↔ wall" in row.evidence and "robot:" not in row.evidence and "wall_1" not in row.evidence
     assert "0.40 cm" in row.evidence and "1.00 cm" in row.evidence  # measured clearance and the margin
     assert "transport" in row.evidence and "sample 12" in row.evidence
-    assert row.finding is not None and row.finding.bodies == ("robot:panda_link5", "wall_1")
+    assert row.finding is not None and row.finding.bodies == ("robot:panda_link5", "wall_1")  # the record is kept
     assert [r.code for r in view.checks] == [f"V-{i}" for i in range(1, 9)]  # spec §9 order
+    assert [r.title for r in view.checks] == ["Target and drop-off", "Reach", "Joint limits", "Singularity margin",
+                                              "Smooth joint motion", "Collision", "Grasp", "Release in bin"]
     assert all(s == "pass" for c, s in statuses(view).items() if c != "collision")
-    assert view.outcome == "blocked" and "Verifier" in view.summary
+    assert view.outcome == "blocked" and view.summary == "rejected: 1 check failed"
+    assert view.title == "Round 1: first plan"
 
 
 def test_penetration_is_reported_as_penetration_not_as_a_negative_clearance():
@@ -100,7 +107,7 @@ def test_unverified_rounds_show_the_verifier_off():
     view = views.round_view(rnd(0, PLAN, executed()), mode="unverified")
     s = statuses(view)
     assert s["grounding"] == "partial" and {v for c, v in s.items() if c != "grounding"} == {"off"}
-    assert "unverified" in view.checks_note
+    assert "without verification" in view.checks_note
 
 
 def test_a_cosmos_rejection_means_every_geometric_check_passed():
@@ -135,7 +142,8 @@ def test_a_refusal_round_shows_the_reason_and_no_checks():
     j = records.JudgeResult(success=True, predicates={"R": True}, violations=(), details={})
     view = views.round_view(rnd(0, refusal, records.EvaluationResult(outcome="refused", judge=j)), mode="repair")
     assert view.plan_kind == "refusal" and view.checks == ()
-    assert "target_enclosed" in view.summary and '"reason": "target_enclosed"' in view.plan_json
+    assert view.summary == "refused (object enclosed): the cube sits in a closed box"
+    assert '"reason": "target_enclosed"' in view.plan_json  # the recorded JSON keeps its values
 
 
 def test_plan_json_is_pretty_printed():
@@ -192,7 +200,7 @@ def test_a_working_gate_is_labelled_a_learned_check_not_verification():
 
 def test_replay_banner_names_attempts_that_ran_without_the_gate():
     record = attempt(rnd(0, PLAN, executed()))
-    assert "without the Cosmos gate" in views.replay_cosmos_banner(record).text
+    assert "without the Cosmos visual check" in views.replay_cosmos_banner(record).text
     down = records.VisualGateReport(status="unavailable", note="offline")
     assert views.replay_cosmos_banner(attempt(rnd(0, PLAN, executed(visual=down)))).text.startswith(
         "COSMOS UNAVAILABLE")
@@ -208,15 +216,31 @@ def test_markup_escapes_planner_text():
 
 def test_markup_shows_status_badges_and_evidence():
     html = markup.timeline_html(views.attempt_view(attempt(rnd(0, PLAN, blocked(finding())),
-                                                           rnd(1, PLAN, executed()))).rounds)
-    assert html.count("Round ") == 2 and "V-6" in html and "robot:panda_link5" in html
-    assert "fail" in html and "pass" in html
+                                                           rnd(1, PLAN, executed())), names=WALL_SCENE).rounds)
+    text = visible(html)
+    assert text.count("Round ") == 2 and "Round 2: repair 1" in text
+    assert "Collision" in text and "arm link 5 ↔ wall" in text
+    assert "✕ Fail" in text and "■ Rejected" in text and "✓ Executed" in text
+    # passed checks are compact chips; only the failing check gets a table row with its evidence
+    assert "Passed ✓ Target and drop-off ✓ Reach" in text and text.count("✕ Fail") == 1
+    assert 'title="Verifier check V-6' in html and 'title="Verifier check V-2' in html  # codes stay as tooltips
+    assert not JARGON.search(text), JARGON.search(text)
+
+
+def test_checks_that_did_not_run_are_grouped():
+    unknown = finding("grounding", stage="plan", plan_field="target_id", measured=None, threshold=None,
+                      direction="target_id 'x' is not an object in the scene", sample_index=None, bodies=())
+    text = visible(markup.timeline_html([views.round_view(rnd(0, PLAN, blocked(unknown)), mode="repair")]))
+    assert "Not run – Reach – Joint limits" in text and text.count("✕ Fail") == 1
 
 
 def test_judge_markup_lists_predicates_and_verdict():
     view = views.attempt_view(attempt(rnd(0, PLAN, executed(success=False))))
     html = markup.judge_html(view.judge)
-    assert "FAILURE" in html and "S1" in html and "inside the bin" in html
+    text = visible(html)
+    assert "✕ Failure" in text and "Object resting in the bin" in text and "Failed: Object resting in the bin" in text
+    assert 'title="S1: the target is inside the bin, at rest"' in html
+    assert not JARGON.search(text), JARGON.search(text)
 
 
 def test_banner_markup_is_escaped_and_marked_by_level():
@@ -232,3 +256,93 @@ def test_a_skipped_gate_reads_like_the_gate_being_off():
     assert "learned visual check" not in banner.text
     record = attempt(rnd(0, PLAN, executed(visual=skipped)))
     assert "geometric checks only" in views.replay_cosmos_banner(record).text
+
+
+# ---- plain names (W4.1) -------------------------------------------------------------------------------
+
+def test_scene_names_turn_ids_into_what_a_viewer_sees():
+    assert WALL_SCENE == {"cube_red": "red cube", "cube_green": "green cube", "wall_1": "wall"}
+    assert views.body_name("robot:panda_link5", WALL_SCENE) == "arm link 5"
+    assert views.body_name("robot:panda_hand", {}) == "gripper"
+    assert views.body_name("robot:panda_leftfinger", {}) == "left finger"
+    assert views.body_name("bin_wall_2", {}) == "bin wall" and views.body_name("bin_floor", {}) == "bin floor"
+    assert views.body_name("table", {}) == "table"
+    task = generated().task
+    names = views.scene_names(task.scene)
+    assert all(not v.startswith("o_") for v in names.values()) and set(names) >= {o.id for o in task.scene.objects}
+    assert names[task.scene.objects[0].id] == f"{task.scene.objects[0].color} {task.scene.objects[0].shape}"
+
+
+def test_obstacles_are_summarised_in_words():
+    assert views.obstacle_summary(make_basic_scene(with_obstacle=True)) == "1 wall"
+    assert views.obstacle_summary(make_basic_scene()) == "none"
+    from vplan.ui import live
+    enclosed = live.generated_task(1, "impossible 3: target enclosed")
+    enclosure = {o.id for o in enclosed.oracle.proof.enclosure}
+    names = views.scene_names(enclosed.task.scene, enclosure)
+    assert {names[i] for i in enclosure} == {"enclosure"}
+    assert views.obstacle_summary(enclosed.task.scene, enclosure).startswith("a closed box around the object")
+
+
+def test_verifier_text_is_rewritten_with_plain_names():
+    text = views.humanize("robot link panda_link5 too close to 'wall_1' (0.4 cm)", WALL_SCENE)
+    assert text == "arm link 5 too close to the wall (0.4 cm)"
+    assert views.humanize("carried 'cube_red' too close to robot link panda_hand", WALL_SCENE) == \
+        "carried red cube too close to the gripper"
+    assert views.humanize("panda_joint4 within 2 deg of its limit", {}) == "joint 4 within 2 deg of its limit"
+    ev = views.finding_evidence(finding("joint_limits", plan_field="transport_via[0]", measured=2.8, threshold=2.9,
+                                        direction="panda_joint4 within 2 deg of its limit", bodies=()), WALL_SCENE)
+    assert ev.startswith("joint 4 within 2 deg of its limit") and "plan field transport_via[0]" in ev
+
+
+def test_round_titles_and_planner_names_read_plainly():
+    assert views.round_title(0, "repair") == "Round 1: first plan"
+    assert views.round_title(2, "repair") == "Round 3: repair 2"
+    assert views.round_title(1, "resample") == "Round 2: new sample 1"
+    assert views.planner_name("heuristic", "template-heuristic") == "Rule-based baseline"
+    assert views.planner_name("api.tokenfactory.nebius.com", "nvidia/Nemotron-3_5-Lightning") == \
+        "nvidia/Nemotron-3_5-Lightning via api.tokenfactory.nebius.com"
+
+
+@pytest.mark.parametrize("outcome", ["executed", "refused", "budget_exhausted", "malformed_final", "service_failure",
+                                     "stale_approval", "sim_error", "visual_uncertain"])
+def test_headlines_and_banners_carry_no_internal_terms(outcome):
+    refusal = records.Refusal(reason="other", explanation="x")
+    j = records.JudgeResult(success=False, predicates={"R": False}, violations=("R",), details={})
+    first = rnd(0, refusal, records.EvaluationResult(outcome="refused", judge=j)) if outcome == "refused" else \
+        rnd(0, PLAN, executed(success=False))
+    view = views.attempt_view(attempt(first, outcome=outcome, judged=outcome in ("executed", "refused")))
+    assert not JARGON.search(view.headline), view.headline
+    for text in (views.COSMOS_OFF, views.COSMOS_ON, views.COSMOS_SKIPPED, views.COSMOS_NONE):
+        assert not JARGON.search(text), text
+
+
+def test_judge_contacts_and_failed_criteria_are_named():
+    j = records.JudgeResult(success=False, predicates={"S1": True, "S2": True, "V1": False, "V2": True, "V3": True,
+                                                      "V4": True},
+                            violations=("robot:panda_link5<->wall_1:-1@transport", "cube_red:-1<->table:-1@lift"),
+                            details={})
+    view = views.judge_view(j, WALL_SCENE)
+    assert view.violations == ("arm link 5 ↔ wall during transport", "red cube ↔ table during lift")
+    text = visible(markup.judge_html(view))
+    assert "Failed: No unsafe contact" in text and "Unsafe contacts: arm link 5 ↔ wall during transport" in text
+    record = attempt(rnd(0, PLAN, records.EvaluationResult(outcome="executed", judge=j)))
+    assert views.attempt_view(record).headline == ("Failure: the plan was executed, but the judge found a problem "
+                                                   "(failed: No unsafe contact)")
+
+
+def test_outcomes_pair_colour_with_an_icon_and_a_word():
+    stopped = views.attempt_view(attempt(*(rnd(i, PLAN, blocked(finding())) for i in range(2)),
+                                         outcome="budget_exhausted", judged=False))
+    assert markup.attempt_status(stopped) == (stopped.headline, "warn", "■")
+    html = markup.status_html([("Task", "x")], *markup.attempt_status(stopped)[:2], icon="■")
+    assert visible(html).startswith(" ■ Blocked no plan passed the checks in 2 planner calls")
+    success = views.attempt_view(attempt(rnd(0, PLAN, executed())))
+    assert markup.attempt_status(success)[1:] == ("pass", "✓")
+
+
+def test_the_css_wins_over_gradio_prose_rules():
+    """gr.HTML content sits in .prose, whose two-class colour and table rules beat single-class selectors."""
+    rules = [line for line in markup.CSS.splitlines() if ".vp-" in line and not line.startswith((":root", ".dark"))]
+    assert rules and all(sel.strip().startswith(markup.SCOPE.strip()) for line in rules
+                         for sel in line.split("{")[0].split(","))

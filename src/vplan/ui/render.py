@@ -20,8 +20,9 @@ from vplan.geometry import T_to_pose, pose_to_T
 from vplan.records import CandidateTrajectory, ExecutionRecord, Finding, PickPlacePlan, Scene, Segment
 from vplan.robot import HOME_Q
 from vplan.sim.scene import SceneHandles, build_scene, set_arm
+from vplan.ui.views import CHECKS, body_name, scene_names, stage_name
 
-UI_SIZE_PX = 384
+UI_SIZE_PX = 480  # sharp enough at 1080p; 512 px would add about 3 s to every execution render (384 px: 5.5 s)
 FOV_DEG = 45.0
 # (eye, target, up) in the world (= robot base) frame, m: the whole arm, the table workspace and the bin.
 OVERVIEW = ((1.75, -1.35, 1.25), (0.45, 0.1, 0.2), (0.0, 0.0, 1.0))
@@ -145,15 +146,17 @@ def offending(f: Finding, plan: PickPlacePlan) -> list[str]:
 
 
 def finding_shot(plan: PickPlacePlan, scene: Scene, f: Finding, traj: CandidateTrajectory | None,
-                 size: int = UI_SIZE_PX) -> Shot | None:
+                 size: int = UI_SIZE_PX, names: dict[str, str] | None = None) -> Shot | None:
     """The scene posed where the finding was measured, offending bodies in magenta; None when there is nothing to
-    pose (an unknown target, a Cosmos finding, or a stage the trajectory lacks)."""
+    pose (an unknown target, a Cosmos finding, or a stage the trajectory lacks). The caption names the check and the
+    bodies in plain words (views.scene_names)."""
+    names = scene_names(scene) if names is None else names
     if f.check == "visual" or (f.check == "grounding" and f.plan_field == "target_id"):
         return None
     cid = _client()
     try:
         h = build_scene(scene, cid, np.array(traj.q_start) if traj is not None else HOME_Q)
-        where = "start state"
+        where = "at the start"
         if f.stage != "plan":
             if traj is None:
                 return None
@@ -163,11 +166,13 @@ def finding_shot(plan: PickPlacePlan, scene: Scene, f: Finding, traj: CandidateT
             seg = traj.segments[i]
             k = f.sample_index if f.sample_index is not None and 0 <= f.sample_index < len(seg.q) else len(seg.q) - 1
             _pose_at(h, plan, scene, traj, seg, seg.q[k])
-            where = f"{seg.label} sample {k}"
-        names = highlight(h, offending(f, plan))
-        caption = (f"{f.check} at {where}"
-                   + (f": {' <-> '.join(names)} highlighted" if names else ": no single body to highlight"))
-        camera = close_up(h, names)
+            where = f"during {stage_name(seg.label)} (sample {k})"
+        lit = highlight(h, offending(f, plan))
+        parts = list(dict.fromkeys(body_name(b, names) for b in lit))  # the bin's five bodies read as one or two
+        title = next((t for _, c, t in CHECKS if c == f.check), f.check)
+        # the parts first: the gallery shows one line per caption and cuts the rest
+        caption = f"{title}: " + (" ↔ ".join(parts) if parts else "no single part to highlight") + f" {where}"
+        camera = close_up(h, lit)
         return Shot(render_rgb(h, size), caption, None if camera is None else render_rgb(h, size, camera))
     finally:
         p.disconnect(cid)
@@ -180,18 +185,20 @@ def rebuild(plan: PickPlacePlan, scene: Scene, *, seed: int, verifier_cfg: dict)
 
 
 def finding_shots(plan: PickPlacePlan, scene: Scene, findings: Sequence[Finding], *, seed: int, verifier_cfg: dict,
-                  size: int = UI_SIZE_PX, label: str = "") -> list[Shot]:
-    """One highlighted shot per renderable finding; a failure to render becomes a caption, never an exception."""
+                  size: int = UI_SIZE_PX, label: str = "", enclosure: Sequence[str] = ()) -> list[Shot]:
+    """One highlighted shot per renderable finding; a failure to render becomes a caption, never an exception.
+    enclosure: the ids of a type-3 task's sealed box, named "enclosure" in captions."""
     findings = [f for f in findings if f.check != "visual"]
     if not findings:
         return []
+    names = scene_names(scene, enclosure)
     try:
         traj = (rebuild(plan, scene, seed=seed, verifier_cfg=verifier_cfg)
                 if any(f.stage != "plan" for f in findings) and plan.target_id in {o.id for o in scene.objects}
                 else None)
-        shots = [finding_shot(plan, scene, f, traj, size) for f in findings]
+        shots = [finding_shot(plan, scene, f, traj, size, names) for f in findings]
     except Exception as exc:  # display only: the recorded verdict stands without its picture
-        return [Shot(np.zeros((size, size, 3), np.uint8), f"{label}render failed: {type(exc).__name__}: {exc}"[:200])]
+        return [Shot(np.zeros((size, size, 3), np.uint8), f"{label}picture failed: {type(exc).__name__}: {exc}"[:200])]
     return [Shot(s.image, label + s.caption, s.close_up) for s in shots if s is not None]
 
 

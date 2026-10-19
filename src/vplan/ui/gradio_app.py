@@ -6,7 +6,10 @@ live attempt's worker thread holds it until run_live returns, even after its pag
 concurrency slot, so a second attempt, a scene load or a replay waits briefly and is then refused with a message
 instead of running beside it (motion/trajectory.py reseeds numpy's global RNG; the Panda model is shared). Telemetry and Gradio's version check are off
 (GRADIO_ANALYTICS_ENABLED), and the theme uses system fonts, so the page loads nothing from the internet: replay works
-offline, with no keys and no GPU."""
+offline, with no keys and no GPU.
+
+On-screen text uses plain words (W4.1); the theme (theme()) and markup.CSS give one restrained style, and the panels run
+in the story's order: task, plan, checks, execution, judge."""
 from __future__ import annotations
 
 import os
@@ -20,18 +23,26 @@ from dataclasses import dataclass, field
 
 import gradio as gr
 
-from vplan.ui import display, live, markup, render, sources
+from vplan.ui import display, live, markup, render, sources, views
 from vplan.ui.display import Display
 
 TITLE = "vplan: LLMs plan, physics verifies"
+BRAND, TAGLINE = "vplan", "LLMs plan, physics verifies"
+SUBTITLE = ("An LLM proposes a pick-and-place plan for a Panda arm. Kinematics and physics checks verify it before "
+            "anything moves, and an independent judge scores the result.")
+FLOW = ("Plan", "Verify", "Execute", "Judge")  # the header's pipeline; the result sections carry the same numbers
 SIM = "sim"  # the Gradio concurrency group of every handler that drives PyBullet (one at a time per event queue)
 SIM_LOCK = threading.Lock()  # the simulator itself; released by the live worker thread, not by the Gradio event
 BUSY_WAIT_S = 2.0
-BUSY = ("the simulator is still running an earlier attempt (it continues after its page closes, until its planner "
-        "calls and execution finish); try again when it is done")
-SOURCES = ("basic scene", "basic scene with wall", "generated task (seed)")
-FONTS = ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"]
-MONO = ["ui-monospace", "Consolas", "Menlo", "monospace"]
+BUSY = ("The simulator is still running an earlier attempt (it finishes its planner calls and execution even after "
+        "its page closes). Try again when it is done.")
+SOURCES = ("Basic scene", "Basic scene with wall", "Generated task")
+DEFAULT_SEED = 1  # seed 0 has no solvable generated task, so the default would open on an error
+BASIC_INFO = "Name one object in the scene, e.g. 'Pick the green cube and place it in the bin.'"
+GENERATED_INFO = "A generated task comes with its own instruction. To type your own, choose a basic scene."
+# System fonts only: the page loads nothing from the internet (Segoe UI on Windows, the platform UI font elsewhere)
+FONTS = ["Segoe UI", "system-ui", "-apple-system", "ui-sans-serif", "Roboto", "Helvetica Neue", "Arial", "sans-serif"]
+MONO = ["Cascadia Mono", "Consolas", "ui-monospace", "Menlo", "monospace"]
 
 
 @dataclass(frozen=True)
@@ -77,7 +88,8 @@ def make_task(source: str, seed, kind: str, instruction: str) -> live.LiveTask:
 
 
 def load_task(source: str, seed, kind: str, instruction: str):
-    """(scene image, task panel, instruction, task state). A generated task fills in its own instruction."""
+    """(scene image, task panel, instruction, task state). A generated task fills in its own instruction; on a refused
+    task the panel holds the warning and the instruction comes back unchanged."""
     if not SIM_LOCK.acquire(timeout=BUSY_WAIT_S):
         return None, markup.banner_html(display.Banner("warning", BUSY)), instruction, None
     try:
@@ -91,11 +103,42 @@ def _load_task(source: str, seed, kind: str, instruction: str):
         task = make_task(source, seed, kind, instruction)
     except live.LiveError as exc:
         return None, markup.banner_html(display.Banner("warning", str(exc))), instruction, None
-    lines = [("Task", task.label), ("Ground truth (oracle; never shown to the planner)", task.truth),
-             ("Objects", ", ".join(f"{o.id}: {o.color} {o.shape}" for o in task.task.scene.objects)),
-             ("Obstacles", str(len(task.task.scene.obstacles)))]
+    scene = task.task.scene
+    lines = [("Task", task.task.instruction), (display.TRUTH, task.truth),
+             ("Objects", views.object_summary(scene)), ("Obstacles", views.obstacle_summary(scene, task.enclosure))]
     key = task_key(source, seed, kind, instruction if source != SOURCES[2] else "")
-    return render.scene_image(task.task.scene), markup.status_html(lines), task.task.instruction, (key, task)
+    return render.scene_image(scene), markup.status_html(lines), task.task.instruction, (key, task)
+
+
+# Outputs of scene_change and task_change, in order (build_app wires them to these components)
+SCENE_CHANGE_OUTPUTS = ("generated_row", "instruction", "scene", "info", "state", "banner", "status", "plan",
+                        "timeline", "findings", "cosmos", "execution", "judge")
+TASK_CHANGE_OUTPUTS = ("instruction", "scene", "info", "state", "banner", "status", "plan", "timeline", "findings",
+                       "cosmos", "execution", "judge")
+
+
+def _cleared() -> tuple:
+    """The live result panels as on a fresh page: no warning, no stale result of another task."""
+    return shown(display.idle_display("live").values())
+
+
+def scene_change(source: str, seed, kind: str, typed: str) -> tuple:
+    """The Scene choice changed (SCENE_CHANGE_OUTPUTS). The new task is loaded at once; a generated task fills in its
+    own instruction and locks the box, a basic scene unlocks it with the text last typed there. Any warning and the
+    previous task's results are cleared."""
+    generated = source == SOURCES[2]
+    image, info, instruction, state = load_task(source, seed, kind, "" if generated else typed)
+    box = (gr.update(value=instruction if state is not None else "", interactive=False, info=GENERATED_INFO)
+           if generated else gr.update(value=typed, interactive=True, info=BASIC_INFO))
+    return (gr.update(visible=generated), box, image, info, state, *_cleared())
+
+
+def task_change(source: str, seed, kind: str) -> tuple:
+    """The seed or task type of a generated task changed (TASK_CHANGE_OUTPUTS): reload it, as scene_change does."""
+    if source != SOURCES[2]:
+        return tuple(gr.skip() for _ in TASK_CHANGE_OUTPUTS)
+    image, info, instruction, state = load_task(source, seed, kind, "")
+    return (instruction if state is not None else "", image, info, state, *_cleared())
 
 
 def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instruction: str, planner_label: str,
@@ -118,10 +161,7 @@ def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instr
             except live.LiveError as exc:
                 yield error_values(str(exc))
                 return
-        if source == SOURCES[2] and instruction.strip() and instruction.strip() != task.task.instruction:
-            yield error_values("a generated task's instruction is fixed by its oracle; choose a basic scene to type "
-                               "your own instruction")
-            return
+        # A generated task always runs with its own instruction (the box is locked and may lag behind a seed change)
         k = int(k)
         progress = display.LiveProgress(task, option.label, settings.cosmos_url, k)
         events: queue.Queue = queue.Queue()
@@ -148,7 +188,7 @@ def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instr
         yield progress.display().values()
     if "error" in outcome:
         exc = outcome["error"]
-        text = f"the attempt stopped: {type(exc).__name__}: {exc}"
+        text = f"the attempt stopped: {type(exc).__name__}: {exc}"  # tests and logs match this prefix
         if option.secret:  # an unexpected exception must not carry the key onto the page
             text = text.replace(option.secret, "[REDACTED]")
         yield error_values(text[:500])
@@ -166,7 +206,7 @@ def replay_open(settings: UISettings, path: str):
     """(case dropdown update, info panel) for a run directory, pilot run, recording or folder of recordings under
     the replay roots."""
     path = (path or "").strip()
-    problem = _path_error(path) if path else "enter a path"
+    problem = _path_error(path) if path else "enter a path to a run folder or a recording"
     if problem is None:
         try:
             cases = sources.list_cases(path, roots=settings.replay_roots())
@@ -175,8 +215,8 @@ def replay_open(settings: UISettings, path: str):
     if problem is not None:
         return gr.update(choices=[], value=None), markup.banner_html(display.Banner("warning", problem))
     choices = [(c.label, c.case_id) for c in cases]
-    return (gr.update(choices=choices, value=choices[0][1]),
-            markup.status_html([("Source", f"{path}: {len(cases)} recorded attempt(s)")]))
+    n = f"{len(cases)} recorded attempt{'s' if len(cases) != 1 else ''}"
+    return (gr.update(choices=choices, value=choices[0][1]), markup.status_html([("Opened", f"{path} ({n})")]))
 
 
 def replay_show(settings: UISettings, path: str, case_id: str | None, seed_dir: str | None = None) -> tuple:
@@ -216,20 +256,31 @@ class Panels:
                 self.judge]
 
 
-def _panels() -> Panels:
-    """Storyboard order (spec §3): plan, check timeline, highlighted findings, Cosmos frames, execution, Judge."""
+def _panels(mode: str) -> Panels:
+    """Storyboard order (spec §3), numbered as the header's pipeline: the outcome, then 1 plan, 2 checks (timeline,
+    highlighted failures, Cosmos frames), 3 execution, 4 judge."""
+    idle = display.idle_display(mode)
     banner = gr.HTML()
     status = gr.HTML()
-    with gr.Row():
-        plan = gr.Code(language="json", label="Plan (latest round, JSON)", interactive=False, scale=1)
-        timeline = gr.HTML(label="Check timeline (per repair round)", scale=2)
-    findings = gr.Gallery(label="Verifier findings: offending bodies in magenta (overview, close-up)", columns=2,
-                          height="auto", object_fit="contain", visible=False)
-    cosmos = gr.Gallery(label="Cosmos key frames and verdicts (learned visual check, not verification)", columns=3,
-                        height="auto", object_fit="contain", visible=False)
-    with gr.Row():
-        execution = gr.HTML(label="Execution", scale=1)
-        judge = gr.HTML(label="Judge", scale=1)
+    with gr.Row(equal_height=False):
+        with gr.Column(scale=2, min_width=360):
+            gr.HTML(markup.step_html(1, "Plan", "the planner's proposal, latest round"))
+            plan = gr.Code(language="json", label="Plan (JSON)", interactive=False, max_lines=30, buttons=["copy"])
+        with gr.Column(scale=3, min_width=480):
+            gr.HTML(markup.step_html(2, "Verify", "kinematics and physics checks before anything moves"))
+            timeline = gr.HTML(idle.timeline_html, label="Checks, round by round")
+            findings = gr.Gallery(label="What failed: problem parts in magenta", columns=2, height="auto",
+                                  object_fit="contain", visible=False, buttons=["fullscreen"])
+            cosmos = gr.Gallery(label="What Cosmos saw: key frames and verdicts (a learned visual check, not "
+                                "verification)", columns=3, height="auto", object_fit="contain", visible=False,
+                                buttons=["fullscreen"])
+    with gr.Row(equal_height=False):
+        with gr.Column(scale=1, min_width=360):
+            gr.HTML(markup.step_html(3, "Execute", "the approved plan in the PyBullet physics simulation"))
+            execution = gr.HTML(idle.execution_html, label="Execution")
+        with gr.Column(scale=1, min_width=360):
+            gr.HTML(markup.step_html(4, "Judge", "independent scoring of the result"))
+            judge = gr.HTML(idle.judge_html, label="Judge")
     return Panels(banner, status, plan, timeline, findings, cosmos, execution, judge)
 
 
@@ -242,29 +293,48 @@ def shown(values: tuple) -> tuple:
 def build_app(settings: UISettings) -> gr.Blocks:
     labels = [o.label for o in settings.planners]
     with gr.Blocks(title=TITLE, analytics_enabled=False) as demo:
-        gr.Markdown(f"## {TITLE}\nAn LLM proposes a Panda pick-and-place plan; deterministic kinematics and physics "
-                    "check it before anything moves (spec §9); an independent Judge scores the executed run (§13).")
+        gr.HTML(markup.header_html(BRAND, TAGLINE, SUBTITLE, FLOW))
         with gr.Tabs(selected="replay" if settings.replay else "live"):
             with gr.Tab("Live", id="live"):
-                with gr.Row():
-                    with gr.Column(scale=1):
+                gr.HTML(markup.step_html(None, "Task", "choose a scene and a planner, then run the attempt"))
+                with gr.Row(equal_height=False):
+                    with gr.Column(scale=5, min_width=420):
                         source = gr.Radio(list(SOURCES), value=SOURCES[0], label="Scene")
-                        with gr.Row():
-                            seed = gr.Number(value=0, precision=0, minimum=0, label="Seed (generated task)")
-                            kind = gr.Dropdown(list(live.TASK_KINDS), value="feasible", label="Kind (generated task)")
-                        instruction = gr.Textbox(value=live.BASIC_INSTRUCTION, label="Instruction (basic scene)")
+                        with gr.Row(visible=False) as generated_row:
+                            seed = gr.Number(value=DEFAULT_SEED, precision=0, minimum=0, label="Task seed")
+                            kind = gr.Dropdown([(live.KIND_LABELS[key], key) for key in live.TASK_KINDS],
+                                               value="feasible", label="Task type")
+                        instruction = gr.Textbox(value=live.BASIC_INSTRUCTION, label="Instruction", info=BASIC_INFO)
                         planner = gr.Radio(labels, value=labels[-1], label="Planner")
-                        k = gr.Slider(0, 3, value=3, step=1, label="Repair rounds k (spec §10: at most 3)")
+                        k = gr.Slider(0, 3, value=3, step=1, label="Repair rounds (up to 3)",
+                                      info="After a rejected plan, the planner sees which checks failed and tries "
+                                           "again.")
                         with gr.Row():
-                            load = gr.Button("Load scene")
+                            load = gr.Button("Load scene", variant="secondary")
                             run = gr.Button("Plan, verify, execute", variant="primary")
-                    with gr.Column(scale=1):
-                        scene = gr.Image(label="Scene", type="numpy", interactive=False)
+                    with gr.Column(scale=4, min_width=360):
+                        scene = gr.Image(label="Scene", type="numpy", interactive=False, height=420,
+                                         buttons=["fullscreen"])
                         info = gr.HTML()
-                live_panels = _panels()
+                live_panels = _panels("live")
                 state = gr.State(None)
-                load.click(load_task, [source, seed, kind, instruction], [scene, info, instruction, state],
-                           concurrency_id=SIM, concurrency_limit=1)
+                typed = gr.State(live.BASIC_INSTRUCTION)  # the last text typed for a basic scene
+                task_outputs = [scene, info, instruction, state]
+                load.click(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
+                           concurrency_limit=1)
+                instruction.submit(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
+                                   concurrency_limit=1)
+                instruction.input(lambda text: text, [instruction], [typed], queue=False, show_progress="hidden",
+                                  api_visibility="private")
+                source.input(scene_change, [source, seed, kind, typed],
+                             [generated_row, instruction, scene, info, state, *live_panels.outputs()],
+                             concurrency_id=SIM, concurrency_limit=1, trigger_mode="always_last")
+                for control in (seed, kind):
+                    control.input(task_change, [source, seed, kind],
+                                  [instruction, scene, info, state, *live_panels.outputs()], concurrency_id=SIM,
+                                  concurrency_limit=1, trigger_mode="always_last")
+                demo.load(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
+                          concurrency_limit=1)  # the page opens with the default scene shown
 
                 def run_live(*args):
                     for values in run_attempt(settings, *args):
@@ -273,17 +343,21 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 run.click(run_live, [state, source, seed, kind, instruction, planner, k], live_panels.outputs(),
                           concurrency_id=SIM, concurrency_limit=1)
             with gr.Tab("Replay", id="replay"):
-                gr.Markdown("Replay a recorded attempt: a W3.1 run directory, a pilot run, or a UI recording (live "
-                            "attempts are saved under `runs/ui`). No keys, no GPU and no network are needed.")
-                with gr.Row():
-                    path = gr.Textbox(value=settings.replay or settings.record_dir or "", label="Path", scale=3)
-                    seed_dir = gr.Textbox(value=settings.seed_dir or "", label="Seed-set directory (W3.1 runs; "
-                                          "optional)", scale=2)
-                    open_ = gr.Button("Open", scale=1)
-                case = gr.Dropdown(choices=[], label="Attempt", allow_custom_value=False)
-                show = gr.Button("Replay", variant="primary")
+                gr.HTML(markup.step_html(None, "Recorded attempt",
+                                         "replay a saved run with no API key, no GPU and no network"))
+                with gr.Row(equal_height=True):
+                    path = gr.Textbox(value=settings.replay or settings.record_dir or "",
+                                      label="Run folder or recording", scale=3,
+                                      info="An evaluation run, a pilot run, or saved live attempts (runs/ui).")
+                    seed_dir = gr.Textbox(value=settings.seed_dir or "", label="Seed-set folder (optional)", scale=2,
+                                          info="Only for an evaluation run whose seed set has moved.")
+                    open_ = gr.Button("Open", scale=1, min_width=120)
+                with gr.Row(equal_height=True):
+                    case = gr.Dropdown(choices=[], label="Attempt", allow_custom_value=False, scale=5)
+                    show = gr.Button("Replay", variant="primary", scale=1, min_width=160)
                 replay_info = gr.HTML()
-                replay_panels = _panels()
+                replay_panels = _panels("replay")
+
                 def open_replay(value):
                     return replay_open(settings, value)
 
@@ -296,7 +370,18 @@ def build_app(settings: UISettings) -> gr.Blocks:
 
 
 def theme() -> gr.themes.Base:
-    return gr.themes.Default(font=FONTS, font_mono=MONO)
+    """Gradio's Default theme in slate and blue with system fonts. Primary buttons use blue 600 (white text 5.2:1);
+    secondary text is slate 600 (7.2:1 on white), not the default slate 400, which fails contrast."""
+    return gr.themes.Default(primary_hue="blue", secondary_hue="blue", neutral_hue="slate", text_size="lg",
+                             font=FONTS, font_mono=MONO).set(
+        body_background_fill="*neutral_50", body_background_fill_dark="*neutral_950",
+        body_text_color_subdued="*neutral_600", body_text_color_subdued_dark="*neutral_400",
+        block_info_text_color="*neutral_600", block_info_text_color_dark="*neutral_400",
+        block_shadow="0 1px 2px rgba(15, 23, 42, 0.06)", block_label_text_weight="600",
+        block_title_text_weight="600", button_large_text_weight="600",
+        button_primary_background_fill="*primary_600", button_primary_background_fill_hover="*primary_700",
+        button_primary_background_fill_dark="*primary_600", button_primary_background_fill_hover_dark="*primary_500",
+        slider_color="*primary_600", color_accent="*primary_600", loader_color="*primary_600")
 
 
 def launch(settings: UISettings) -> None:
