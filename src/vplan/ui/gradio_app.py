@@ -111,8 +111,8 @@ def _load_task(source: str, seed, kind: str, instruction: str):
 
 
 # Outputs of scene_change and task_change, in order (build_app wires them to these components)
-SCENE_CHANGE_OUTPUTS = ("generated_row", "instruction", "scene", "info", "state", "banner", "status", "plan",
-                        "timeline", "findings", "cosmos", "execution", "judge")
+SCENE_CHANGE_OUTPUTS = ("generated_row", "instruction", "scene", "info", "state", "memory", "banner", "status",
+                        "plan", "timeline", "findings", "cosmos", "execution", "judge")
 TASK_CHANGE_OUTPUTS = ("instruction", "scene", "info", "state", "banner", "status", "plan", "timeline", "findings",
                        "cosmos", "execution", "judge")
 
@@ -122,15 +122,18 @@ def _cleared() -> tuple:
     return shown(display.idle_display("live").values())
 
 
-def scene_change(source: str, seed, kind: str, typed: str) -> tuple:
-    """The Scene choice changed (SCENE_CHANGE_OUTPUTS). The new task is loaded at once; a generated task fills in its
-    own instruction and locks the box, a basic scene unlocks it with the text last typed there. Any warning and the
-    previous task's results are cleared."""
+def scene_change(source: str, seed, kind: str, instruction: str, memory: tuple[str, str]) -> tuple:
+    """The Scene choice changed (SCENE_CHANGE_OUTPUTS). memory is (the previous scene choice, the last text typed for a
+    basic scene). The new task is loaded at once; a generated task fills in its own instruction and locks the box, a
+    basic scene unlocks it with the text last typed there. Any warning and the previous task's results are cleared."""
+    last_source, typed = memory
+    if last_source != SOURCES[2]:  # the box was editable, so it holds the user's text (loaded or not)
+        typed = instruction
     generated = source == SOURCES[2]
-    image, info, instruction, state = load_task(source, seed, kind, "" if generated else typed)
-    box = (gr.update(value=instruction if state is not None else "", interactive=False, info=GENERATED_INFO)
+    image, info, filled, state = load_task(source, seed, kind, "" if generated else typed)
+    box = (gr.update(value=filled if state is not None else "", interactive=False, info=GENERATED_INFO)
            if generated else gr.update(value=typed, interactive=True, info=BASIC_INFO))
-    return (gr.update(visible=generated), box, image, info, state, *_cleared())
+    return (gr.update(visible=generated), box, image, info, state, (source, typed), *_cleared())
 
 
 def task_change(source: str, seed, kind: str) -> tuple:
@@ -318,16 +321,14 @@ def build_app(settings: UISettings) -> gr.Blocks:
                         info = gr.HTML()
                 live_panels = _panels("live")
                 state = gr.State(None)
-                typed = gr.State(live.BASIC_INSTRUCTION)  # the last text typed for a basic scene
+                memory = gr.State((SOURCES[0], live.BASIC_INSTRUCTION))  # see scene_change
                 task_outputs = [scene, info, instruction, state]
                 load.click(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
                            concurrency_limit=1)
                 instruction.submit(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
                                    concurrency_limit=1)
-                instruction.input(lambda text: text, [instruction], [typed], queue=False, show_progress="hidden",
-                                  api_visibility="private")
-                source.input(scene_change, [source, seed, kind, typed],
-                             [generated_row, instruction, scene, info, state, *live_panels.outputs()],
+                source.input(scene_change, [source, seed, kind, instruction, memory],
+                             [generated_row, instruction, scene, info, state, memory, *live_panels.outputs()],
                              concurrency_id=SIM, concurrency_limit=1, trigger_mode="always_last")
                 for control in (seed, kind):
                     control.input(task_change, [source, seed, kind],
@@ -345,16 +346,16 @@ def build_app(settings: UISettings) -> gr.Blocks:
             with gr.Tab("Replay", id="replay"):
                 gr.HTML(markup.step_html(None, "Recorded attempt",
                                          "replay a saved run with no API key, no GPU and no network"))
-                with gr.Row(equal_height=True):
+                with gr.Row(equal_height=False, elem_classes=["vp-align-end"]):
                     path = gr.Textbox(value=settings.replay or settings.record_dir or "",
-                                      label="Run folder or recording", scale=3,
+                                      label="Run folder or recording", scale=3, max_lines=1,
                                       info="An evaluation run, a pilot run, or saved live attempts (runs/ui).")
                     seed_dir = gr.Textbox(value=settings.seed_dir or "", label="Seed-set folder (optional)", scale=2,
-                                          info="Only for an evaluation run whose seed set has moved.")
-                    open_ = gr.Button("Open", scale=1, min_width=120)
-                with gr.Row(equal_height=True):
+                                          max_lines=1, info="Only for an evaluation run whose seed set has moved.")
+                    open_ = gr.Button("Open", scale=1, min_width=140)
+                with gr.Row(equal_height=False, elem_classes=["vp-align-end"]):
                     case = gr.Dropdown(choices=[], label="Attempt", allow_custom_value=False, scale=5)
-                    show = gr.Button("Replay", variant="primary", scale=1, min_width=160)
+                    show = gr.Button("Replay", variant="primary", scale=1, min_width=140)
                 replay_info = gr.HTML()
                 replay_panels = _panels("replay")
 

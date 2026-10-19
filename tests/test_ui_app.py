@@ -152,8 +152,11 @@ def test_a_generated_task_runs_with_its_own_instruction_whatever_the_box_holds(m
 
 
 def test_choosing_a_generated_task_fills_and_locks_the_instruction_and_clears_warnings():
-    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[2], 1, KIND3, live.BASIC_INSTRUCTION)))
+    typed = "Pick the green cube and place it in the bin."
+    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[2], 1, KIND3, typed,
+                                                              (app.SOURCES[0], live.BASIC_INSTRUCTION))))
     task = live.generated_task(1, KIND3)
+    assert out["memory"] == (app.SOURCES[2], typed)  # the text typed for the basic scene is kept
     assert out["generated_row"]["visible"] is True
     assert out["instruction"]["value"] == task.task.instruction and out["instruction"]["interactive"] is False
     assert out["instruction"]["info"] == app.GENERATED_INFO
@@ -165,13 +168,20 @@ def test_choosing_a_generated_task_fills_and_locks_the_instruction_and_clears_wa
 
 def test_choosing_a_basic_scene_unlocks_the_instruction_and_restores_the_typed_text():
     typed = "Pick the green cube and place it in the bin."
-    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[0], 1, KIND3, typed)))
+    generated = live.generated_task(1, KIND3).task.instruction
+    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[0], 1, KIND3, generated,
+                                                              (app.SOURCES[2], typed))))
     assert out["generated_row"]["visible"] is False
     assert out["instruction"]["value"] == typed and out["instruction"]["interactive"] is True
     assert out["instruction"]["info"] == app.BASIC_INFO
     assert out["state"][1].task.instruction == typed and out["banner"] == ""
-    bad = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[0], 1, KIND3, "Pick the blue cube.")))
-    assert bad["state"] is None and "exactly one object" in bad["info"] and bad["banner"] == ""
+    assert out["memory"] == (app.SOURCES[0], typed)
+    # between the two basic scenes the box keeps whatever was typed, even if it was never loaded
+    out = dict(zip(app.SCENE_CHANGE_OUTPUTS, app.scene_change(app.SOURCES[1], 1, KIND3, "Pick the blue cube.",
+                                                              (app.SOURCES[0], typed))))
+    assert out["instruction"]["value"] == "Pick the blue cube." and out["memory"] == (app.SOURCES[1],
+                                                                                      "Pick the blue cube.")
+    assert out["state"] is None and "exactly one object" in out["info"] and out["banner"] == ""
 
 
 def test_changing_the_seed_or_type_reloads_the_generated_task():
