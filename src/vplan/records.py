@@ -730,6 +730,43 @@ class FrameExport(Frozen):
         return self
 
 
+ShadowSource = Literal["natural", "wrong_object", "misaligned_grasp"]
+
+
+class ShadowRecord(Frozen):
+    """One shadow.jsonl line (spec §11 "Shadow study", §14 config 4): one Cosmos stage question about one key frame of
+    an executed round, scored against the spec §11 state predicate for the oracle target. A learned visual check, never
+    verification; Cosmos never influenced the run it annotates.
+
+    source natural: the run's own key frames (frames are run-directory paths); wrong_object and misaligned_grasp:
+    injected negatives rendered by the shadow study (frames are paths in its output directory). posed is the object
+    the frames show the plan acting on. frames are in retry-view order. checks are the requests in order (the gate
+    views, then all views after `uncertain`); verdict is the last one's. Exactly one of verdict, error (the endpoint
+    failed; a rerun asks again) and skipped (not asked, and why) is set."""
+    question_id: str  # "<attempt_id>/r<round>/<stage>/<source>"
+    attempt_id: str
+    task_index: int = Field(ge=0)
+    round_index: int = Field(ge=0, le=3)
+    stage: VisualStage
+    source: ShadowSource
+    subject: str
+    posed: str
+    frames: tuple[str, ...] = Field(min_length=1)
+    truth: bool
+    checks: tuple[VisualCheck, ...] = ()
+    verdict: Literal["pass", "fail", "uncertain"] | None = None
+    error: str | None = None
+    skipped: str | None = None
+
+    @model_validator(mode="after")
+    def _one_result(self) -> "ShadowRecord":
+        if sum(x is not None for x in (self.verdict, self.error, self.skipped)) != 1:
+            raise ValueError("a shadow record has exactly one of verdict, error and skipped")
+        if self.verdict is not None and (not self.checks or self.checks[-1].verdict.verdict != self.verdict):
+            raise ValueError("a shadow record's verdict is its last check's")
+        return self
+
+
 class EvalAttempt(Frozen):
     """One runs/<run_id>/attempts.jsonl line (W3.1), written only by the parent process.
 
