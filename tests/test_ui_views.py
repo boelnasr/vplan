@@ -290,6 +290,10 @@ def test_verifier_text_is_rewritten_with_plain_names():
     assert views.humanize("carried 'cube_red' too close to robot link panda_hand", WALL_SCENE) == \
         "carried red cube too close to the gripper"
     assert views.humanize("panda_joint4 within 2 deg of its limit", {}) == "joint 4 within 2 deg of its limit"
+    # a model's explanation often repeats the id after the name
+    names = {"o_400dc354a15f0aae": "yellow cylinder"}
+    assert views.humanize("The yellow cylinder (o_400dc354a15f0aae) is beyond reach; o_400dc354a15f0aae is far.",
+                          names) == "The yellow cylinder is beyond reach; yellow cylinder is far."
     ev = views.finding_evidence(finding("joint_limits", plan_field="transport_via[0]", measured=2.8, threshold=2.9,
                                         direction="panda_joint4 within 2 deg of its limit", bodies=()), WALL_SCENE)
     assert ev.startswith("joint 4 within 2 deg of its limit") and "plan field transport_via[0]" in ev
@@ -343,6 +347,7 @@ def test_outcomes_pair_colour_with_an_icon_and_a_word():
 
 def test_the_css_wins_over_gradio_prose_rules():
     """gr.HTML content sits in .prose, whose two-class colour and table rules beat single-class selectors."""
-    rules = [line for line in markup.CSS.splitlines() if ".vp-" in line and not line.startswith((":root", ".dark"))]
-    assert rules and all(sel.strip().startswith(markup.SCOPE.strip()) for line in rules
-                         for sel in line.split("{")[0].split(","))
+    scoped = markup._scoped(markup._RULES)
+    assert scoped in markup.CSS and scoped.count("{") == markup._RULES.count("{")
+    assert all(sel.strip().startswith(markup.SCOPE.strip()) for line in scoped.splitlines()
+               for sel in line.split("{")[0].split(","))

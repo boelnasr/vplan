@@ -137,6 +137,7 @@ def humanize(text: str, names: Mapping[str, str]) -> str:
     text = re.sub(r"'([^']+)'", lambda m: (("the " if names[m.group(1)] in ("wall", "block", "lid", "enclosure")
                                             else "") + names[m.group(1)]) if m.group(1) in names else m.group(0), text)
     for body, name in names.items():
+        text = re.sub(rf"{re.escape(name)} \({re.escape(body)}\)", name, text, flags=re.IGNORECASE)
         text = re.sub(rf"\b{re.escape(body)}\b", name, text)
     return text
 
@@ -369,7 +370,7 @@ def _call_problems(call: PlannerCall) -> list[str]:
     return out
 
 
-def _summary(rnd: RoundRecord) -> str:
+def _summary(rnd: RoundRecord, names: Mapping[str, str]) -> str:
     call, ev = rnd.call, rnd.evaluation
     plan = call.plan
     if ev is None:
@@ -377,9 +378,9 @@ def _summary(rnd: RoundRecord) -> str:
                 "malformed": f"the reply was not a valid plan ({len(call.errors)} errors)",
                 "protocol_error": f"protocol error; the next request uses '{call.next_protocol}'"}.get(
             call.outcome, call.outcome)
-    elif ev.outcome == "refused":
-        text = (f"refused ({REFUSAL_WORDS.get(plan.reason, plan.reason)}): {plan.explanation}" if plan is not None
-                else "refused")
+    elif ev.outcome == "refused":  # the explanation is the model's; ids in it become names (the JSON keeps them)
+        text = (f"refused ({REFUSAL_WORDS.get(plan.reason, plan.reason)}): {humanize(plan.explanation, names)}"
+                if plan is not None else "refused")
     elif ev.outcome == "blocked" and ev.visual is not None and ev.visual.status == "fail":
         text = "rejected by the Cosmos visual check (learned, not verification)"
     elif ev.outcome == "blocked":
@@ -408,7 +409,7 @@ def round_view(rnd: RoundRecord, *, mode: str, names: Mapping[str, str] | None =
         index=rnd.round_index, call_outcome=call.outcome, planner=planner_name(call.provider, call.model),
         latency_s=call.latency_s, plan_kind=None if call.plan is None else call.plan.kind,
         plan_json=plan_json(call.plan), outcome=ev.outcome if ev is not None else call.outcome,
-        summary=_summary(rnd), checks=rows, checks_note=note,
+        summary=_summary(rnd, names or {}), checks=rows, checks_note=note,
         visual_status=None if visual is None else visual.status,
         visual=() if visual is None else tuple(
             VisualRow(c.stage, tuple(c.views), c.verdict.verdict, c.verdict.reason, c.verdict.latency_s)

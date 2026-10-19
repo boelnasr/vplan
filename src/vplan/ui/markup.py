@@ -22,7 +22,9 @@ _VARS = """
 .dark{--vp-pass-bg:rgba(46,160,67,.18);--vp-pass-fg:#56d364;--vp-fail-bg:rgba(248,81,73,.18);--vp-fail-fg:#ff7b72;
 --vp-warn-bg:rgba(187,128,9,.2);--vp-warn-fg:#e3b341;--vp-info-bg:rgba(56,139,253,.18);--vp-info-fg:#79c0ff;
 --vp-muted-bg:rgba(110,118,129,.2);--vp-muted-fg:#c9d1d9}
-.gradio-container{max-width:1600px !important;margin:0 auto !important}
+.gradio-container{width:100% !important;max-width:1600px !important;margin:0 auto !important}
+.vp-align-end{align-items:flex-end !important}
+.vp-align-end > button{margin-bottom:var(--block-padding, 10px)}
 .gradio-container textarea:disabled{background:var(--background-fill-secondary);color:var(--body-text-color-subdued);
 cursor:not-allowed}
 """
@@ -122,7 +124,7 @@ def _scoped(rules: str) -> str:
             continue
         selectors, body = block.split("{", 1)
         scoped = ",".join(SCOPE + sel.strip() for sel in selectors.replace("\n", " ").split(", "))
-        out.append(f"{scoped}{{{body.strip()}}}")
+        out.append(f"{scoped}{{{body.strip().replace(chr(10), '')}}}")  # one rule per line
     return "\n".join(out)
 
 
