@@ -30,7 +30,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -42,7 +41,8 @@ from pydantic import ValidationError
 
 from vplan.evaluate.collect import read_run_manifest
 from vplan.evaluate.frames import SEED_MODULUS, FrameMismatch, rebuild_trajectory
-from vplan.evaluate.pilot import _git, _utc_now, _write_json
+from vplan.evaluate.pilot import _git, _utc_now
+from vplan.evaluate.report import _write_atomic
 from vplan.evaluate.runner import RUNS_ROOT
 from vplan.evaluate.seedsets import EvalError, SeedSet, load_seed_set
 from vplan.geometry import pose_to_T, rot_angle
@@ -287,9 +287,7 @@ def _kept(path: Path) -> list[ShadowRecord]:
         if rec.error is None:
             kept.append(rec)
     if partial or len(kept) != len(seen):
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text("".join(r.model_dump_json() + "\n" for r in kept), encoding="utf-8", newline="\n")
-        os.replace(tmp, path)
+        _write_atomic(path, "".join(r.model_dump_json() + "\n" for r in kept))
     return kept
 
 
@@ -307,7 +305,7 @@ def _open(out_dir: Path, identity: dict[str, Any], extra: dict[str, Any]) -> Non
                             "--output")
         return
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(path, {**identity, **extra})
+    _write_atomic(path, json.dumps({**identity, **extra}, indent=2) + "\n")
 
 
 def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, ask: Callable, base_url: str,
@@ -346,7 +344,10 @@ def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, as
                 result = rec.verdict or ("ERROR " + rec.error if rec.error else "skipped: " + rec.skipped)
                 echo(f"{rec.question_id} (truth {rec.truth}): {result} "
                      f"({sum(c.verdict.latency_s for c in rec.checks):.1f} s)")
-                in_row = in_row + 1 if rec.error else 0 if rec.verdict else in_row
+                if rec.error:
+                    in_row += 1
+                elif rec.verdict:  # a skipped record neither breaks nor extends a streak
+                    in_row = 0
                 if in_row >= MAX_CONSECUTIVE_ERRORS:
                     return f"{in_row} endpoint errors in a row at {base_url} (last: {rec.error})", asked, None
     return None, asked, without
@@ -360,9 +361,10 @@ def _finish(out_dir: Path, identity: dict[str, Any], stop: str | None, without: 
         stop = f"{errors} questions ended in an endpoint error"
     summary = {**identity, "status": "complete" if stop is None else "incomplete", "stop_reason": stop,
                "executed_without_frames": without, **summarize(records)}
-    _write_json(out_dir / SUMMARY_JSON, summary)
-    (out_dir / SUMMARY_MD).write_text(summary_markdown(summary), encoding="utf-8", newline="\n")
-    return json.loads((out_dir / SUMMARY_JSON).read_text(encoding="utf-8"))
+    text = json.dumps(summary, indent=2) + "\n"
+    _write_atomic(out_dir / SUMMARY_JSON, text)
+    _write_atomic(out_dir / SUMMARY_MD, summary_markdown(summary))
+    return json.loads(text)
 
 
 def run_shadow(run_dir: str | Path, out_dir: str | Path, *, base_url: str, seed_dir: str | Path | None = None,
