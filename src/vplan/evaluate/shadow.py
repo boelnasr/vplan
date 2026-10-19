@@ -342,12 +342,15 @@ def run_shadow(run_dir: str | Path, out_dir: str | Path, *, base_url: str, seed_
     asked, in_row, stop = 0, 0, None
     with open(out_dir / SHADOW, "a", encoding="utf-8", newline="\n") as f:
         for attempt in _attempts(run_dir):
+            i = attempt.task_index
+            if i >= len(seeds.tasks) or seeds.tasks[i].task_id != attempt.task_id:
+                raise EvalError(f"{attempt.attempt_id} ({attempt.task_id}) has no task at index {i} of the seed set")
             index, rel, pngs = _read_frames(run_dir, attempt)
             if index.subject is None:
                 echo(f"{attempt.attempt_id}: skipped, the instruction names no single object")
                 continue
-            for q in _questions(attempt, index, rel, pngs, seeds.tasks[attempt.task_index],
-                                seeds.oracles[attempt.task_index], seeds.config, out_dir, done):
+            for q in _questions(attempt, index, rel, pngs, seeds.tasks[i], seeds.oracles[i], seeds.config, out_dir,
+                                done):
                 if q.fields["question_id"] in done:
                     continue
                 if q.skipped is not None:

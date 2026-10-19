@@ -279,6 +279,14 @@ def test_the_output_never_goes_inside_the_run_directory(run_dir):
     assert not (run_dir / "shadow").exists()
 
 
+def test_an_attempt_that_does_not_join_its_seed_set_task_is_refused(run_dir, tmp_path, monkeypatch):
+    from vplan.evaluate import shadow
+    short = seed_set()._replace(tasks=seed_set().tasks[:INDEX])  # no task at the executed attempt's index
+    monkeypatch.setattr(shadow, "load_seed_set", lambda path, **kw: short)
+    with pytest.raises(EvalError, match=f"{ATTEMPT}.*seed set"):
+        shadow_run(run_dir, tmp_path / "shadow", [])
+
+
 def test_a_run_over_another_seed_set_is_refused(run_dir, tmp_path, monkeypatch):
     from vplan.evaluate import shadow
     monkeypatch.setattr(shadow, "load_seed_set", lambda path, **kw: seed_set("ef" * 32))
