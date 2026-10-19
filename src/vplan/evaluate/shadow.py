@@ -16,10 +16,12 @@ not a negative. Cosmos hears the object only as the instruction's '<color> <shap
 no single object is not asked about, as the gate skips it.
 
 Output directory OUT (default runs/shadow-<run directory name>), never inside the run directory, which is only read:
-- manifest.json: the run, seed set and Cosmos settings; a rerun with other settings is refused.
+- manifest.json: the run, seed set and Cosmos settings (model, thinking, endpoint, timeout); a rerun with other
+  settings is refused.
 - shadow.jsonl: one records.ShadowRecord per question, appended as each is answered.
 - injected/<frames stem>/r<round>-<stage>-<source>-<view>.png: the injected renders.
-- summary.json and summary.md: summarize() over shadow.jsonl, rewritten at the end of every session.
+- summary.json and summary.md: summarize() over shadow.jsonl, rewritten at the end of every session, and naming the
+  executed attempts the run has no key frames of.
 Rerun the same command to continue: answered and skipped questions are kept; endpoint errors and a partial final line
 are dropped and asked again. Three endpoint errors in a row stop the session, as three failed requests stop a run (D33).
 """
@@ -39,10 +41,10 @@ import pybullet as p
 from pydantic import ValidationError
 
 from vplan.evaluate.collect import read_run_manifest
-from vplan.evaluate.frames import FrameMismatch, rebuild_trajectory
+from vplan.evaluate.frames import SEED_MODULUS, FrameMismatch, rebuild_trajectory
 from vplan.evaluate.pilot import _git, _utc_now, _write_json
 from vplan.evaluate.runner import RUNS_ROOT
-from vplan.evaluate.seedsets import EvalError, load_seed_set
+from vplan.evaluate.seedsets import EvalError, SeedSet, load_seed_set
 from vplan.geometry import pose_to_T, rot_angle
 from vplan.records import (CandidateTrajectory, EvalAttempt, FrameIndex, PickPlacePlan, Scene, SeedSetTask,
                            ShadowRecord, TaskOracle, VisualCheck)
@@ -135,7 +137,7 @@ def _misaligned(traj: CandidateTrajectory, scene: Scene, target_id: str | None, 
     goal = _goal(traj, "grasp").copy()
     goal[:3, 3] += goal[:3, 0] * rng.choice((-1.0, 1.0)) * rng.uniform(*OFFSET_M)
     q_grasp = np.asarray(traj.segments[SEGMENT["grasp"]].q[-1])
-    np.random.seed(seed % 2 ** 32)  # ManipulaPy IK perturbations use the global RNG
+    np.random.seed(seed % SEED_MODULUS)  # ManipulaPy IK perturbations use the global RNG
     q, _ = load_panda().ik(goal, q_grasp, max_iterations=IK_ITERATIONS)
     q = q if np.all(np.isfinite(q)) else q_grasp  # posed unchanged, so it misses the goal and is skipped
     return _with_client(lambda c: _look(build_scene(scene, c, q), scene, "grasp", target_id, None, cfg, goal, views))
@@ -143,7 +145,7 @@ def _misaligned(traj: CandidateTrajectory, scene: Scene, target_id: str | None, 
 
 # ---- reading the run ------------------------------------------------------------------------------------------
 def _attempts(run_dir: Path) -> Iterator[EvalAttempt]:
-    """attempts.jsonl rows with written key frames, one at a time (an executed record is about 0.5 MB)."""
+    """attempts.jsonl rows of executed attempts, one at a time (an executed record is about 0.5 MB)."""
     path = run_dir / "attempts.jsonl"
     if not path.is_file():
         raise EvalError(f"{run_dir} has no attempts.jsonl")
@@ -154,7 +156,7 @@ def _attempts(run_dir: Path) -> Iterator[EvalAttempt]:
             except ValidationError as exc:
                 raise EvalError(f"{run_dir.name}/attempts.jsonl line {number} does not validate "
                                 f"({exc.error_count()} errors)") from None
-            if attempt.record is not None and attempt.frames is not None and attempt.frames.status == "written":
+            if attempt.outcome == "executed" and attempt.record is not None:
                 yield attempt
 
 
@@ -235,7 +237,7 @@ def _questions(attempt: EvalAttempt, index: FrameIndex, rel: str, pngs: dict[str
             from vplan.robot import HOME_Q
             posed = str(rng.choice(others))
             wrong = plan.model_copy(update={"target_id": posed})
-            wtraj = build_trajectory(wrong, scene, HOME_Q, seed=task.seed % 2 ** 32, cfg=cfg)
+            wtraj = build_trajectory(wrong, scene, HOME_Q, seed=task.seed % SEED_MODULUS, cfg=cfg)
             looks = {stage: _with_client(lambda c: _look(_pose(c, wrong, wtraj, scene, stage), scene, stage, target,
                                                          posed, cfg, _goal(wtraj, stage), views)) for stage in STAGES}
             for stage in STAGES:
@@ -308,12 +310,68 @@ def _open(out_dir: Path, identity: dict[str, Any], extra: dict[str, Any]) -> Non
     _write_json(path, {**identity, **extra})
 
 
+def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, ask: Callable, base_url: str,
+             model: str, timeout_s: float, limit: int | None, echo: Callable[[str], None]
+             ) -> tuple[str | None, int, list[str] | None]:
+    """Ask every pending question, appending each record as it is answered. Returns the stop reason (None when every
+    attempt was reached), the questions asked, and the executed attempts the run has no key frames for (None when the
+    session stopped before the end of attempts.jsonl)."""
+    asked, in_row, without = 0, 0, []
+    with open(out_dir / SHADOW, "a", encoding="utf-8", newline="\n") as f:
+        for attempt in _attempts(run_dir):
+            i = attempt.task_index
+            if i >= len(seeds.tasks) or seeds.tasks[i].task_id != attempt.task_id:
+                raise EvalError(f"{attempt.attempt_id} ({attempt.task_id}) has no task at index {i} of the seed set")
+            if attempt.frames is None or attempt.frames.status != "written":
+                echo(f"{attempt.attempt_id}: executed, but the run has no key frames of it")
+                without.append(attempt.attempt_id)
+                continue
+            index, rel, pngs = _read_frames(run_dir, attempt)
+            if index.subject is None:
+                echo(f"{attempt.attempt_id}: skipped, the instruction names no single object")
+                continue
+            for q in _questions(attempt, index, rel, pngs, seeds.tasks[i], seeds.oracles[i], seeds.config, out_dir,
+                                done):
+                if q.fields["question_id"] in done:
+                    continue
+                if q.skipped is not None:
+                    rec = ShadowRecord(**q.fields, skipped=q.skipped)
+                elif limit is not None and asked >= limit:
+                    return f"--limit {limit} reached", asked, None
+                else:
+                    rec = _ask(q, index.gate_views, index.retry_views, ask, base_url, model, timeout_s)
+                    asked += 1
+                f.write(rec.model_dump_json() + "\n")
+                f.flush()
+                result = rec.verdict or ("ERROR " + rec.error if rec.error else "skipped: " + rec.skipped)
+                echo(f"{rec.question_id} (truth {rec.truth}): {result} "
+                     f"({sum(c.verdict.latency_s for c in rec.checks):.1f} s)")
+                in_row = in_row + 1 if rec.error else 0 if rec.verdict else in_row
+                if in_row >= MAX_CONSECUTIVE_ERRORS:
+                    return f"{in_row} endpoint errors in a row at {base_url} (last: {rec.error})", asked, None
+    return None, asked, without
+
+
+def _finish(out_dir: Path, identity: dict[str, Any], stop: str | None, without: list[str] | None) -> dict[str, Any]:
+    """Write summary.json and summary.md over every record in shadow.jsonl; returns the summary as written."""
+    records = _records(out_dir / SHADOW)
+    errors = sum(r.error is not None for r in records)
+    if stop is None and errors:
+        stop = f"{errors} questions ended in an endpoint error"
+    summary = {**identity, "status": "complete" if stop is None else "incomplete", "stop_reason": stop,
+               "executed_without_frames": without, **summarize(records)}
+    _write_json(out_dir / SUMMARY_JSON, summary)
+    (out_dir / SUMMARY_MD).write_text(summary_markdown(summary), encoding="utf-8", newline="\n")
+    return json.loads((out_dir / SUMMARY_JSON).read_text(encoding="utf-8"))
+
+
 def run_shadow(run_dir: str | Path, out_dir: str | Path, *, base_url: str, seed_dir: str | Path | None = None,
                model: str = DEFAULT_MODEL, timeout_s: float = TIMEOUT_S, limit: int | None = None,
                ask: Callable = ask_cosmos, echo: Callable[[str], None] = print) -> ShadowResult:
     """Ask Cosmos about every executed round of run_dir (a W3.1 run with frames) and write OUT (see the module
-    docstring). Refusals raise EvalError before anything is written. limit caps the questions asked in this session.
-    ask is ask_cosmos's seam for tests."""
+    docstring). Refusals raise EvalError before anything is written; damaged evidence found later (a frame that does
+    not match its index, a trajectory that does not rebuild) raises EvalError mid-session, after the summary is
+    rewritten. limit caps the questions asked in this session. ask is ask_cosmos's seam for tests."""
     run_dir, out_dir = Path(run_dir), Path(out_dir)
     if out_dir.resolve().is_relative_to(run_dir.resolve()):
         raise EvalError(f"--output {out_dir} is inside the run directory {run_dir}, which the shadow study only reads")
@@ -335,52 +393,16 @@ def run_shadow(run_dir: str | Path, out_dir: str | Path, *, base_url: str, seed_
                         f"made on {manifest['seed_set_hash'][:12]}")
     identity = {"kind": KIND, "schema_version": SCHEMA_VERSION, "run_id": manifest.get("run_id", run_dir.name),
                 "config": manifest["config"], "split": manifest["split"], "seed_set_hash": manifest["seed_set_hash"],
-                "model": model, "enable_thinking": ENABLE_THINKING}
-    _open(out_dir, identity, {"created_utc": _utc_now(), "base_url": base_url, "timeout_s": timeout_s,
-                              "git": _git()})
+                "model": model, "enable_thinking": ENABLE_THINKING, "base_url": base_url, "timeout_s": timeout_s}
+    _open(out_dir, identity, {"created_utc": _utc_now(), "git": _git()})
     done = {r.question_id for r in _kept(out_dir / SHADOW)}
-    asked, in_row, stop = 0, 0, None
-    with open(out_dir / SHADOW, "a", encoding="utf-8", newline="\n") as f:
-        for attempt in _attempts(run_dir):
-            i = attempt.task_index
-            if i >= len(seeds.tasks) or seeds.tasks[i].task_id != attempt.task_id:
-                raise EvalError(f"{attempt.attempt_id} ({attempt.task_id}) has no task at index {i} of the seed set")
-            index, rel, pngs = _read_frames(run_dir, attempt)
-            if index.subject is None:
-                echo(f"{attempt.attempt_id}: skipped, the instruction names no single object")
-                continue
-            for q in _questions(attempt, index, rel, pngs, seeds.tasks[i], seeds.oracles[i], seeds.config, out_dir,
-                                done):
-                if q.fields["question_id"] in done:
-                    continue
-                if q.skipped is not None:
-                    rec = ShadowRecord(**q.fields, skipped=q.skipped)
-                elif limit is not None and asked >= limit:
-                    stop = f"--limit {limit} reached"
-                    break
-                else:
-                    rec = _ask(q, index.gate_views, index.retry_views, ask, base_url, model, timeout_s)
-                    asked += 1
-                f.write(rec.model_dump_json() + "\n")
-                f.flush()
-                result = rec.verdict or ("ERROR " + rec.error if rec.error else "skipped: " + rec.skipped)
-                echo(f"{rec.question_id} (truth {rec.truth}): {result} "
-                     f"({sum(c.verdict.latency_s for c in rec.checks):.1f} s)")
-                in_row = in_row + 1 if rec.error else 0 if rec.verdict else in_row
-                if in_row >= MAX_CONSECUTIVE_ERRORS:
-                    stop = f"{in_row} endpoint errors in a row at {base_url} (last: {rec.error})"
-                    break
-            if stop:
-                break
-    records = _records(out_dir / SHADOW)
-    errors = sum(r.error is not None for r in records)
-    if stop is None and errors:
-        stop = f"{errors} questions ended in an endpoint error"
-    status = "complete" if stop is None else "incomplete"
-    summary = {**identity, "status": status, "stop_reason": stop, **summarize(records)}
-    _write_json(out_dir / SUMMARY_JSON, summary)
-    (out_dir / SUMMARY_MD).write_text(summary_markdown(summary), encoding="utf-8", newline="\n")
-    return ShadowResult(status, stop, asked, json.loads((out_dir / SUMMARY_JSON).read_text(encoding="utf-8")), out_dir)
+    stop, asked, without = "the session ended early", 0, None
+    try:
+        stop, asked, without = _session(run_dir, out_dir, seeds, done, ask=ask, base_url=base_url, model=model,
+                                        timeout_s=timeout_s, limit=limit, echo=echo)
+    finally:
+        summary = _finish(out_dir, identity, stop, without)
+    return ShadowResult(summary["status"], summary["stop_reason"], asked, summary, out_dir)
 
 
 # ---- the summary ------------------------------------------------------------------------------------------------
@@ -478,11 +500,15 @@ def summary_markdown(s: dict[str, Any]) -> str:
     q, lat = s["questions"], s["latency_s"]
     status = "complete" if s["status"] == "complete" else f"INCOMPLETE ({s['stop_reason']}; rerun to continue)"
     skipped = ", ".join(f"{n} {why}" for why, n in sorted(q["skipped"].items())) or "none"
+    without = s["executed_without_frames"]
+    without = ("not counted (the session ended early)" if without is None
+               else f"{len(without)} ({', '.join(without)})" if without else "none")
     lines = [f"# Cosmos shadow study of {s['run_id']}: a learned visual check, not verification", "", s["note"], "",
              f"- Status: {status}. Model `{s['model']}`, thinking {'on' if s['enable_thinking'] else 'off'}; config "
              f"{s['config']} on the {s['split']} seed set `{s['seed_set_hash'][:12]}`; {s['attempts']} attempts.",
              f"- Questions: {q['recorded']} recorded, {q['answered']} answered, {q['errors']} endpoint errors; "
-             f"injected frames skipped: {skipped}.",
+             f"injected frames skipped: {skipped}. Executed attempts without key frames, never asked about: "
+             f"{without}.",
              f"- Latency per request: n {lat['request']['n']}, median {_s(lat['request']['median'])} s, p90 "
              f"{_s(lat['request']['p90'])} s, max {_s(lat['request']['max'])} s. Per question (with re-asks): median "
              f"{_s(lat['question']['median'])} s, p90 {_s(lat['question']['p90'])} s.", "",

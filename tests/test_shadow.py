@@ -45,7 +45,7 @@ class FakeAsk:
         self.sent.append({"views": tuple(images), "images": dict(images), "question": question,
                           "base_url": base_url, **kwargs})
         reply = self.replies.pop(0)
-        if isinstance(reply, Exception):
+        if isinstance(reply, BaseException):
             raise reply
         return verdict(reply)
 
@@ -252,6 +252,29 @@ def test_an_outage_stops_after_three_errors_in_a_row_and_a_rerun_asks_only_what_
     assert third.status == "complete" and ask.sent == [] and lines(out) == again
 
 
+def test_the_summary_is_rewritten_when_a_session_ends_with_an_exception(run_dir, tmp_path):
+    out = tmp_path / "shadow"
+    with pytest.raises(KeyboardInterrupt):
+        shadow_run(run_dir, out, ["pass", KeyboardInterrupt()])
+    s = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert s["status"] == "incomplete" and s["questions"]["answered"] == 1
+    assert s["executed_without_frames"] is None  # the session never reached the end of attempts.jsonl
+
+
+def test_executed_attempts_without_frames_are_named_in_the_summary(run_dir, tmp_path):
+    copy = tmp_path / "c3-dev"
+    shutil.copytree(run_dir, copy, ignore=shutil.ignore_patterns("frames"))
+    rows = [records.EvalAttempt.model_validate_json(line)
+            for line in (copy / "attempts.jsonl").read_text(encoding="utf-8").splitlines()]
+    failed = records.FrameExport(status="failed", error_type="FrameMismatch", error_message="approval differs")
+    rows = [r.model_copy(update={"frames": failed}) if r.outcome == "executed" else r for r in rows]
+    (copy / "attempts.jsonl").write_text("".join(r.model_dump_json() + "\n" for r in rows), encoding="utf-8")
+    result, ask = shadow_run(copy, tmp_path / "shadow", [])
+    assert result.status == "complete" and ask.sent == []
+    assert result.summary["executed_without_frames"] == [ATTEMPT]
+    assert ATTEMPT in (tmp_path / "shadow" / "summary.md").read_text(encoding="utf-8")
+
+
 def test_limit_caps_the_questions_asked_in_one_session(run_dir, tmp_path):
     result, ask = shadow_run(run_dir, tmp_path / "shadow", ["pass"] * 7, limit=2)
     assert result.status == "incomplete" and "limit" in result.stop_reason
@@ -259,9 +282,14 @@ def test_limit_caps_the_questions_asked_in_one_session(run_dir, tmp_path):
 
 
 # ---- refusals -------------------------------------------------------------------------------------------------
-def test_a_rerun_with_other_settings_is_refused(studied, run_dir):
-    with pytest.raises(EvalError, match="model"):
-        shadow_run(run_dir, studied[2], [], model="nvidia/Cosmos3-Nano")
+@pytest.mark.parametrize("setting, match", [({"model": "nvidia/Cosmos3-Nano"}, "model"),
+                                            ({"timeout_s": 20.0}, "timeout_s"),
+                                            ({"base_url": "http://other.invalid/v1"}, "base_url")])
+def test_a_rerun_with_other_settings_is_refused(studied, run_dir, setting, match):
+    from vplan.evaluate import shadow
+    kw = {"base_url": "http://cosmos.invalid/v1", **setting}
+    with pytest.raises(EvalError, match=match):
+        shadow.run_shadow(run_dir, studied[2], ask=FakeAsk([]), echo=lambda *a: None, **kw)
 
 
 def test_a_frame_that_differs_from_its_index_is_refused(run_dir, tmp_path):
