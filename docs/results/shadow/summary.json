@@ -1,0 +1,516 @@
+{
+  "kind": "shadow_study",
+  "schema_version": 1,
+  "run_id": "c3-test",
+  "config": 3,
+  "split": "test",
+  "seed_set_hash": "834d19318aab068fc246126e00160c19217e41cb601148d1f41ff613861671cf",
+  "model": "nvidia/Cosmos3-Edge",
+  "enable_thinking": true,
+  "base_url": "http://127.0.0.1:8000/v1",
+  "timeout_s": 90.0,
+  "git": {
+    "head": "66827d44f40201049cab2fd5962ef380cfa6ca6f",
+    "dirty": null,
+    "source": "files"
+  },
+  "status": "complete",
+  "stop_reason": null,
+  "executed_without_frames": [],
+  "no_single_object": [],
+  "note": "A learned visual check, not verification. Cosmos never influenced the run, so this measures what a visual gate would have caught or falsely rejected, never incremental success (spec \u00a711, D8 item 4). Truth is the state predicate of each kinematic key frame, posed from the plan's trajectory, not the executed outcome the Judge scored.",
+  "reading": "For predicate-true frames a fail is a false rejection and a pass a correct acceptance. For negatives a fail is a true rejection (a catch) and a pass a catch the gate missed. In the live gate a final uncertain also stops execution (visual_uncertain). A misaligned grasp on a wrong-target round is the misaligned grasp of a round whose plan grasped another object than the instructed one.",
+  "questions": {
+    "recorded": 1337,
+    "answered": 1337,
+    "errors": 0,
+    "skipped": {}
+  },
+  "attempts": 215,
+  "natural_negative_rounds": {
+    "n": 19,
+    "wrong_target": 19
+  },
+  "classes": {
+    "predicate_true": {
+      "pregrasp": {
+        "n": 196,
+        "pass": 188,
+        "fail": 3,
+        "uncertain": 5,
+        "errors": 0,
+        "pass_rate": 0.9591836734693877,
+        "fail_rate": 0.015306122448979591,
+        "uncertain_rate": 0.025510204081632654,
+        "latency_s": {
+          "n": 219,
+          "median": 1.1444867999962298,
+          "p90": 2.090599619995919,
+          "max": 6.882277100012288
+        }
+      },
+      "grasp": {
+        "n": 196,
+        "pass": 175,
+        "fail": 7,
+        "uncertain": 14,
+        "errors": 0,
+        "pass_rate": 0.8928571428571429,
+        "fail_rate": 0.03571428571428571,
+        "uncertain_rate": 0.07142857142857142,
+        "latency_s": {
+          "n": 248,
+          "median": 1.3272928000005777,
+          "p90": 2.0953025900016655,
+          "max": 6.911336399993161
+        }
+      },
+      "prerelease": {
+        "n": 196,
+        "pass": 127,
+        "fail": 53,
+        "uncertain": 16,
+        "errors": 0,
+        "pass_rate": 0.6479591836734694,
+        "fail_rate": 0.27040816326530615,
+        "uncertain_rate": 0.08163265306122448,
+        "latency_s": {
+          "n": 230,
+          "median": 1.8065917499989155,
+          "p90": 3.5053071600079417,
+          "max": 7.111600000003818
+        }
+      },
+      "all": {
+        "n": 588,
+        "pass": 490,
+        "fail": 63,
+        "uncertain": 35,
+        "errors": 0,
+        "pass_rate": 0.8333333333333334,
+        "fail_rate": 0.10714285714285714,
+        "uncertain_rate": 0.05952380952380952,
+        "latency_s": {
+          "n": 697,
+          "median": 1.31587039999431,
+          "p90": 2.757259859994519,
+          "max": 7.111600000003818
+        }
+      }
+    },
+    "natural_negative": {
+      "pregrasp": {
+        "n": 19,
+        "pass": 11,
+        "fail": 0,
+        "uncertain": 8,
+        "errors": 0,
+        "pass_rate": 0.5789473684210527,
+        "fail_rate": 0.0,
+        "uncertain_rate": 0.42105263157894735,
+        "latency_s": {
+          "n": 32,
+          "median": 1.0222548000019742,
+          "p90": 1.5302646600001026,
+          "max": 4.559989999994286
+        }
+      },
+      "grasp": {
+        "n": 19,
+        "pass": 10,
+        "fail": 6,
+        "uncertain": 3,
+        "errors": 0,
+        "pass_rate": 0.5263157894736842,
+        "fail_rate": 0.3157894736842105,
+        "uncertain_rate": 0.15789473684210525,
+        "latency_s": {
+          "n": 24,
+          "median": 1.638820250002027,
+          "p90": 2.7132586199964863,
+          "max": 3.490834399999585
+        }
+      },
+      "prerelease": {
+        "n": 19,
+        "pass": 0,
+        "fail": 16,
+        "uncertain": 3,
+        "errors": 0,
+        "pass_rate": 0.0,
+        "fail_rate": 0.8421052631578947,
+        "uncertain_rate": 0.15789473684210525,
+        "latency_s": {
+          "n": 23,
+          "median": 0.9336065999959828,
+          "p90": 1.3278921000048285,
+          "max": 2.027615799990599
+        }
+      },
+      "all": {
+        "n": 57,
+        "pass": 21,
+        "fail": 22,
+        "uncertain": 14,
+        "errors": 0,
+        "pass_rate": 0.3684210526315789,
+        "fail_rate": 0.38596491228070173,
+        "uncertain_rate": 0.24561403508771928,
+        "latency_s": {
+          "n": 79,
+          "median": 1.0945096999930684,
+          "p90": 2.3130187199916694,
+          "max": 4.559989999994286
+        }
+      }
+    },
+    "injected_negative": {
+      "pregrasp": {
+        "n": 159,
+        "pass": 129,
+        "fail": 1,
+        "uncertain": 29,
+        "errors": 0,
+        "pass_rate": 0.8113207547169812,
+        "fail_rate": 0.006289308176100629,
+        "uncertain_rate": 0.18238993710691823,
+        "latency_s": {
+          "n": 214,
+          "median": 1.1898769500039634,
+          "p90": 2.681362870002342,
+          "max": 7.077592399989953
+        }
+      },
+      "grasp": {
+        "n": 374,
+        "pass": 282,
+        "fail": 55,
+        "uncertain": 37,
+        "errors": 0,
+        "pass_rate": 0.7540106951871658,
+        "fail_rate": 0.14705882352941177,
+        "uncertain_rate": 0.09893048128342247,
+        "latency_s": {
+          "n": 488,
+          "median": 1.5489237500078161,
+          "p90": 2.936854799996945,
+          "max": 7.038230400008615
+        }
+      },
+      "prerelease": {
+        "n": 159,
+        "pass": 14,
+        "fail": 92,
+        "uncertain": 53,
+        "errors": 0,
+        "pass_rate": 0.0880503144654088,
+        "fail_rate": 0.5786163522012578,
+        "uncertain_rate": 0.3333333333333333,
+        "latency_s": {
+          "n": 217,
+          "median": 1.0024881999997888,
+          "p90": 2.027192699999432,
+          "max": 6.471449799995753
+        }
+      },
+      "all": {
+        "n": 692,
+        "pass": 425,
+        "fail": 148,
+        "uncertain": 119,
+        "errors": 0,
+        "pass_rate": 0.6141618497109826,
+        "fail_rate": 0.2138728323699422,
+        "uncertain_rate": 0.17196531791907516,
+        "latency_s": {
+          "n": 919,
+          "median": 1.3013165000011213,
+          "p90": 2.7199396800016986,
+          "max": 7.077592399989953
+        }
+      }
+    },
+    "wrong_object": {
+      "pregrasp": {
+        "n": 159,
+        "pass": 129,
+        "fail": 1,
+        "uncertain": 29,
+        "errors": 0,
+        "pass_rate": 0.8113207547169812,
+        "fail_rate": 0.006289308176100629,
+        "uncertain_rate": 0.18238993710691823,
+        "latency_s": {
+          "n": 214,
+          "median": 1.1898769500039634,
+          "p90": 2.681362870002342,
+          "max": 7.077592399989953
+        }
+      },
+      "grasp": {
+        "n": 159,
+        "pass": 127,
+        "fail": 20,
+        "uncertain": 12,
+        "errors": 0,
+        "pass_rate": 0.7987421383647799,
+        "fail_rate": 0.12578616352201258,
+        "uncertain_rate": 0.07547169811320754,
+        "latency_s": {
+          "n": 210,
+          "median": 1.6276342999990447,
+          "p90": 3.1552059799971173,
+          "max": 7.038230400008615
+        }
+      },
+      "prerelease": {
+        "n": 159,
+        "pass": 14,
+        "fail": 92,
+        "uncertain": 53,
+        "errors": 0,
+        "pass_rate": 0.0880503144654088,
+        "fail_rate": 0.5786163522012578,
+        "uncertain_rate": 0.3333333333333333,
+        "latency_s": {
+          "n": 217,
+          "median": 1.0024881999997888,
+          "p90": 2.027192699999432,
+          "max": 6.471449799995753
+        }
+      },
+      "all": {
+        "n": 477,
+        "pass": 270,
+        "fail": 113,
+        "uncertain": 94,
+        "errors": 0,
+        "pass_rate": 0.5660377358490566,
+        "fail_rate": 0.23689727463312368,
+        "uncertain_rate": 0.1970649895178197,
+        "latency_s": {
+          "n": 641,
+          "median": 1.2224789000028977,
+          "p90": 2.724750399996992,
+          "max": 7.077592399989953
+        }
+      }
+    },
+    "misaligned_grasp": {
+      "pregrasp": {
+        "n": 0,
+        "pass": 0,
+        "fail": 0,
+        "uncertain": 0,
+        "errors": 0,
+        "pass_rate": null,
+        "fail_rate": null,
+        "uncertain_rate": null,
+        "latency_s": {
+          "n": 0,
+          "median": null,
+          "p90": null,
+          "max": null
+        }
+      },
+      "grasp": {
+        "n": 196,
+        "pass": 150,
+        "fail": 25,
+        "uncertain": 21,
+        "errors": 0,
+        "pass_rate": 0.7653061224489796,
+        "fail_rate": 0.12755102040816327,
+        "uncertain_rate": 0.10714285714285714,
+        "latency_s": {
+          "n": 252,
+          "median": 1.4507629500003532,
+          "p90": 2.4877762799980703,
+          "max": 6.925214600007166
+        }
+      },
+      "prerelease": {
+        "n": 0,
+        "pass": 0,
+        "fail": 0,
+        "uncertain": 0,
+        "errors": 0,
+        "pass_rate": null,
+        "fail_rate": null,
+        "uncertain_rate": null,
+        "latency_s": {
+          "n": 0,
+          "median": null,
+          "p90": null,
+          "max": null
+        }
+      },
+      "all": {
+        "n": 196,
+        "pass": 150,
+        "fail": 25,
+        "uncertain": 21,
+        "errors": 0,
+        "pass_rate": 0.7653061224489796,
+        "fail_rate": 0.12755102040816327,
+        "uncertain_rate": 0.10714285714285714,
+        "latency_s": {
+          "n": 252,
+          "median": 1.4507629500003532,
+          "p90": 2.4877762799980703,
+          "max": 6.925214600007166
+        }
+      }
+    },
+    "misaligned_grasp_wrong_target": {
+      "pregrasp": {
+        "n": 0,
+        "pass": 0,
+        "fail": 0,
+        "uncertain": 0,
+        "errors": 0,
+        "pass_rate": null,
+        "fail_rate": null,
+        "uncertain_rate": null,
+        "latency_s": {
+          "n": 0,
+          "median": null,
+          "p90": null,
+          "max": null
+        }
+      },
+      "grasp": {
+        "n": 19,
+        "pass": 5,
+        "fail": 10,
+        "uncertain": 4,
+        "errors": 0,
+        "pass_rate": 0.2631578947368421,
+        "fail_rate": 0.5263157894736842,
+        "uncertain_rate": 0.21052631578947367,
+        "latency_s": {
+          "n": 26,
+          "median": 2.3195204500007094,
+          "p90": 3.2685261000005994,
+          "max": 6.833324799998081
+        }
+      },
+      "prerelease": {
+        "n": 0,
+        "pass": 0,
+        "fail": 0,
+        "uncertain": 0,
+        "errors": 0,
+        "pass_rate": null,
+        "fail_rate": null,
+        "uncertain_rate": null,
+        "latency_s": {
+          "n": 0,
+          "median": null,
+          "p90": null,
+          "max": null
+        }
+      },
+      "all": {
+        "n": 19,
+        "pass": 5,
+        "fail": 10,
+        "uncertain": 4,
+        "errors": 0,
+        "pass_rate": 0.2631578947368421,
+        "fail_rate": 0.5263157894736842,
+        "uncertain_rate": 0.21052631578947367,
+        "latency_s": {
+          "n": 26,
+          "median": 2.3195204500007094,
+          "p90": 3.2685261000005994,
+          "max": 6.833324799998081
+        }
+      }
+    }
+  },
+  "balanced_accuracy": {
+    "natural": {
+      "pregrasp": {
+        "value": 0.47959183673469385,
+        "n_true": 196,
+        "n_false": 19
+      },
+      "grasp": {
+        "value": 0.6043233082706767,
+        "n_true": 196,
+        "n_false": 19
+      },
+      "prerelease": {
+        "value": 0.7450322234156821,
+        "n_true": 196,
+        "n_false": 19
+      },
+      "all": {
+        "value": 0.6096491228070176,
+        "n_true": 588,
+        "n_false": 57
+      }
+    },
+    "injected": {
+      "pregrasp": {
+        "value": 0.48273649082274417,
+        "n_true": 196,
+        "n_false": 159
+      },
+      "grasp": {
+        "value": 0.5199579831932774,
+        "n_true": 196,
+        "n_false": 374
+      },
+      "prerelease": {
+        "value": 0.6132877679373636,
+        "n_true": 196,
+        "n_false": 159
+      },
+      "all": {
+        "value": 0.5236030828516378,
+        "n_true": 588,
+        "n_false": 692
+      }
+    }
+  },
+  "gate": {
+    "predicate_true": {
+      "n": 196,
+      "pass": 111,
+      "fail": 53,
+      "uncertain": 32,
+      "stopped_at": {
+        "pregrasp": 8,
+        "grasp": 19,
+        "prerelease": 58
+      }
+    },
+    "predicate_false": {
+      "n": 19,
+      "pass": 0,
+      "fail": 8,
+      "uncertain": 11,
+      "stopped_at": {
+        "pregrasp": 8,
+        "grasp": 3,
+        "prerelease": 8
+      }
+    }
+  },
+  "latency_s": {
+    "request": {
+      "n": 1695,
+      "median": 1.2977932000067085,
+      "p90": 2.719109480001498,
+      "max": 7.111600000003818
+    },
+    "question": {
+      "n": 1337,
+      "median": 1.6211138000071514,
+      "p90": 3.7155396799877067,
+      "max": 14.153281400009291
+    }
+  }
+}

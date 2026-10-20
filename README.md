@@ -4,7 +4,7 @@ A language model proposes a pick-and-place plan for a Franka Panda arm. Determin
 
 Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron**: **3.5 Lightning** for the evaluation and **3 Ultra** for the live demo, both served by **Nebius Token Factory** in the final runs (D62).
 
-> **Status: week 3 of 4.** The final held-out evaluation ran on Nebius Token Factory on Oct 18 ([results below](#results), D70). The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, the evaluation pipeline (frozen seed sets, a supervised resumable runner and a self-contained HTML report) and a Gradio UI that shows live attempts and replays recorded ones without keys. ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come in week 4: planner-prompt work on the `dev` set, the Cosmos shadow study, the demo video and the submission write-ups.
+> **Status: week 4 of 4.** The final held-out evaluation ran on Nebius Token Factory on Oct 18 ([results below](#results), D70), and the Cosmos shadow study on Oct 19 (D73). The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, the evaluation pipeline (frozen seed sets, a supervised resumable runner and a self-contained HTML report) and a Gradio UI that shows live attempts and replays recorded ones without keys. ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come in week 4: planner-prompt work on the `dev` set, the demo video and the submission write-ups.
 
 ## How it works
 
@@ -48,6 +48,8 @@ The held-out `test` seed set holds 300 feasible and 100 provably impossible gene
 - **Refusals are the weak spot.** Lightning refuses 40–57 of the 100 impossible tasks, and no planner refuses an enclosed target (type 3, 0 of 25 in every config). The verifier blocks most of the rest before they move. One wrongly refused feasible task in 900 Lightning attempts on feasible tasks.
 - **Cost and reliability.** 2,510 Token Factory calls cost about $1.61 (median 7.5–8.7 s per call). 35 calls (1.4%) failed at the provider and count as failures, which is why the report title says "DEGRADED".
 - These findings were made on `test`, so the frozen prompt stays as it is for these numbers. Prompt work moves to week 4 on `dev` (D70).
+
+**Cosmos shadow study (config 4, [D73](docs/decisions.md)).** NVIDIA **Cosmos3-Edge**, served locally, answered the live gate's three stage questions about the key frames of all 215 executed config 3 attempts, plus 692 injected wrong-object and misaligned-grasp renders: 1,337 questions, scored against simulator state predicates. It never influenced the evaluation, so this measures only what a visual gate would have caught, not added success. It is not a usable gate: it falsely rejected 27% of correct pre-release frames (it reads the object as inside the bin, not over it), caught 1 of 159 wrong-object pre-grasps and 25 of 196 misaligned grasps, and reached balanced accuracy 0.61 against natural negatives and 0.52 against injected ones, at 1.3 s per request. The demo's Cosmos gate stays an advisory, learned check. Summary: [`docs/results/shadow/summary.md`](docs/results/shadow/summary.md).
 
 ## Setup
 
@@ -189,6 +191,9 @@ python -m vplan eval run --config 3 --seeds dev --env-file .env --resume runs/<r
 
 # 3. Build metrics.json and a single self-contained report.html from several runs over one seed set.
 python -m vplan report build --run runs/<c3_run> --run runs/<c7_run> --run runs/<c5_run> --output runs/report
+
+# 4. Config 4: Cosmos answers the gate's questions about config 3's saved frames (local vLLM server; resumable).
+python -m vplan eval shadow --run runs/<c3_run> --cosmos-url http://127.0.0.1:8000/v1   # -> runs/shadow-<c3_run>/summary.md
 ```
 
 - Each run directory holds `manifest.json` (code, config and seed-set hashes, versions, provider and model), `sessions.jsonl` and `attempts.jsonl`, written only by the supervising parent. The API key never reaches any of them.

@@ -1921,3 +1921,36 @@ All model and provider text is HTML-escaped.
 - Not prompt work: the `place` attribution and the 1 cm clearance are Verifier behaviour. They stay as recorded findings unless the owner rules otherwise.
 
 **Headline and README (owner, Oct 19):** the spec §1 headline is filled in with these numbers: 24.7% → 65.0% on 300 tasks, and +29.3 points over equal-budget resampling. The feedback gain at equal budget is what the pilot could not show (D46), so the claim that credits verifier feedback now stands. The spec adds the caveat that unverified first attempts succeed on 43.3% with 169 of 346 executions unsafe. The README gains a Results section, and the report (`report.html`, `metrics.json`) is copied to `docs/results/` so the public repo carries it.
+
+## D73. The Cosmos shadow study (W4.2, 2026-10-20)
+
+**What ran (spec §11 "Shadow study", config 4):** `vplan eval shadow` over the final config 3 run (`runs/dryrun-tf/c3-test`, D70), on the local GPU at no cost. Cosmos never influenced that run, so this measures what a visual gate would have caught or falsely rejected. It is a learned visual check, not verification, and makes no incremental-success claim.
+- Server: `nvidia/Cosmos3-Edge` at revision `344d602b…` in vLLM 0.31.0 (`~/venvs/cosmos`) with the D34 flags. D34's `max_pixels` 409600 is passed as `--mm-processor-kwargs '{"do_resize":true,"min_pixels":4096,"max_pixels":409600}'`, as the Oct 11 serve log recorded it (D34 omitted `do_resize` and `min_pixels`). 15.2 of 16.3 GB in use.
+- Protocol: the live gate's (D47). Thinking on, the two gate views, the side view once after `uncertain`, 90 s per request, the D36 strict parser.
+- Questions: per executed round, the three stage questions on its saved frames (natural), plus injected negatives rendered at shadow time:
+  - wrong object: the executed plan retargeted at a seeded random object that is neither the oracle target nor the plan's target;
+  - misaligned grasp: the grasp pose slid 3–4 cm along TCP x, the D34 offset. On the 19 rounds whose plan grasped a non-oracle object, these are reported as their own class.
+- Truth: the spec §11 state predicate for the oracle target, read from the posed simulator state of each kinematic key frame (D59), not the executed outcome. Every rebuilt trajectory reproduced its recorded approval token. Injected poses that miss their IK target, or whose predicate holds, are skipped; none was.
+- Scope: 215 executed attempts, 1,337 questions, 1,695 requests, 0 endpoint errors, about 52 minutes on Oct 19.
+- Provenance: the answers were collected from the `w4/shadow` worktree at `ad54e18`. Later commits changed only the summary, identity keys, atomic writes and per-session provenance, not questions, truths or requests. The summary was rebuilt from the same `shadow.jsonl` at `66827d4` without asking Cosmos again.
+- Output: `shadow.jsonl`, `summary.json`, `summary.md` (local), with the summary copied to `docs/results/shadow/`. `report build` is unchanged; its D70 output stays byte-identical.
+
+**Result:**
+
+| Frames | N | caught (fail) | missed (pass) | uncertain |
+|---|---|---|---|---|
+| Correct frames (a fail is a false rejection) | 588 | 63 (10.7%); 53 of 196 at pre-release | 490 | 35 |
+| Natural negatives (19 wrong-target rounds) | 57 | 22 (38.6%) | 21 | 14 |
+| Injected wrong object | 477 | 113 (23.7%); 1 of 159 at pre-grasp | 270 | 94 |
+| Injected misaligned grasp, instructed object | 196 | 25 (12.8%) | 150 | 21 |
+
+- Balanced accuracy (D34's measure, a final `uncertain` counts as wrong): 0.61 against natural negatives, 0.52 against injected ones. D34's pilot scored 0.70 on 30 frames with a lenient parser, about 0.60 under this strict parser.
+- Latency per request: 1.30 s median, 2.72 s p90 (D47's 6–16 s was GPU contention).
+- Replayed as the live gate on the natural frames, it would have executed 111 of 196 correct rounds and stopped all 19 wrong-target rounds, 11 of them by `uncertain`.
+
+**Findings:**
+- **Pre-release rejects correct plans:** 49 of the 53 false rejections say the object is inside the bin, not over it. The frame is the end of `descend_place`, as in D47.
+- **Biased toward pass at pre-grasp and grasp:** it misses almost every wrong-object pre-grasp and most misaligned grasps.
+- **`uncertain` is mostly reply format:** 161 of the 168 final `uncertain` verdicts are replies the strict parser rejects (a VERDICT line without REASON, or a bare `pass`/`fail`). A lenient reading, as a one-off sensitivity check, gives 0.71 and 0.58; the conclusion stands.
+
+**Ruling (owner's plan, Oct 19):** Cosmos stays a shadow annotator and the opt-in, advisory demo gate of D47. These are `test` frames, so the question wording, cameras and parser are not tuned against them. The source change (`records.py`, `frames.py`, `gate.py`, `cli.py`, new `evaluate/shadow.py`) changes the hashed digest after the freeze (D68); week 4 `dev` runs need `--allow-source-drift` or a re-prepared seed set.
