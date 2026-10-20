@@ -97,8 +97,8 @@ def basic_task(instruction: str, *, obstacle: bool, cfgs: dict[str, dict] | None
         target = resolve_instruction(instruction, scene)
     except ValueError:
         names = ", ".join(f"{o.color} {o.shape}" for o in scene.objects)
-        raise LiveError(f"The instruction must name exactly one object, as in 'Pick the red cube and place it in the "
-                        f"bin.' Objects here: {names}.") from None
+        raise LiveError(f"The instruction must name exactly one object, as in “Pick the red cube and place it in the "
+                        f"bin.” Objects here: {names}.") from None
     # The generator's rule for feasible tasks (spec §6): the heuristic witness must solve it, else feasibility is open
     witness = gen.run_witness(task, target, seed=0, config_snapshot=cfgs)
     if gen.witness_rejection(witness, target) is not None:

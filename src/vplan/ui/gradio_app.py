@@ -38,7 +38,7 @@ BUSY = ("The simulator is still running an earlier attempt (it finishes its plan
         "its page closes). Try again when it is done.")
 SOURCES = ("Basic scene", "Basic scene with wall", "Generated task")
 DEFAULT_SEED = 1  # seed 0 has no solvable generated task, so the default would open on an error
-BASIC_INFO = "Name one object in the scene, e.g. 'Pick the green cube and place it in the bin.'"
+BASIC_INFO = "Name one object in the scene, e.g. “Pick the green cube and place it in the bin.”"
 GENERATED_INFO = "A generated task comes with its own instruction. To type your own, choose a basic scene."
 # System fonts only: the page loads nothing from the internet (Segoe UI on Windows, the platform UI font elsewhere)
 FONTS = ["Segoe UI", "system-ui", "-apple-system", "ui-sans-serif", "Roboto", "Helvetica Neue", "Arial", "sans-serif"]
@@ -323,26 +323,27 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 state = gr.State(None)
                 memory = gr.State((SOURCES[0], live.BASIC_INSTRUCTION))  # see scene_change
                 task_outputs = [scene, info, instruction, state]
-                load.click(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
-                           concurrency_limit=1)
-                instruction.submit(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
-                                   concurrency_limit=1)
+                # Loads show one spinner on the scene picture, not one over every output they update
+                sim = dict(concurrency_id=SIM, concurrency_limit=1, show_progress_on=[scene])
+                load.click(load_task, [source, seed, kind, instruction], task_outputs, **sim)
+                instruction.submit(load_task, [source, seed, kind, instruction], task_outputs, **sim)
                 source.input(scene_change, [source, seed, kind, instruction, memory],
                              [generated_row, instruction, scene, info, state, memory, *live_panels.outputs()],
-                             concurrency_id=SIM, concurrency_limit=1, trigger_mode="always_last")
+                             trigger_mode="always_last", **sim)
                 for control in (seed, kind):
                     control.input(task_change, [source, seed, kind],
-                                  [instruction, scene, info, state, *live_panels.outputs()], concurrency_id=SIM,
-                                  concurrency_limit=1, trigger_mode="always_last")
-                demo.load(load_task, [source, seed, kind, instruction], task_outputs, concurrency_id=SIM,
-                          concurrency_limit=1)  # the page opens with the default scene shown
+                                  [instruction, scene, info, state, *live_panels.outputs()],
+                                  trigger_mode="always_last", **sim)
+                demo.load(load_task, [source, seed, kind, instruction], task_outputs,
+                          **sim)  # the page opens with the default scene shown
 
                 def run_live(*args):
                     for values in run_attempt(settings, *args):
                         yield shown(values)
 
+                # The status card says "Running" and the panels fill in as rounds finish, so no overlay on them
                 run.click(run_live, [state, source, seed, kind, instruction, planner, k], live_panels.outputs(),
-                          concurrency_id=SIM, concurrency_limit=1)
+                          concurrency_id=SIM, concurrency_limit=1, show_progress="minimal")
             with gr.Tab("Replay", id="replay"):
                 gr.HTML(markup.step_html(None, "Recorded attempt",
                                          "replay a saved run with no API key, no GPU and no network"))
@@ -362,9 +363,12 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 def open_replay(value):
                     return replay_open(settings, value)
 
+                def show_replay(*args):
+                    return shown(replay_show(settings, *args))
+
                 open_.click(open_replay, [path], [case, replay_info])
-                show.click(lambda *args: shown(replay_show(settings, *args)), [path, case, seed_dir],
-                           replay_panels.outputs(), concurrency_id=SIM, concurrency_limit=1)
+                show.click(show_replay, [path, case, seed_dir], replay_panels.outputs(), concurrency_id=SIM,
+                           concurrency_limit=1, show_progress_on=[replay_panels.timeline])
                 if settings.replay:
                     demo.load(open_replay, [path], [case, replay_info])
     return demo
@@ -388,7 +392,8 @@ def theme() -> gr.themes.Base:
 def launch(settings: UISettings) -> None:
     """Serve until interrupted. 127.0.0.1 by default: anyone who can reach the port can drive the planner. share and
     mcp_server are pinned off, because None would let GRADIO_SHARE open a public tunnel or GRADIO_MCP_SERVER expose the
-    handlers as tools."""
+    handlers as tools. The footer drops the API-docs link (the page is recorded for the demo); the API itself is
+    unchanged."""
     build_app(settings).queue(default_concurrency_limit=1).launch(
         server_name=settings.host, server_port=settings.port, share=False, mcp_server=False, theme=theme(),
-        css=markup.CSS, show_error=True, inbrowser=False)
+        css=markup.CSS, show_error=True, inbrowser=False, footer_links=["gradio", "settings"])

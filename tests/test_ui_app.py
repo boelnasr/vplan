@@ -315,6 +315,7 @@ def test_launch_pins_loopback_no_share_link_and_no_mcp_server(monkeypatch):
     monkeypatch.setenv("GRADIO_MCP_SERVER", "true")
     app.launch(app.UISettings())
     assert seen["server_name"] == "127.0.0.1" and seen["share"] is False and seen["mcp_server"] is False
+    assert seen["footer_links"] == ["gradio", "settings"]  # no API-docs link on a page recorded for the video
 
 
 def test_replay_paths_outside_the_roots_are_refused(tmp_path, monkeypatch):
@@ -350,3 +351,16 @@ def test_cli_refuses_a_network_replay_path(launched, capsys):
 def test_a_non_loopback_host_prints_a_warning(host, warned, launched, capsys):
     assert cli.main(["ui", "--host", host]) == 0
     assert ("not a loopback address" in capsys.readouterr().err) is warned
+
+
+def test_progress_shows_on_one_panel_not_over_every_output():
+    """Gradio covers every output with a spinner by default; on video that hides the panels being filled in."""
+    config = app.build_app(app.UISettings(replay="runs/ui")).get_config_file()
+    ids = {(c["type"], c.get("props", {}).get("label")): c["id"] for c in config["components"]}
+    timelines = [c["id"] for c in config["components"] if c.get("props", {}).get("label") == "Checks, round by round"]
+    deps = {d["api_name"]: d for d in config["dependencies"]}
+    scene = ids[("image", "Scene")]
+    for name in ("load_task", "load_task_1", "load_task_2", "scene_change", "task_change", "task_change_1"):
+        assert deps[name]["show_progress_on"] == [scene], name
+    assert deps["run_live"]["show_progress"] == "minimal"  # the status card itself says "Running"
+    assert deps["show_replay"]["show_progress_on"] == [timelines[1]]
