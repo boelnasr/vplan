@@ -23,8 +23,8 @@ from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
 
-from vplan.records import (AttemptRecord, FrameEntry, FrameExport, FrameIndex, PickPlacePlan, TaskSpec,
-                           scene_hash)
+from vplan.records import (AttemptRecord, CandidateTrajectory, ExecutionRecord, FrameEntry, FrameExport, FrameIndex,
+                           PickPlacePlan, Scene, TaskSpec, scene_hash)
 from vplan.visual.gate import RETRY_VIEWS, STAGES, VIEWS, render_stage, subject
 
 FRAME_VIEWS: tuple[str, ...] = RETRY_VIEWS  # the gate's two views, then the side view of the re-ask (spec §11)
@@ -48,6 +48,22 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def rebuild_trajectory(plan: PickPlacePlan, executed: ExecutionRecord, scene: Scene, *, seed: int,
+                       config_snapshot: dict[str, dict], round_index: int) -> CandidateTrajectory:
+    """The executed round's trajectory, built as pipeline.run_attempt built it (same plan, scene, start, seed and
+    verifier config). Raises FrameMismatch unless it reproduces the executed approval token."""
+    from vplan.execute.executor import approval_token
+    from vplan.motion.trajectory import build_trajectory
+    from vplan.robot import HOME_Q
+
+    cfgs = deepcopy(config_snapshot)
+    traj = build_trajectory(plan, scene, HOME_Q, seed=seed % SEED_MODULUS, cfg=cfgs["verifier"])
+    if approval_token(traj, scene, plan.target_id, cfgs) != executed.approval:
+        raise FrameMismatch(f"round {round_index}: the rebuilt trajectory's approval token differs from the executed "
+                            "one")
+    return traj
+
+
 def export_frames(record: AttemptRecord, spec: TaskSpec, *, seed: int, config_snapshot: dict[str, dict],
                   out_dir: Path, rel_dir: str, render: Callable[..., dict[str, bytes]] = render_stage,
                   clock: Callable[[], float] = time.perf_counter) -> FrameExport:
@@ -58,22 +74,14 @@ def export_frames(record: AttemptRecord, spec: TaskSpec, *, seed: int, config_sn
     if not executed:
         return FrameExport(status="none", render_s=clock() - start)
     try:
-        from vplan.execute.executor import approval_token
-        from vplan.motion.trajectory import build_trajectory
-        from vplan.robot import HOME_Q
-
-        cfgs = deepcopy(config_snapshot)
         scene, shash = spec.scene, scene_hash(spec.scene)
         images: list[tuple[FrameEntry, bytes]] = []
         for rnd in executed:
             plan, executed_record = rnd.call.plan, rnd.evaluation.record
             if not isinstance(plan, PickPlacePlan) or executed_record is None:
                 raise FrameMismatch(f"round {rnd.round_index} was executed without a plan or an execution record")
-            # As pipeline.run_attempt builds it: same plan, scene, start, seed and verifier config.
-            traj = build_trajectory(plan, scene, HOME_Q, seed=seed % SEED_MODULUS, cfg=cfgs["verifier"])
-            if approval_token(traj, scene, plan.target_id, cfgs) != executed_record.approval:
-                raise FrameMismatch(f"round {rnd.round_index}: the rebuilt trajectory's approval token differs from "
-                                    "the executed one")
+            traj = rebuild_trajectory(plan, executed_record, scene, seed=seed, config_snapshot=config_snapshot,
+                                      round_index=rnd.round_index)
             phash = plan_hash(plan)
             for stage in STAGES:
                 pngs = render(plan, traj, scene, stage, FRAME_VIEWS)

@@ -1,6 +1,6 @@
 """Command-line entry points: demo-once, the feedback pilot (prepare / run / report / show), the W3.1 evaluation
-(eval prepare / eval run), the W3.3 sigma_thr calibration (eval calibrate), the spec §15 report (report build) and the
-W3.5 Gradio UI (ui)."""
+(eval prepare / eval run), the W3.3 sigma_thr calibration (eval calibrate), the config-4 Cosmos shadow study (eval
+shadow), the spec §15 report (report build) and the W3.5 Gradio UI (ui)."""
 from __future__ import annotations
 
 import argparse
@@ -116,14 +116,37 @@ def _show_round(run: str, task_id: str, arm: str, round_index: int | None, *, un
     return 0 if (res.judge and res.judge.success) else 1
 
 
+def _shadow(args) -> int:
+    """eval shadow: 0 complete, 1 incomplete (rerun the same command to continue), 130 interrupted. Refusals raise."""
+    from vplan.evaluate import shadow
+    given = {k: v for k, v in (("model", args.model), ("timeout_s", args.timeout), ("limit", args.limit))
+             if v is not None}
+    try:
+        result = shadow.run_shadow(args.run, args.output or shadow.default_output(args.run), base_url=args.cosmos_url,
+                                   seed_dir=args.seed_dir, echo=lambda line: print(line, flush=True), **given)
+    except KeyboardInterrupt:
+        print("interrupted: rerun the same command to continue; answered questions are kept", file=sys.stderr)
+        return 130
+    q = result.summary["questions"]
+    counts = f"{q['answered']} answered, {q['errors']} endpoint errors, {sum(q['skipped'].values())} skipped"
+    if result.status == "complete":
+        print(f"complete: {counts}; {result.out_dir / shadow.SUMMARY_MD}")
+        return 0
+    print(f"INCOMPLETE: {counts}; stopped: {result.stop_reason}. Rerun the same command to continue "
+          f"({result.out_dir / shadow.SUMMARY_MD} covers what is recorded so far)", file=sys.stderr)
+    return 1
+
+
 def _eval(args) -> int:
-    """eval prepare / run / calibrate. Exit codes: 0 done, 1 an incomplete run (resume it), 2 refused, 130
+    """eval prepare / run / calibrate / shadow. Exit codes: 0 done, 1 an incomplete run (resume it), 2 refused, 130
     interrupted."""
     from vplan.evaluate import calibrate, pilot, runner, seedsets
     try:
-        for name in ("output", "seed_dir", "run_dir", "resume", "env_file"):
+        for name in ("output", "seed_dir", "run_dir", "resume", "env_file", "run"):
             if getattr(args, name, None):
                 pilot.check_path_arg(getattr(args, name))
+        if args.eval_cmd == "shadow":
+            return _shadow(args)
         if args.eval_cmd == "calibrate":
             evidence = calibrate.run_calibration(
                 args.output, args.seeds, feasible=args.feasible, impossible=args.impossible,
@@ -310,6 +333,16 @@ def main(argv: list[str] | None = None) -> int:
     er.add_argument("--frames", action=argparse.BooleanOptionalAction, default=None,
                     help="render the visual-gate key frames of executed rounds into RUN_DIR/frames for the Cosmos "
                          "shadow study (default: config 3 only; on --resume, the run's own setting)")
+    es = esub.add_parser("shadow", help="config 4: Cosmos answers the live gate's questions about a run's saved key "
+                         "frames and injected negatives (spec §11 shadow study; a learned check, not verification)")
+    es.add_argument("--run", required=True, help="a W3.1 run directory with frames/ (config 3 renders them)")
+    es.add_argument("--cosmos-url", required=True, help="the local vLLM server, e.g. http://127.0.0.1:8000/v1")
+    es.add_argument("--seed-dir", help="the run's seed set (default: the directory the run recorded)")
+    es.add_argument("--output", help="default runs/shadow-<run directory name>; never inside the run directory")
+    es.add_argument("--model", help="served model name (default nvidia/Cosmos3-Edge)")
+    es.add_argument("--timeout", type=float, help="per request, s (default 90, the live gate's)")
+    es.add_argument("--limit", type=int, help="ask at most N questions in this session (a smoke test); rerun the "
+                    "same command to continue")
     rep = sub.add_parser("report", help="spec §15 report: metrics.json and one static HTML file")
     rsub = rep.add_subparsers(dest="report_cmd", required=True)
     rb = rsub.add_parser("build", help="build the report from W3.1 run directories over one seed set")

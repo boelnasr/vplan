@@ -28,6 +28,7 @@ DIRECTION = {"pregrasp": "learned visual check (Cosmos): approach to the instruc
              "prerelease": "learned visual check (Cosmos): object over the bin not confirmed"}
 VIEWS = ("front_oblique", "top")
 RETRY_VIEWS = ("front_oblique", "top", "side")  # spec §11: uncertain -> one re-ask with the third view
+TIMEOUT_S = 90.0  # per request: a full thinking reply (1024 tokens) at the ~22 tokens/s measured under GPU contention
 
 
 def subject(spec: TaskSpec) -> str | None:
@@ -96,12 +97,12 @@ def render_stage(plan: PickPlacePlan, traj: CandidateTrajectory, scene: Scene, s
 class CosmosGate:
     """Callable gate: gate(plan, traj, scene, subject=...) -> VisualGateReport. Stops at the first non-pass stage.
     ask and render are seams for tests; on_check sees every verdict as it arrives (live demo output).
-    timeout (s) covers a full thinking reply (1024 tokens) at the ~22 tokens/s measured under GPU contention.
+    timeout is in s (TIMEOUT_S by default).
     Any gate-side error (endpoint, rendering, callback) means unavailable: the demo falls back to the geometric
     checks instead of blaming the simulation (spec §11)."""
 
     def __init__(self, base_url: str, *, model: str = DEFAULT_MODEL, enable_thinking: bool = True,
-                 timeout: float = 90.0, ask: Callable = ask_cosmos, render: Callable = render_stage,
+                 timeout: float = TIMEOUT_S, ask: Callable = ask_cosmos, render: Callable = render_stage,
                  on_check: Callable[[VisualCheck], None] | None = None):
         self.base_url, self.model, self.enable_thinking, self.timeout = base_url, model, enable_thinking, timeout
         self._ask, self._render, self._on_check = ask, render, on_check
