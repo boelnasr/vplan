@@ -7,7 +7,8 @@ import pytest
 
 from tests.test_planner import FakeClient, response
 from tests.test_visual_gate import FakeAsk
-from tests.ui_fixtures import (SECRET, basic_result, basic_task, enclosed_result, low_transport, magenta_pixels)
+from tests.ui_fixtures import (JARGON, SECRET, basic_result, basic_task, enclosed_result, low_transport,
+                               magenta_pixels, visible)
 from vplan import pipeline
 from vplan.evaluate.pilot import PilotError
 from vplan.planners.heuristic import heuristic_geometry
@@ -22,7 +23,7 @@ def test_basic_task_resolves_the_instruction_and_carries_a_feasible_oracle():
     task = basic_task()
     assert task.oracle.feasibility == "feasible" and task.oracle.target_id == "cube_red"
     assert task.task.instruction == live.BASIC_INSTRUCTION and len(task.task.scene.obstacles) == 1
-    assert task.truth.startswith("feasible")
+    assert task.truth == "solvable" and task.label == f"Basic scene with wall: {live.BASIC_INSTRUCTION}"
 
 
 @pytest.mark.parametrize("instruction", ["Pick the blue cube and place it in the bin.", "put the red cube away",
@@ -35,13 +36,33 @@ def test_basic_task_refuses_instructions_without_exactly_one_object(instruction)
 def test_generated_impossible_task_carries_its_proof():
     task = live.generated_task(1, "impossible 3: target enclosed")
     assert task.oracle.feasibility == "impossible" and task.oracle.proof.type == 3
-    assert "refusal (target_enclosed)" in task.truth and task.seed == 1
+    assert task.truth == "impossible: object enclosed, so the correct answer is to refuse" and task.seed == 1
+    assert task.label.startswith("Generated task, seed 1 (Impossible: object enclosed): Pick ")
+    assert task.enclosure == frozenset(o.id for o in task.oracle.proof.enclosure) and len(task.enclosure) == 5
 
 
-@pytest.mark.parametrize("seed, kind", [(-1, "feasible"), (0, "impossible 9"), (True, "feasible")])
+@pytest.mark.parametrize("seed, kind", [(-1, "feasible"), (0, "impossible 9"), (True, "feasible"), (0, "feasible")])
 def test_generated_task_refuses_bad_input(seed, kind):
-    with pytest.raises(live.LiveError):
+    with pytest.raises(live.LiveError) as refused:
         live.generated_task(seed, kind)
+    assert not JARGON.search(str(refused.value)), refused.value  # shown in the page's banner
+
+
+def test_task_types_and_the_baseline_have_plain_labels():
+    assert list(live.KIND_LABELS.values()) == ["Solvable", "Impossible: object out of reach",
+                                               "Impossible: bin out of reach", "Impossible: object enclosed",
+                                               "Impossible: object not in scene"]
+    assert list(live.KIND_LABELS) == list(live.TASK_KINDS)  # the dropdown's values stay the generator's kinds
+    assert live.heuristic_option().label == "Rule-based baseline (no LLM)"
+
+
+def test_an_unsolvable_basic_instruction_is_refused_in_plain_words(monkeypatch):
+    from vplan.tasks import generate as gen
+    monkeypatch.setattr(gen, "witness_rejection", lambda witness, target: "blocked")
+    with pytest.raises(live.LiveError) as refused:
+        live.basic_task(live.BASIC_INSTRUCTION, obstacle=False)
+    assert "rule-based baseline could not solve" in str(refused.value)
+    assert not JARGON.search(str(refused.value)), refused.value
 
 
 # ---- the attempt ---------------------------------------------------------------------------------------------------
@@ -60,11 +81,14 @@ def test_rejected_rounds_render_the_offending_bodies_highlighted():
     assert result.record.outcome == "budget_exhausted" and result.record.call_count == 2
     rounds = [e for e in events if e.kind == "round"]
     assert len(rounds) == 2 and all(e.round.evaluation.findings for e in rounds)
-    assert result.shots and all(s.caption.startswith("round ") for s in result.shots)
-    collision = [s for s in result.shots if "collision" in s.caption]
+    assert result.shots and all(s.caption.startswith("Round 1 · Collision: ") for s in result.shots)
+    assert [r.repeat_plan for r in result.record.rounds] == [False, True]  # round 2 repeats it: no second picture
+    collision = [s for s in result.shots if "Collision" in s.caption]
+    assert all("enclosure" in s.caption for s in collision)
+    assert not any(JARGON.search(s.caption) for s in result.shots), [s.caption for s in result.shots]
     assert collision and all(magenta_pixels(s.image) > 50 for s in collision)
     assert all(s.close_up is not None and magenta_pixels(s.close_up) > magenta_pixels(s.image) for s in collision)
-    assert result.execution_gif is None and result.execution_note == "nothing was executed"
+    assert result.execution_gif is None and result.execution_note == "Nothing was executed."
 
 
 def test_progress_display_follows_the_events():
@@ -76,16 +100,16 @@ def test_progress_display_follows_the_events():
     for event in events:
         progress.apply(event)
     shown = progress.display()
-    assert shown.timeline_html.count("Round ") == 2 and "V-6" in shown.timeline_html
+    assert shown.timeline_html.count("Round ") == 2 and "Collision" in visible(shown.timeline_html)
     assert len(shown.findings) == len(result.shots) + sum(s.close_up is not None for s in result.shots)
     assert [c.endswith(("(overview)", "(close-up)")) for _, c in shown.findings] == [True] * len(shown.findings)
-    assert "geometric checks only" in shown.banner_html  # no Cosmos URL: the D22 banner
+    assert "kinematic and collision checks only" in shown.banner_html  # no Cosmos URL: the D22 banner
 
 
 def test_live_result_display_has_every_panel():
     result, _ = basic_result()
     shown = display.live_result_display(result)
-    assert "SUCCESS" in shown.judge_html and "data:image/gif;base64," in shown.execution_html
+    assert "Success" in shown.judge_html and "data:image/gif;base64," in shown.execution_html
     assert '"target_id": "cube_red"' in shown.plan_json and "V-6" in shown.timeline_html
     assert "Cosmos visual check off" in shown.banner_html
     assert len(shown.values()) == len(display.Display.FIELDS)
@@ -135,8 +159,9 @@ def test_cosmos_frames_and_verdicts_are_shown_with_the_round(monkeypatch):
         (s, v) for s in ("pregrasp", "grasp", "prerelease") for v in ("front_oblique", "top")]
     assert all(f.png.startswith(b"\x89PNG") and f.round_index == 0 for f in result.cosmos)
     shown = display.live_result_display(result)
-    assert len(shown.cosmos) == 6 and all("pass (learned check)" in caption for _, caption in shown.cosmos)
-    assert "not verification" in shown.banner_html and "Cosmos (learned visual check" in shown.timeline_html
+    assert len(shown.cosmos) == 6 and all(caption.startswith("Pass (learned check) · ") for _, caption in shown.cosmos)
+    assert shown.cosmos[0][1] == "Pass (learned check) · Round 1 · pregrasp, front oblique view"  # verdict first
+    assert "not verification" in shown.banner_html and "Cosmos visual check" in visible(shown.timeline_html)
 
 
 # ---- the LLM path and the key ---------------------------------------------------------------------------------------
@@ -199,3 +224,47 @@ def test_recordings_never_overwrite_each_other(tmp_path, monkeypatch):
     monkeypatch.setattr(live, "_utc_stamp", lambda: "20261016T000000000000Z")  # a coarse Windows clock tick
     paths = [live.save_bundle(tmp_path, result.task, result.record, planner="h", cosmos_url=None) for _ in range(3)]
     assert len(set(paths)) == 3 and sorted(p.name for p in tmp_path.iterdir()) == [p.name for p in paths]
+
+
+def test_live_panels_carry_no_internal_terms():
+    """W4.1: what a viewer reads in every panel (the plan JSON keeps its recorded field names and values)."""
+    for result, events in (basic_result(), enclosed_result()):
+        progress = display.LiveProgress(result.task, result.planner, None, 1)
+        shown = []
+        for event in events:
+            progress.apply(event)
+            shown.append(progress.display())
+        shown.append(display.live_result_display(result))
+        for d in shown:
+            for name in ("banner_html", "status_html", "timeline_html", "execution_html", "judge_html"):
+                text = visible(getattr(d, name))
+                assert not JARGON.search(text), (name, JARGON.search(text), text)
+            for _, caption in d.findings + d.cosmos:
+                assert not JARGON.search(caption), caption
+    status = visible(display.live_result_display(basic_result()[0]).status_html)
+    assert "Task Pick the red cube and place it in the bin." in status
+    assert "Ground truth (hidden from the planner) solvable" in status and "Planner Rule-based baseline" in status
+
+
+def test_only_collision_captions_pair_parts_with_an_arrow():
+    """"Release in bin: red cube ↔ bin" would read as a collision; other checks list their parts."""
+    from vplan.records import Finding
+    from vplan.ui import render
+    task = basic_task()
+    release = Finding(stage="plan", check="release", plan_field="place.position", measured=0.01, threshold=0.0,
+                      direction="carried object's footprint extends 0.010 m outside the bin interior")
+    (shot,) = render.finding_shots(task.oracle.reference_plan, task.task.scene, [release], seed=0,
+                                   verifier_cfg=__import__("vplan.config", fromlist=["x"]).config_snapshot()["verifier"],
+                                   label="Round 1 · ")
+    assert shot.caption.startswith("Round 1 · Release in bin: red cube, bin floor, bin wall") and "↔" not in shot.caption
+    _, events = enclosed_result()
+    assert all("↔" in s.caption for e in events if e.kind == "round" for s in e.shots if "Collision" in s.caption)
+
+
+def test_no_repair_rounds_read_as_at_most_one_call():
+    result, events = basic_result()
+    progress = display.LiveProgress(result.task, result.planner, None, 0)
+    text = visible(progress.display().status_html)
+    assert "Repair rounds none (at most 1 planner call)" in text and "up to 0" not in text
+    record = result.record.model_copy(update={"k": 0})
+    assert display._attempt_line(record) == "1 planner call; checked, no repair rounds"

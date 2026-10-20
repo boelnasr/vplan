@@ -26,7 +26,7 @@ from vplan.config import config_snapshot
 from vplan.records import (AttemptRecord, PickPlacePlan, PlannerCall, RobotFacts, RoundRecord,
                            TaskOracle, TaskSpec)
 from vplan.ui import render
-from vplan.ui.views import Banner, cosmos_banner
+from vplan.ui.views import REFUSAL_WORDS, Banner, cosmos_banner
 
 BASIC_INSTRUCTION = "Pick the red cube and place it in the bin."
 DEFAULT_TEMPERATURE = 0.7  # every evaluation call uses it (runner.DEFAULT_TEMPERATURE); the demo matches
@@ -37,6 +37,11 @@ TASK_KINDS: dict[str, tuple[Literal["feasible", "impossible"], int | None]] = {
     "impossible 3: target enclosed": ("impossible", 3),
     "impossible 4: absent referent": ("impossible", 4),
 }
+# What the Task type dropdown shows for each kind (its values stay the TASK_KINDS keys)
+KIND_LABELS = {"feasible": "Solvable", "impossible 1: target out of reach": "Impossible: object out of reach",
+               "impossible 2: bin out of reach": "Impossible: bin out of reach",
+               "impossible 3: target enclosed": "Impossible: object enclosed",
+               "impossible 4: absent referent": "Impossible: object not in scene"}
 BUNDLE_KIND = "vplan_ui_attempt"
 BUNDLE_SCHEMA = 1
 
@@ -57,10 +62,25 @@ class LiveTask:
 
     @property
     def truth(self) -> str:
-        o = self.oracle
-        if o.feasibility == "feasible":
-            return "feasible (the heuristic witness solved it)"
-        return f"impossible, type {o.proof.type}: the correct answer is a refusal ({o.proof.refusal_reason})"
+        return truth_text(self.oracle)
+
+    @property
+    def enclosure(self) -> frozenset[str]:
+        """The ids of a type-3 task's sealed box, so the UI can name its panels "enclosure"."""
+        return enclosure_ids(self.oracle)
+
+
+def truth_text(oracle: TaskOracle) -> str:
+    """The ground truth in words (feasible tasks are solved by the rule-based baseline, impossible ones carry a proof)."""
+    if oracle.feasibility == "feasible":
+        return "solvable"
+    reason = REFUSAL_WORDS.get(oracle.proof.refusal_reason, oracle.proof.refusal_reason)
+    return f"impossible: {reason}, so the correct answer is to refuse"
+
+
+def enclosure_ids(oracle: TaskOracle | None) -> frozenset[str]:
+    proof = getattr(oracle, "proof", None)
+    return frozenset(o.id for o in proof.enclosure) if proof is not None else frozenset()
 
 
 def basic_task(instruction: str, *, obstacle: bool, cfgs: dict[str, dict] | None = None) -> LiveTask:
@@ -76,15 +96,16 @@ def basic_task(instruction: str, *, obstacle: bool, cfgs: dict[str, dict] | None
     try:
         target = resolve_instruction(instruction, scene)
     except ValueError:
-        names = ", ".join(f"the {o.color} {o.shape}" for o in scene.objects)
-        raise LiveError(f"the instruction must name exactly one object as 'Pick <object> and place it in the bin.' "
-                        f"(objects here: {names})") from None
+        names = ", ".join(f"{o.color} {o.shape}" for o in scene.objects)
+        raise LiveError(f"The instruction must name exactly one object, as in “Pick the red cube and place it in the "
+                        f"bin.” Objects here: {names}.") from None
+    # The generator's rule for feasible tasks (spec §6): the heuristic witness must solve it, else feasibility is open
     witness = gen.run_witness(task, target, seed=0, config_snapshot=cfgs)
     if gen.witness_rejection(witness, target) is not None:
-        raise LiveError("the heuristic witness could not solve this instruction here, so the task's feasibility is "
-                        "undetermined (spec §6); choose another object or scene")
+        raise LiveError("The rule-based baseline could not solve this task here, so it is not known to be solvable. "
+                        "Choose another object or scene.")
     oracle = TaskOracle(target_id=target, reference_plan=witness.plan, reference_result=witness.result)
-    label = f"basic scene{' with wall' if obstacle else ''}: {instruction}"
+    label = f"Basic scene{' with wall' if obstacle else ''}: {instruction}"
     return LiveTask(label, task, oracle, 0, {"kind": "basic", "obstacle": obstacle})
 
 
@@ -93,15 +114,15 @@ def generated_task(seed: int, kind: str, *, cfgs: dict[str, dict] | None = None)
     from vplan.tasks import generate_task
 
     if kind not in TASK_KINDS:
-        raise LiveError(f"unknown task kind {kind!r}")
+        raise LiveError(f"Unknown task type {kind!r}.")
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
-        raise LiveError("the seed must be a non-negative integer")
+        raise LiveError("The task seed must be a whole number, 0 or more.")
     task_kind, impossible_type = TASK_KINDS[kind]
     pair = generate_task(seed, task_kind, impossible_type, config_snapshot=cfgs)
-    if pair is None:
-        raise LiveError(f"seed {seed} yields no {kind} task (neither a witness nor a proof); try another seed")
+    if pair is None:  # neither a witness nor a proof for this seed
+        raise LiveError(f"Seed {seed} gives no task of type '{KIND_LABELS[kind]}'. Try another seed.")
     spec, oracle = pair
-    return LiveTask(f"generated seed {seed} ({kind}): {spec.instruction}", spec, oracle, seed,
+    return LiveTask(f"Generated task, seed {seed} ({KIND_LABELS[kind]}): {spec.instruction}", spec, oracle, seed,
                     {"kind": "generated", "seed": seed, "task_kind": task_kind, "impossible_type": impossible_type})
 
 
@@ -116,7 +137,7 @@ class PlannerOption:
 
 def heuristic_option() -> PlannerOption:
     from vplan.planners.heuristic import HeuristicPlanner
-    return PlannerOption("Template heuristic (no LLM, no key)", HeuristicPlanner())
+    return PlannerOption("Rule-based baseline (no LLM)", HeuristicPlanner())
 
 
 def llm_option(env_file: str | Path, *, model: str | None = None, allow_paid: bool = False,
@@ -215,10 +236,12 @@ def run_live(task: LiveTask, option: PlannerOption, *, k: int = 3, cosmos_url: s
             rnd = RoundRecord.model_validate(event["round"])
             ev, plan = rnd.evaluation, rnd.call.plan
             new_shots: tuple[render.Shot, ...] = ()
-            if ev is not None and ev.findings and isinstance(plan, PickPlacePlan):
+            # A round that repeats the previous plan would only redraw the same picture
+            if ev is not None and ev.findings and isinstance(plan, PickPlacePlan) and not rnd.repeat_plan:
                 new_shots = tuple(render.finding_shots(plan, task.task.scene, ev.findings, seed=task.seed,
                                                        verifier_cfg=cfgs["verifier"],
-                                                       label=f"round {rnd.round_index}: "))
+                                                       label=f"Round {rnd.round_index + 1} · ",
+                                                       enclosure=task.enclosure))
             new_frames = tuple(CosmosFrame(rnd.round_index, stage, view, png)
                                for stage, pngs in pending for view, png in pngs.items())
             pending.clear()
@@ -228,7 +251,7 @@ def run_live(task: LiveTask, option: PlannerOption, *, k: int = 3, cosmos_url: s
 
     record = run_task(task.task, task.oracle, option.planner, k=k, mode="repair", config_snapshot=cfgs,
                       event_sink=sink, attempt_id=f"ui:{_utc_stamp()}", seed=task.seed, visual_gate=gate)
-    gif, note = None, "nothing was executed"
+    gif, note = None, "Nothing was executed."
     last = record.rounds[-1].evaluation
     if last is not None and last.record is not None and not render_execution:
         note = "executed (the execution render was skipped)"
@@ -236,9 +259,9 @@ def run_live(task: LiveTask, option: PlannerOption, *, k: int = 3, cosmos_url: s
         emit(LiveEvent("status", text="rendering the execution from its recorded joint states"))
         try:
             gif = render.gif_bytes(render.execution_frames(last.record, task.task.scene))
-            note = (f"round {record.rounds[-1].round_index} as executed in PyBullet, played back from the recorded "
-                    f"60 Hz joint and object states ({len(last.record.q_replay)} frames, shown at "
-                    f"{render.GIF_FPS} fps)")
+            note = (f"Round {record.rounds[-1].round_index + 1} as executed in the PyBullet physics simulation, "
+                    f"replayed from its recorded joint and object states ({len(last.record.q_replay)} frames at "
+                    f"60 Hz, shown at {render.GIF_FPS} fps)")
         except Exception as exc:  # display only; the Judge's verdict stands
             note = f"execution render failed: {type(exc).__name__}: {exc}"[:300]
     bundle = None
@@ -282,6 +305,6 @@ def save_bundle(record_dir: str | Path, task: LiveTask, record: AttemptRecord, *
     raise LiveError(f"no free recording name for {stamp} in {out}")
 
 
-__all__ = ["BASIC_INSTRUCTION", "BUNDLE_KIND", "CosmosFrame", "LiveError", "LiveEvent",
-           "LiveResult", "LiveTask", "PlannerOption", "TASK_KINDS", "basic_task", "bundle_text", "generated_task",
-           "heuristic_option", "llm_option", "run_live", "save_bundle"]
+__all__ = ["BASIC_INSTRUCTION", "BUNDLE_KIND", "CosmosFrame", "KIND_LABELS", "LiveError", "LiveEvent",
+           "LiveResult", "LiveTask", "PlannerOption", "TASK_KINDS", "basic_task", "bundle_text", "enclosure_ids",
+           "generated_task", "heuristic_option", "llm_option", "run_live", "save_bundle", "truth_text"]

@@ -1928,11 +1928,11 @@ All model and provider text is HTML-escaped.
 
 **Consequence:** an unresumed D70 run stays eligible. A resumed comparison that combines attempts evaluated under different hashed source trees cannot support the headline.
 
-## D71. Resumed-run source provenance in reports (2026-10-20)
+## D72. Week 4 UI text and demo styling (2026-10-20)
 
-**Ruling:** reports carry the prepared seed-set source digest, the initial run provenance, and the `git`, `source_digest` and `source_drift` recorded by every runner session. A session is marked as contributing when one or more included attempts came from it; every attempt must map to a recorded contributing session. A configuration is not a headline source when provenance is missing, its contributing sessions have different source digests, have recorded source drift, or differ from the prepared seed-set or initial run digest. All required digests must be nonempty SHA-256 values. Paired configurations must also share the same contributing digest. Comparisons that use an ineligible configuration are labelled ineligible. The source digest is the compatibility check; git SHAs remain visible context because documentation-only commits can change a SHA without changing evaluated source.
+**Ruling:** the live and replay UI presents checks, Judge results, scene objects and plan fields in plain user-facing language. Generated task instructions are taken from the selected task and locked; text entered for a basic scene is preserved when switching scenes. Changing the task clears stale warnings and results. Load and run actions lock their controls while work is in progress and show one progress indicator, and the page receives a visual pass for the demo.
 
-**Consequence:** an unresumed D70 run stays eligible. A resumed comparison that combines attempts evaluated under different hashed source trees cannot support the headline.
+**Consequence:** the UI communicates the existing task, verifier and Judge results without changing planning, verification or execution behavior.
 
 ## D73. The Cosmos shadow study (W4.2, 2026-10-20)
 

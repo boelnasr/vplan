@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>vplan system overview</title>
+  <style>
+    /* Skin: GitHub Primer functional tokens (@primer/primitives 11.10.0, dark theme).
+       Fonts: Primer's own system stacks, in order; no web fonts are loaded. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #0d1117;   /* bgColor-default */
+      --color-paper-2: #151b23;   /* bgColor-muted */
+      --color-ink:     #f0f6fc;   /* fgColor-default */
+      --color-muted:   #9198a1;   /* fgColor-muted */
+      --color-accent:  #4493f8;   /* fgColor-accent */
+      --font-sans:     "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Backtick Fix", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+      --font-mono:     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; min-width: 0; }
+    /* The SVG keeps its readable width (min-width == viewBox width); this wrapper scrolls on narrow screens
+       instead of the page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-sans);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 600;
+      line-height: 1.25;
+      color: var(--color-ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .sub {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: var(--color-muted);
+      max-width: 68ch;
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* Paper has no scrollbar: let the diagram scale to the sheet. Must follow the svg rule above. */
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · vplan</p>
+    <h1>LLMs plan, physics verifies</h1>
+    <p class="sub">Nemotron proposes a pick-and-place plan. Deterministic kinematics and physics decide whether it runs: the Verifier returns findings for repair or issues an approval token, and an independent Judge scores what was executed.</p>
+    <div class="diagram-container">
+<svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="system-overview-dark-title system-overview-dark-desc">
+<title id="system-overview-dark-title">vplan system overview: LLMs plan, physics verifies</title>
+<desc id="system-overview-dark-desc">Architecture of vplan: an evaluation runner feeds generated tasks to a Nemotron planner; its plan becomes a joint trajectory that a physics Verifier either sends back with findings for repair or approves with a token for the Executor, an independent Judge scores the run, and a demo-only Cosmos gate can only block.</desc>
+<defs>
+<marker id="system-overview-dark-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9198a1"/></marker>
+<marker id="system-overview-dark-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4493f8"/></marker>
+<marker id="system-overview-dark-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4493f8"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#0d1117"/>
+<!-- Zones / bands (painted first) -->
+<rect x="40" y="40" width="640" height="120" rx="8" fill="rgba(240,246,252,0.02)" stroke="rgba(61,68,77,0.70)" stroke-width="0.8"/>
+<rect x="48" y="44" width="120" height="12" rx="2" fill="#0d1117"/>
+<text x="52" y="53" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">EVALUATION HARNESS</text>
+<rect x="100" y="208" width="508" height="120" rx="8" fill="rgba(240,246,252,0.02)" stroke="rgba(61,68,77,0.70)" stroke-width="0.8"/>
+<rect x="108" y="212" width="120" height="12" rx="2" fill="#0d1117"/>
+<text x="112" y="221" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEARNED — PROPOSES</text>
+<rect x="40" y="368" width="880" height="120" rx="8" fill="rgba(240,246,252,0.02)" stroke="rgba(61,68,77,0.70)" stroke-width="0.8"/>
+<rect x="48" y="372" width="112" height="12" rx="2" fill="#0d1117"/>
+<text x="52" y="381" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">PHYSICS — DECIDES</text>
+<!-- Connectors (before nodes) -->
+<line x1="204" y1="104" x2="280" y2="104" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="424" y1="104" x2="516" y2="104" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="300" y1="136" x2="300" y2="240" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<path d="M 828,400 V 192 Q 828,184 820,184 H 408 Q 400,184 400,176 V 136" fill="none" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="168" y1="304" x2="168" y2="400" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="340" y1="400" x2="340" y2="304" stroke="#4493f8" stroke-width="1.4" marker-end="url(#system-overview-dark-arrow-accent)"/>
+<line x1="412" y1="400" x2="412" y2="304" stroke="#9198a1" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="564" y1="304" x2="564" y2="400" stroke="#9198a1" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="204" y1="432" x2="284" y2="432" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<line x1="428" y1="432" x2="532" y2="432" stroke="#4493f8" stroke-width="1.4" marker-end="url(#system-overview-dark-arrow-accent)"/>
+<line x1="676" y1="432" x2="756" y2="432" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<!-- Connector labels on opaque masks -->
+<rect x="212" y="86" width="60" height="12" rx="2" fill="#0d1117"/><text x="242" y="95" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SEED SETS</text>
+<rect x="444" y="86" width="52" height="12" rx="2" fill="#0d1117"/><text x="470" y="95" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ATTEMPTS</text>
+<rect x="260" y="182" width="32" height="12" rx="2" fill="#0d1117"/><text x="276" y="191" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TASK</text>
+<rect x="682" y="166" width="36" height="12" rx="2" fill="#0d1117"/><text x="700" y="175" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SCORE</text>
+<rect x="176" y="346" width="32" height="12" rx="2" fill="#0d1117"/><text x="192" y="355" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PLAN</text>
+<rect x="264" y="346" width="68" height="12" rx="2" fill="#0d1117"/><text x="298" y="355" fill="#4493f8" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">≤5 FINDINGS</text>
+<rect x="420" y="346" width="64" height="12" rx="2" fill="#0d1117"/><text x="452" y="355" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">AFTER PASS</text>
+<rect x="572" y="346" width="88" height="12" rx="2" fill="#0d1117"/><text x="616" y="355" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">IF NOT BLOCKED</text>
+<rect x="212" y="414" width="64" height="12" rx="2" fill="#0d1117"/><text x="244" y="423" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TRAJECTORY</text>
+<rect x="436" y="414" width="88" height="12" rx="2" fill="#0d1117"/><text x="480" y="423" fill="#4493f8" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">APPROVAL TOKEN</text>
+<rect x="684" y="414" width="64" height="12" rx="2" fill="#0d1117"/><text x="716" y="423" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RUN RECORD</text>
+<!-- Nodes -->
+<rect x="60" y="72" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="60" y="72" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="68" y="78" width="28" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="82" y="87" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DATA</text>
+<text x="132" y="110" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Task generator</text>
+<text x="132" y="126" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">feasible + impossible</text>
+<rect x="280" y="72" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="280" y="72" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="288" y="78" width="24" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="300" y="87" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="352" y="110" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Eval runner</text>
+<text x="352" y="126" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">vplan eval run</text>
+<rect x="516" y="72" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="516" y="72" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="524" y="78" width="24" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="536" y="87" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLI</text>
+<text x="588" y="110" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Report</text>
+<text x="588" y="126" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">vplan report build</text>
+<rect x="120" y="240" width="240" height="64" rx="6" fill="#0d1117"/>
+<rect x="120" y="240" width="240" height="64" rx="6" fill="rgba(240,246,252,0.03)" stroke="rgba(240,246,252,0.3)" stroke-width="1"/>
+<rect x="128" y="246" width="24" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="140" y="255" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LLM</text>
+<text x="240" y="278" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Nemotron planner</text>
+<text x="240" y="294" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">Nebius Token Factory</text>
+<rect x="388" y="240" width="200" height="64" rx="6" fill="#0d1117"/>
+<rect x="388" y="240" width="200" height="64" rx="6" fill="rgba(240,246,252,0.02)" stroke="#9198a1" stroke-width="1" stroke-dasharray="4,3"/>
+<rect x="396" y="246" width="28" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="410" y="255" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DEMO</text>
+<text x="488" y="278" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Cosmos visual gate</text>
+<text x="488" y="294" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">can only block</text>
+<rect x="60" y="400" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="60" y="400" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="68" y="406" width="20" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="78" y="415" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">IK</text>
+<text x="132" y="438" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Motion layer</text>
+<text x="132" y="454" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">ManipulaPy IK</text>
+<rect x="284" y="400" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="284" y="400" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="292" y="406" width="28" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="306" y="415" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">GATE</text>
+<text x="356" y="438" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Verifier</text>
+<text x="356" y="454" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">8 checks · preview sim</text>
+<rect x="532" y="400" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="532" y="400" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="540" y="406" width="24" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="552" y="415" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SIM</text>
+<text x="604" y="438" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Executor</text>
+<text x="604" y="454" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">PyBullet · 240 Hz</text>
+<rect x="756" y="400" width="144" height="64" rx="6" fill="#0d1117"/>
+<rect x="756" y="400" width="144" height="64" rx="6" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<rect x="764" y="406" width="36" height="12" rx="2" fill="none" stroke="rgba(145,152,161,0.45)" stroke-width="0.8"/>
+<text x="782" y="415" fill="#9198a1" font-size="7" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SCORE</text>
+<text x="828" y="438" fill="#f0f6fc" font-size="12" font-weight="600" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'" text-anchor="middle">Judge</text>
+<text x="828" y="454" fill="#9198a1" font-size="9" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">independent score</text>
+<!-- Legend strip -->
+<line x1="40" y1="520" x2="920" y2="520" stroke="rgba(61,68,77,0.70)" stroke-width="0.8"/>
+<text x="40" y="548" fill="#9198a1" font-size="8" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+<line x1="112" y1="545" x2="140" y2="545" stroke="#4493f8" stroke-width="1.4" marker-end="url(#system-overview-dark-arrow-accent)"/>
+<text x="148" y="548" fill="#9198a1" font-size="9" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'">Verifier verdict</text>
+<line x1="268" y1="545" x2="296" y2="545" stroke="#9198a1" stroke-width="1.2" marker-end="url(#system-overview-dark-arrow)"/>
+<text x="304" y="548" fill="#9198a1" font-size="9" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'">Data flow</text>
+<line x1="388" y1="545" x2="416" y2="545" stroke="#9198a1" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#system-overview-dark-arrow)"/>
+<rect x="424" y="540" width="14" height="10" rx="2" fill="rgba(240,246,252,0.02)" stroke="#9198a1" stroke-width="1" stroke-dasharray="3,2"/>
+<text x="446" y="548" fill="#9198a1" font-size="9" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'">Demo only</text>
+<rect x="540" y="540" width="14" height="10" rx="2" fill="#151b23" stroke="#f0f6fc" stroke-width="1"/>
+<text x="562" y="548" fill="#9198a1" font-size="9" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'">Deterministic code</text>
+<rect x="700" y="540" width="14" height="10" rx="2" fill="rgba(240,246,252,0.03)" stroke="rgba(240,246,252,0.3)" stroke-width="1"/>
+<text x="722" y="548" fill="#9198a1" font-size="9" font-family="'Mona Sans VF', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Backtick Fix', 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'">Learned model</text>
+</svg>
+    </div>
+  </div>
+</body>
+</html>
