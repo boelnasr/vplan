@@ -76,8 +76,18 @@ def test_segment_checks_after_an_ik_failure_are_only_partial():
                  direction="pose not reachable: residual 10.0 mm / 0.1 deg", sample_index=3)
     s = statuses(views.round_view(rnd(0, PLAN, blocked(ik)), mode="repair"))
     assert s["ik_accuracy"] == "fail"
+    assert s["continuity"] == "partial"
     assert s["joint_limits"] == s["singularity"] == s["collision"] == "partial"
     assert s["grasp_preconditions"] == s["release"] == s["grounding"] == "pass"  # whole-plan checks still ran
+
+
+def test_ik_accuracy_after_a_continuity_failure_is_partial():
+    continuity = finding("continuity", stage="lift", plan_field="grasp", measured=2.0, threshold=1.0, bodies=(),
+                         direction="IK branch flip: large joint jump", sample_index=3)
+    s = statuses(views.round_view(rnd(0, PLAN, blocked(continuity)), mode="repair"))
+    assert s["continuity"] == "fail"
+    assert s["ik_accuracy"] == "partial"
+    assert s["joint_limits"] == s["singularity"] == s["collision"] == "partial"
 
 
 def test_five_findings_leave_the_unreported_checks_unknown():

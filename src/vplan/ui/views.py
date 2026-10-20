@@ -5,7 +5,7 @@ Check statuses (spec §9 V-1..V-8, one row per check and round):
 - pass: the check ran over the whole trajectory and reported nothing;
 - fail: the Verifier reported a Finding for it (at most one per check);
 - partial: nothing reported, but the segment checks stopped at an IK or continuity failure, so later segments were
-  not checked (verifier.verify);
+  not checked (verifier.verify), or the paired IK/continuity check was skipped;
 - unknown: it may have failed without being reported (verify keeps at most five Findings), or the round ended in a
   simulation error before or during verification;
 - off: it did not run (the unverified ablation, or an unknown target_id, which stops everything after grounding).
@@ -188,7 +188,7 @@ def check_timeline(evaluation: EvaluationResult | None, mode: str) -> tuple[tupl
     note = "every check ran" if not found else f"{len(found)} finding(s)"
     stop = next((found[c] for c in ("ik_accuracy", "continuity") if c in found), None)
     if stop is not None:
-        for c in SEGMENT_CHECKS - set(found):
+        for c in (SEGMENT_CHECKS | STOP_CHECKS) - set(found):
             status[c] = "partial"
             notes[c] = f"nothing up to the {stop.stage} segment; later segments not checked"
         note += f"; segment checks stopped at the {stop.stage} segment ({stop.check})"

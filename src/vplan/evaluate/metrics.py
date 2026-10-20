@@ -459,7 +459,7 @@ def _gain(by_config: Mapping[int, Sequence[AttemptRow]], blocks: Mapping[str, Ma
     # provenance.headline_source already needs a complete run on the test seeds (_mark_not_headline); config 2
     # shares config 3's run
     source = ran and bool(common) and all(blocks[str(c)]["provenance"]["headline_source"] for c in (x, y))
-    reasons = _short_run_reasons(runs, (x, y)) + _split_reasons(split)
+    reasons = _short_run_reasons(runs, (x, y)) + _source_reasons(runs, (x, y)) + _split_reasons(split)
     result["headline_source"] = source
     result["dry_run_configs"] = [c for c in (x, y) if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
     result["label"] = (NOT_RUN if not ran else TOKEN_FACTORY_LABEL if source else
@@ -486,6 +486,16 @@ def _short_run_reasons(runs: Mapping[int, Mapping[str, Any]], configs: Iterable[
     return reasons
 
 
+def _source_reasons(runs: Mapping[int, Mapping[str, Any]], configs: Iterable[int]) -> list[str]:
+    return [f"config {c} has incompatible source provenance"
+            for c in dict.fromkeys(map(_run_of, configs))
+            if c in runs and runs[c].get("source_incompatible")]
+
+
+def _valid_source_digest(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
 def _split_reasons(split: str) -> list[str]:
     """Spec §14 runs every configuration on the held-out test seeds; a report on any other seed set says so."""
     return [] if split == HEADLINE_SPLIT else [DEV_SPLIT_REASON]
@@ -496,7 +506,9 @@ def _mark_not_headline(block: dict[str, Any], split: str) -> None:
     a headline source: its provenance and label say why. dry_run stays about the provider alone."""
     provenance, run = block["provenance"], block["run"]
     kinds = [kind for kind in ("incomplete", "limited") if run is not None and run[kind]]
-    reasons = ([f"{' and '.join(kinds)} run"] if kinds else []) + _split_reasons(split)
+    source_reason = (["incompatible source provenance"] if run is not None and
+                     run.get("source_incompatible") else [])
+    reasons = ([f"{' and '.join(kinds)} run"] if kinds else []) + source_reason + _split_reasons(split)
     if provenance["headline_source"] and reasons:
         provenance.update(headline_source=False, label=TOKEN_FACTORY_NOT_HEADLINE.format("; ".join(reasons)))
         block["label"] = provenance["label"]
@@ -516,15 +528,18 @@ def _headline_status(blocks: Mapping[str, Mapping[str, Any]], runs: Mapping[int,
     dry = [c for c in HEADLINE_CONFIGS if str(c) in blocks and blocks[str(c)]["provenance"]["dry_run"]]
     missing = [c for c in HEADLINE_CONFIGS if str(c) not in blocks]
     short = _short_run_reasons(runs, HEADLINE_CONFIGS)
+    source_mixed = [c for c in HEADLINE_CONFIGS if c in runs and runs[c].get("source_incompatible")]
     # A run that recorded nothing is missing from the rows but named by its count (0/n), not as "not run".
     unrun = [c for c in missing if _run_of(c) not in runs]
     off_split = _split_reasons(split)
-    source = not dry and not missing and not short and not off_split
+    source = not dry and not missing and not short and not off_split and not source_mixed
     reasons = ([f"{config_list(dry)} {'is a dry run' if len(dry) == 1 else 'are dry runs'} (not on Nebius Token "
-                "Factory)"] if dry else []) + ([f"{config_list(unrun)} not run"] if unrun else []) + short + off_split
+                "Factory)"] if dry else []) + ([f"{config_list(unrun)} not run"] if unrun else []) + short + \
+        _source_reasons(runs, HEADLINE_CONFIGS) + off_split
     incomplete = any(runs[c]["incomplete"] for c in (3, 7) if c in runs)
     status = ("headline" if source else "not_run" if "3" not in blocks else "dry_run" if dry else
-              "partial" if unrun else "incomplete" if incomplete else "limited" if short else "development")
+              "partial" if unrun else "incomplete" if incomplete else "limited" if short else
+              "source_drift" if source_mixed else "development")
     return {"headline_source": source, "status": status, "dry_run_configs": dry, "missing_configs": missing,
             "reason": "; ".join(reasons) or None,
             "label": TOKEN_FACTORY_LABEL if source else "not a headline result: " + "; ".join(reasons)}
@@ -565,8 +580,41 @@ def _runs(manifests: Sequence[Mapping[str, Any]], by_config: Mapping[int, Sequen
         recorded = len(by_config.get(config, ()))
         if recorded > planned:
             raise MetricsError(f"config {config} has more rows ({recorded}) than its run planned ({planned})")
+        raw_sessions = m.get("sessions")
+        sessions = [s for s in raw_sessions if isinstance(s, Mapping) and s.get("contributed")
+                    ] if isinstance(raw_sessions, (list, tuple)) else []
+        sources = {s.get("source_digest") for s in sessions}
+        baseline_digest = m.get("source_digest")
+        prepared_digest = m.get("prepared_source_digest")
+        source_incompatible = (
+            len(sources) > 1
+            or (recorded > 0 and (not sessions or m.get("session_provenance_complete") is not True))
+            or (recorded > 0 and (not _valid_source_digest(baseline_digest)
+                                  or not _valid_source_digest(prepared_digest)))
+            or bool(m.get("source_drift"))
+            or m.get("session_provenance_complete") is False
+            or not isinstance(m.get("source_drift"), list)
+            or any(not _valid_source_digest(s.get("source_digest")) or not isinstance(s.get("source_drift"), list)
+                   for s in sessions)
+            or any(s.get("source_drift")
+                   or (baseline_digest and s.get("source_digest") != baseline_digest)
+                   or (prepared_digest and s.get("source_digest") != prepared_digest)
+                   for s in sessions)
+        )
         runs[config] = {"config": config, "run_id": m.get("run_id"), "planned": planned, "prepared": prepared,
                         "recorded": recorded, "incomplete": recorded < planned, "limited": planned < prepared}
+        if source_incompatible:
+            runs[config]["source_incompatible"] = True
+    paired_sources = {
+        config: {s.get("source_digest") for s in (m.get("sessions") or ())
+                 if isinstance(s, Mapping) and s.get("contributed") and _valid_source_digest(s.get("source_digest"))}
+        for config in (3, 7) for m in manifests if m.get("kind") == "eval_run" and m.get("config") == config
+    }
+    known_sources = set().union(*paired_sources.values()) if paired_sources else set()
+    if len(known_sources) > 1:
+        for config, sources in paired_sources.items():
+            if sources != known_sources and config in runs:
+                runs[config]["source_incompatible"] = True
     prepared = sorted({r["prepared"] for r in runs.values()} | ({size} if size is not None else set()))
     if len(prepared) > 1:
         raise MetricsError(f"the runs and the seed set disagree on how many tasks were prepared: {prepared}")

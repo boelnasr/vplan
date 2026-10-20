@@ -42,8 +42,8 @@ DAMAGED = (KeyError, IndexError, TypeError, AttributeError, ValueError)  # pydan
 
 
 def is_network_path(value: str | Path) -> bool:
-    text = str(value)
-    return text.startswith("\\\\") or text.startswith("//")
+    text = str(value).replace("\\", "/")
+    return text.startswith("//")
 
 
 def check_path(value: str | Path, roots: Roots = None) -> Path:

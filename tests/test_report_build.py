@@ -188,7 +188,44 @@ def test_the_seed_set_defaults_to_the_one_the_runs_recorded(runs, seed_dir):
     assert collect.collect_runs([runs[5]], seed_dir=seed_dir).rows == collect.collect_runs([runs[5]]).rows
 
 
-def test_a_report_built_from_runs_is_labelled_and_carries_no_local_path(runs, tmp_path):
+@pytest.mark.parametrize("damage", ["absent", "omitted"])
+def test_attempts_without_matching_session_provenance_are_marked_unknown(seed_dir, tmp_path, damage):
+    from vplan.evaluate import collect
+    run_dir = tmp_path / "c5"
+    assert run(5, seed_dir, run_dir).status == "complete"
+    sessions = run_dir / "sessions.jsonl"
+    if damage == "absent":
+        sessions.unlink()
+    else:
+        sessions.write_text("", encoding="utf-8")
+    got = collect.collect_runs([run_dir])
+    assert got.manifests[0]["sessions"] == []
+    assert got.manifests[0]["session_provenance_complete"] is False
+
+
+@pytest.mark.parametrize("damage", ["bool_session", "float_session", "string_session", "missing_source_digest"])
+def test_malformed_session_provenance_is_rejected(seed_dir, tmp_path, damage):
+    from vplan.evaluate import collect
+    run_dir = tmp_path / "c5"
+    assert run(5, seed_dir, run_dir).status == "complete"
+    path = run_dir / "sessions.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    event = json.loads(lines[0])
+    if damage == "bool_session":
+        event["session"] = False
+    elif damage == "float_session":
+        event["session"] = 0.0
+    elif damage == "string_session":
+        event["session"] = "0"
+    else:
+        del event["source_digest"]
+    lines[0] = json.dumps(event)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(collect.EvalError, match="sessions.jsonl line 1"):
+        collect.collect_runs([run_dir])
+
+
+def test_a_report_built_from_runs_is_labelled_and_carries_no_local_path(runs, seed_dir, tmp_path):
     from vplan.evaluate import collect
     files, status = collect.build([runs[5], runs[3], runs[7]], tmp_path / "report")
     m = json.loads(files.metrics.read_text(encoding="utf-8"))
@@ -198,6 +235,12 @@ def test_a_report_built_from_runs_is_labelled_and_carries_no_local_path(runs, tm
     assert m["provenance"]["seed_set"]["size"] == 5 and m["provenance"]["seed_set"]["tasks"] == 5
     assert m["configs"]["3"]["success"]["k"] == 3 and m["configs"]["5"]["refusals"]["correct_refusals"]["k"] == 2
     assert [r["config"] for r in m["provenance"]["runs"]] == [5, 3, 7]
+    assert m["provenance"]["runs"][0]["sessions"] == [{
+        "session": 0, "git": json.loads((runs[5] / "sessions.jsonl").read_text(encoding="utf-8").splitlines()[0])["git"],
+        "source_digest": json.loads((runs[5] / "sessions.jsonl").read_text(encoding="utf-8").splitlines()[0])[
+            "source_digest"], "source_drift": [], "contributed": True}]
+    assert m["provenance"]["runs"][0]["prepared_source_digest"] == json.loads(
+        (seed_dir / "manifest.json").read_text(encoding="utf-8"))["source_digest"]
     page = files.html.read_text(encoding="utf-8")
     assert "DRY RUN: configs 2, 3 and 7 — vplan evaluation report</title>" in page
     for path in (files.metrics, files.html):
