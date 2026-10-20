@@ -424,11 +424,112 @@ def test_an_incomplete_or_limited_token_factory_run_is_not_a_headline(manifests,
 
 def test_complete_token_factory_runs_stay_a_headline():
     rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
-    m = compute_metrics(rows, manifests=[ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)], seed_set_size=7)
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    for manifest in manifests:
+        manifest["source_digest"] = manifest["prepared_source_digest"] = "a" * 64
+        manifest["sessions"] = [{"session": 0, "git": {"sha": "frozen-commit"},
+                                 "source_digest": "a" * 64, "source_drift": [], "contributed": True}]
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
     assert m["status"]["complete"] is True and m["dry_run_configs"] == []
     assert m["headline"]["status"] == "headline" and m["headline"]["headline_source"] is True
     assert m["headline"]["reason"] is None and m["headline"]["label"] == TOKEN_FACTORY_LABEL
     assert m["headline"]["feedback_gain"]["headline_source"] is True
+
+
+def test_mixed_source_resume_is_preserved_and_excluded_from_headline():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    manifests[0]["source_digest"] = manifests[1]["source_digest"] = "a" * 64
+    manifests[0]["prepared_source_digest"] = manifests[1]["prepared_source_digest"] = "a" * 64
+    manifests[0]["sessions"] = [{"session": 0, "git": {"sha": "base"}, "source_digest": "a" * 64,
+                                 "source_drift": [], "contributed": True}]
+    manifests[1]["sessions"] = [
+        {"session": 0, "git": {"sha": "base"}, "source_digest": "a" * 64, "source_drift": [],
+         "contributed": True},
+        {"session": 1, "git": {"sha": "changed"}, "source_digest": "b" * 64,
+         "source_drift": ["src/vplan/repair.py"], "contributed": True},
+    ]
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["provenance"]["runs"][1]["sessions"] == manifests[1]["sessions"]
+    assert m["headline"]["headline_source"] is False
+    assert "config 7 has incompatible source provenance" in m["headline"]["reason"]
+    assert m["headline"]["feedback_gain"]["headline_source"] is False
+
+
+def test_initial_source_drift_also_disqualifies_a_single_session():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    manifests[0]["source_digest"] = manifests[1]["source_digest"] = "a" * 64
+    manifests[0]["prepared_source_digest"] = manifests[1]["prepared_source_digest"] = "a" * 64
+    manifests[0]["sessions"] = [{"session": 0, "git": {"sha": "base"}, "source_digest": "a" * 64,
+                                 "source_drift": [], "contributed": True}]
+    manifests[1]["sessions"] = [{"session": 0, "git": {"sha": "changed"}, "source_digest": "b" * 64,
+                                 "source_drift": ["src/vplan/repair.py"], "contributed": True}]
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
+    assert "config 7 has incompatible source provenance" in m["headline"]["reason"]
+
+
+def test_missing_initial_source_drift_cannot_be_a_headline():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    manifests[0].pop("source_drift")
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
+    assert "config 3 has incompatible source provenance" in m["headline"]["reason"]
+
+
+def test_missing_contributing_session_provenance_cannot_be_a_headline():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    for manifest in manifests:
+        manifest["source_digest"] = manifest["prepared_source_digest"] = "a" * 64
+        manifest["sessions"] = []
+        manifest["session_provenance_complete"] = False
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
+    assert m["headline"]["feedback_gain"]["headline_source"] is False
+
+
+def test_headline_comparison_requires_matching_source_digests_across_configs():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    for manifest, digest in zip(manifests, ("a" * 64, "b" * 64), strict=True):
+        manifest["source_digest"] = manifest["prepared_source_digest"] = digest
+        manifest["sessions"] = [{"session": 0, "git": {"sha": digest}, "source_digest": digest,
+                                 "source_drift": [], "contributed": True}]
+        manifest["session_provenance_complete"] = True
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
+    assert "config 3 has incompatible source provenance" in m["headline"]["reason"]
+    assert "config 7 has incompatible source provenance" in m["headline"]["reason"]
+
+
+@pytest.mark.parametrize("field,value", [("source_digest", None), ("source_digest", ""),
+                                          ("prepared_source_digest", None), ("prepared_source_digest", "")])
+def test_missing_or_empty_source_baseline_cannot_be_a_headline(field, value):
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    for manifest in manifests:
+        manifest["source_digest"] = manifest["prepared_source_digest"] = "a" * 64
+        manifest["sessions"] = [{"session": 0, "git": {"sha": "frozen-commit"}, "source_digest": "a" * 64,
+                                 "source_drift": [], "contributed": True}]
+        manifest["session_provenance_complete"] = True
+    manifests[1][field] = value
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
+    assert "config 7 has incompatible source provenance" in m["headline"]["reason"]
+
+
+def test_rows_with_an_empty_session_list_have_unknown_provenance():
+    rows = [r for r in ev.scenario_rows(source_override=TF) if r.config in (3, 7)]
+    manifests = [ev.run_manifest(3, 7, 7), ev.run_manifest(7, 7, 7)]
+    for manifest in manifests:
+        manifest["source_digest"] = manifest["prepared_source_digest"] = "a" * 64
+        manifest["sessions"] = []
+        manifest["session_provenance_complete"] = True
+    m = compute_metrics(rows, manifests=manifests, seed_set_size=7)
+    assert m["headline"]["headline_source"] is False
 
 
 DEV_REASON = "development seeds, not the held-out test set"
