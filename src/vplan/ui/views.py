@@ -15,6 +15,7 @@ Check statuses (spec §9 V-1..V-8, one row per check and round):
 """
 from __future__ import annotations
 
+import ast
 import json
 import math
 import re
@@ -36,9 +37,10 @@ CHECK_HELP = {
     "grounding": "the target object exists and the drop-off point is over the bin",
     "ik_accuracy": "the arm can reach every planned pose accurately",
     "joint_limits": "every joint stays clear of its position and velocity limits",
-    "singularity": "the arm stays away from singular (locked-up) poses",
+    "singularity": "the arm stays away from configurations where it loses the ability to move in some direction",
     "continuity": "no sudden joint jumps between neighbouring samples",
-    "collision": "at least 1 cm between the arm or carried object and everything else",
+    "collision": ("at least 1 cm between the arm or carried object and everything else, apart from the allowed "
+                  "contacts: fingers on the object, the object on the table or the bin floor"),
     "grasp_preconditions": "the object fits between the fingers and the approach is square to a face",
     "release": "the object is released fully inside the bin at its resting height"}
 SEGMENT_CHECKS = frozenset({"joint_limits", "singularity", "collision"})  # skipped after an IK/continuity stop
@@ -47,12 +49,21 @@ MAX_FINDINGS = 5  # verifier.verify reports at most five Findings, at most one p
 # spec §13 predicates in report order: (id, plain name, meaning)
 PREDICATES: tuple[tuple[str, str, str], ...] = (
     ("S1", "Object resting in the bin", "the target is inside the bin, at rest"),
-    ("S2", "Correct object", "the object in the bin is the instructed one"),
+    ("S2", "Only the instructed object in the bin", "the target is in the bin and no other object is"),
     ("V1", "No unsafe contact", "no penetration or excessive contact force"),
     ("V2", "Joint limits kept", "every joint within its URDF limits"),
-    ("V3", "Singularity margin kept", "sigma_min(J_s) above the Judge threshold"),
+    ("V3", "Singularity margin kept", "the arm never came close to losing the ability to move in some direction"),
     ("V4", "No self-collision", "no link of the arm touches another"),
     ("R", "Refusal matches the task", "refusing is correct only for an impossible task"))
+# A type-4 task names no existing object; the Judge then scores S1/S2 on the object the planner picked (repair.py)
+PLANNED_NAMES = {"S1": "Planned object resting in the bin", "S2": "Only the planned object in the bin"}
+PLANNED_MEANING = "the instruction names no object in the scene, so this is judged on the object the planner picked"
+# Judge details (judge.judge) in words; an empty value is left out
+DETAIL_NAMES = {"in_bin": "Objects in the bin", "at_rest": "Settled at rest", "dwell_ok": "Settling record complete",
+                "dwell_containment": "Stayed in the bin while settling", "dwell_evidence_error": "Settling record problem",
+                "sigma_evidence_steps": "Singularity samples recorded", "refusal": "Refusal"}
+BASELINE = "Rule-based baseline"
+CHECKS_NAME = "kinematic and collision checks"  # one name for the Verifier's checks (it does no physics stepping)
 REFUSAL_WORDS = {"target_unreachable": "object out of reach", "destination_unreachable": "bin out of reach",
                  "target_enclosed": "object enclosed", "no_matching_object": "object not in scene",
                  "other": "other reason"}
@@ -64,13 +75,13 @@ OUTCOME_WORDS = {"executed": "Executed", "blocked": "Rejected", "refused": "Refu
                  "proposed": "Plan received", "budget_exhausted": "No plan passed", "malformed_final": "Invalid reply"}
 
 # Cosmos banners (spec §11, D22, D47, D58). The outage text is the CLI's (cli._cosmos_gate), so demo and UI agree.
-COSMOS_OFF = "Cosmos visual check off: approved plans execute on the geometric checks only."
-COSMOS_DOWN = "COSMOS UNAVAILABLE - proceeding on the geometric checks only"
-COSMOS_ON = ("Cosmos visual check on: a learned check after the geometric checks pass, not verification (balanced "
+COSMOS_OFF = f"Cosmos visual check off: approved plans execute on the {CHECKS_NAME} only."
+COSMOS_DOWN = "COSMOS UNAVAILABLE - proceeding on the geometric checks only"  # the CLI's words; keep them identical
+COSMOS_ON = (f"Cosmos visual check on: a learned check after the {CHECKS_NAME} pass, not verification (balanced "
              "accuracy 0.70 in our pilot).")
 COSMOS_SKIPPED = ("Cosmos visual check skipped (the instruction names no single object to ask about): approved plans "
-                  "execute on the geometric checks only.")
-COSMOS_NONE = ("This attempt ran without the Cosmos visual check, on the geometric checks only (evaluation runs never "
+                  f"execute on the {CHECKS_NAME} only.")
+COSMOS_NONE = (f"This attempt ran without the Cosmos visual check, on the {CHECKS_NAME} only (evaluation runs never "
                "use Cosmos).")
 
 # ---- plain names for scene bodies ----------------------------------------------------------------------------------
@@ -129,8 +140,30 @@ def object_summary(scene: Scene) -> str:
     return ", ".join(f"{o.color} {o.shape}" for o in scene.objects)
 
 
+_FIELDS = {"target_id": "the target object", "place.position": "the drop-off point", "place": "the drop-off",
+           "place.yaw_deg": "the drop-off angle", "place.release_height_m": "the release height", "grasp": "the grasp",
+           "grasp.yaw_deg": "the grasp angle", "grasp.approach": "the grasp approach",
+           "grasp.pregrasp_offset_m": "the pre-grasp offset", "transport_via": "the waypoints"}
+
+
+def field_name(plan_field: str) -> str:
+    """A plan field (Finding.plan_field) as a part of the plan: "transport_via[1]" is "waypoint 2"."""
+    m = re.fullmatch(r"transport_via\[(\d+)\]", plan_field)
+    return f"waypoint {int(m.group(1)) + 1}" if m else _FIELDS.get(plan_field, plan_field.replace("_", " "))
+
+
+def _known(match: re.Match, names: Mapping[str, str]) -> str:
+    ids = re.findall(r"'([^']+)'", match.group(1))
+    return "objects here: " + ", ".join(names.get(i, i) for i in ids)
+
+
 def humanize(text: str, names: Mapping[str, str]) -> str:
-    """Verifier and Judge text with ids replaced by plain names: robot links, joints, and quoted or bare scene ids."""
+    """Verifier and Judge text with ids replaced by plain names: robot links, joints, plan fields, and quoted or bare
+    scene ids."""
+    text = re.sub(r"known ids: \[([^\]]*)\]", lambda m: _known(m, names), text)
+    text = re.sub(r"\btarget_id\b", "the target name", text)
+    text = text.replace("place.position z", "the drop-off height").replace("place.position", "the drop-off point")
+    text = re.sub(r"\brelease_height_m\b", "the release height", text)
     text = re.sub(r"robot link (panda_\w+)", lambda m: "the " + link_name(m.group(1)) if m.group(1) in ROBOT_LINKS
                   else link_name(m.group(1)), text)
     text = re.sub(r"panda_joint(\d)", r"joint \1", text)
@@ -155,12 +188,29 @@ def round_title(index: int, mode: str = "repair") -> str:
 
 def planner_name(provider: str, model: str) -> str:
     if provider == "heuristic":
-        return "Rule-based baseline"
+        return BASELINE
     return f"{model} via {provider}" if provider else model
 
 
-def predicate_name(pid: str) -> str:
+def predicate_name(pid: str, no_target: bool = False) -> str:
+    if no_target and pid in PLANNED_NAMES:
+        return PLANNED_NAMES[pid]
     return next((name for p, name, _ in PREDICATES if p == pid), pid)
+
+
+def _detail(key: str, value: str, names: Mapping[str, str]) -> tuple[str, str] | None:
+    """A Judge detail in words: True/False as yes/no, an {id: bool} map by object name; None when empty."""
+    if not value:
+        return None
+    words = {"True": "yes", "False": "no"}
+    if value.startswith("{"):
+        try:
+            data = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            data = None
+        if isinstance(data, dict):
+            value = ", ".join(f"{names.get(str(k), str(k))} {words.get(str(v), str(v))}" for k, v in data.items())
+    return DETAIL_NAMES.get(key, predicate_name(key)), words.get(value, humanize(value, names))
 
 
 def contact_text(violation: str, names: Mapping[str, str]) -> str:
@@ -277,13 +327,14 @@ def finding_evidence(f: Finding, names: Mapping[str, str] | None = None) -> str:
         a, b = (body_name(x, names) for x in f.bodies)
         gap = (f"penetration {-f.measured * 100:.2f} cm" if f.measured < 0
                else f"clearance {f.measured * 100:.2f} cm")
-        return f"{a} ↔ {b}: {gap} (minimum {f.threshold * 100:.2f} cm) during {where}; plan field {f.plan_field}"
+        return (f"{a} ↔ {b}: {gap} (minimum {f.threshold * 100:.2f} cm) during {where}; "
+                f"in the plan: {field_name(f.plan_field)}")
     parts = [humanize(f.direction, names)]
     if f.measured is not None:
         unit = _unit(f)
         parts.append(f"measured {_num(f.measured)}{unit}"
                      + ("" if f.threshold is None else f" vs threshold {_num(f.threshold)}{unit}"))
-    parts.append(f"during {where}; plan field {f.plan_field}")
+    parts.append(f"during {where}; in the plan: {field_name(f.plan_field)}")
     if f.bodies:
         parts.append("parts: " + ", ".join(body_name(b, names) for b in f.bodies))
     return "; ".join(parts)
@@ -340,16 +391,20 @@ def check_timeline(evaluation: EvaluationResult | None, mode: str,
     return _rows(status, found, notes, names), note
 
 
-def judge_view(result: JudgeResult, names: Mapping[str, str] | None = None) -> JudgeView:
+def judge_view(result: JudgeResult, names: Mapping[str, str] | None = None, no_target: bool = False) -> JudgeView:
+    """no_target: the task's oracle has no target (type 4), so S1/S2 were scored on the planned object."""
     names = names or {}
-    info = {pid: (name, meaning) for pid, name, meaning in PREDICATES}
+    meaning = {pid: m for pid, _, m in PREDICATES}
+    if no_target:
+        meaning.update({pid: PLANNED_MEANING for pid in PLANNED_NAMES})
     order = [pid for pid, _, _ in PREDICATES if pid in result.predicates]
     order += sorted(set(result.predicates) - set(order))
+    details = (_detail(k, v, names) for k, v in sorted(result.details.items()))
     return JudgeView(success=result.success, verdict="Success" if result.success else "Failure",
-                     predicates=tuple(Predicate(pid, info.get(pid, ("", ""))[1], result.predicates[pid],
-                                                info.get(pid, (pid, ""))[0]) for pid in order),
+                     predicates=tuple(Predicate(pid, meaning.get(pid, ""), result.predicates[pid],
+                                                predicate_name(pid, no_target)) for pid in order),
                      violations=tuple(contact_text(v, names) for v in result.violations if "<->" in v),
-                     details=tuple((k, humanize(v, names)) for k, v in sorted(result.details.items())))
+                     details=tuple(d for d in details if d is not None))
 
 
 def plan_json(plan) -> str | None:
@@ -359,12 +414,13 @@ def plan_json(plan) -> str | None:
 def _call_problems(call: PlannerCall) -> list[str]:
     out = []
     if call.outcome == "service_failure":
-        out.append(f"provider failure: {call.error_type or 'unknown error'}"
+        out.append(f"Provider error: {call.error_type or 'unknown error'}"
                    + (f", HTTP {call.status_code}" if call.status_code is not None else ""))
+    what = OUTCOME_WORDS.get(call.outcome, call.outcome.replace("_", " "))
     for error in call.errors[:3]:  # pydantic errors carry no input values (include_input=False in the planner)
         loc = ".".join(str(x) for x in error.get("loc", ())) if isinstance(error, dict) else ""
         msg = error.get("msg") or error.get("message") or error.get("type") if isinstance(error, dict) else str(error)
-        out.append(f"{call.outcome}: {loc + ': ' if loc else ''}{msg}")
+        out.append(f"{what}: {loc + ': ' if loc else ''}{msg}")
     if len(call.errors) > 3:
         out.append(f"... and {len(call.errors) - 3} more errors")
     return out
@@ -374,10 +430,11 @@ def _summary(rnd: RoundRecord, names: Mapping[str, str]) -> str:
     call, ev = rnd.call, rnd.evaluation
     plan = call.plan
     if ev is None:
+        n = len(call.errors)
         text = {"service_failure": "the planner call failed",
-                "malformed": f"the reply was not a valid plan ({len(call.errors)} errors)",
-                "protocol_error": f"protocol error; the next request uses '{call.next_protocol}'"}.get(
-            call.outcome, call.outcome)
+                "malformed": f"the reply was not a valid plan ({n} error{'s' if n != 1 else ''})",
+                "protocol_error": "the reply did not come in the expected format; the next request asks another way"}.get(
+            call.outcome, OUTCOME_WORDS.get(call.outcome, call.outcome).lower())
     elif ev.outcome == "refused":  # the explanation is the model's; ids in it become names (the JSON keeps them)
         text = (f"refused ({REFUSAL_WORDS.get(plan.reason, plan.reason)}): {humanize(plan.explanation, names)}"
                 if plan is not None else "refused")
@@ -398,13 +455,15 @@ def _summary(rnd: RoundRecord, names: Mapping[str, str]) -> str:
     return text + (" (repeats the previous plan)" if rnd.repeat_plan else "")
 
 
-def round_view(rnd: RoundRecord, *, mode: str, names: Mapping[str, str] | None = None) -> RoundView:
+def round_view(rnd: RoundRecord, *, mode: str, names: Mapping[str, str] | None = None,
+               no_target: bool = False) -> RoundView:
     call, ev = rnd.call, rnd.evaluation
     rows, note = check_timeline(ev, mode, names)
     visual = ev.visual if ev is not None else None
     problems = _call_problems(call)
     if ev is not None and ev.error_type:
-        problems.append(f"{ev.outcome}: {ev.error_type}" + (f": {ev.error_message}" if ev.error_message else ""))
+        problems.append(f"{OUTCOME_WORDS.get(ev.outcome, ev.outcome)}: {ev.error_type}"
+                        + (f": {ev.error_message}" if ev.error_message else ""))
     return RoundView(
         index=rnd.round_index, call_outcome=call.outcome, planner=planner_name(call.provider, call.model),
         latency_s=call.latency_s, plan_kind=None if call.plan is None else call.plan.kind,
@@ -415,7 +474,7 @@ def round_view(rnd: RoundRecord, *, mode: str, names: Mapping[str, str] | None =
             VisualRow(c.stage, tuple(c.views), c.verdict.verdict, c.verdict.reason, c.verdict.latency_s)
             for c in visual.checks),
         visual_note=None if visual is None else visual.note,
-        judge=judge_view(ev.judge, names) if ev is not None and ev.judge is not None else None,
+        judge=judge_view(ev.judge, names, no_target) if ev is not None and ev.judge is not None else None,
         repeat_plan=rnd.repeat_plan, problems=tuple(problems), title=round_title(rnd.round_index, mode))
 
 
@@ -437,14 +496,16 @@ def pending_round_view(index: int, call: PlannerCall | None, mode: str = "repair
                      title=round_title(index, mode))
 
 
-def headline(record: AttemptRecord) -> str:
+def headline(record: AttemptRecord, no_target: bool = False) -> str:
     j = record.judge
     o = record.outcome
     # "Word: sentence": the status card shows the word as a chip and the sentence beside it
     if o == "executed":
         if j and j.success:
             return "Success: the plan was executed and the judge confirms it"
-        failed = ", ".join(predicate_name(p) for p, ok in j.predicates.items() if not ok) if j else ""
+        if j and j.predicates.get("R") is False:  # an executed plan on an impossible task
+            return "Failure: the task is impossible, so the planner should have refused"
+        failed = ", ".join(predicate_name(p, no_target) for p, ok in j.predicates.items() if not ok) if j else ""
         return "Failure: the plan was executed, but the judge found a problem" + (f" (failed: {failed})" if failed
                                                                                  else "")
     if o == "refused":
@@ -459,12 +520,15 @@ def headline(record: AttemptRecord) -> str:
             "visual_uncertain": "Not executed: the Cosmos visual check stayed unsure after a third view"}.get(o, o)
 
 
-def attempt_view(record: AttemptRecord, names: Mapping[str, str] | None = None) -> AttemptView:
+def attempt_view(record: AttemptRecord, names: Mapping[str, str] | None = None,
+                 no_target: bool = False) -> AttemptView:
+    """no_target: the task's oracle has no target (type 4); see judge_view."""
     return AttemptView(attempt_id=record.attempt_id, mode=record.mode, k=record.k, outcome=record.outcome,
                        success=record.success, call_count=record.call_count,
-                       rounds=tuple(round_view(r, mode=record.mode, names=names) for r in record.rounds),
-                       judge=judge_view(record.judge, names) if record.judge is not None else None,
-                       headline=headline(record))
+                       rounds=tuple(round_view(r, mode=record.mode, names=names, no_target=no_target)
+                                    for r in record.rounds),
+                       judge=judge_view(record.judge, names, no_target) if record.judge is not None else None,
+                       headline=headline(record, no_target))
 
 
 def cosmos_banner(cosmos_url: str | None, reports: Iterable[VisualGateReport | None]) -> Banner:

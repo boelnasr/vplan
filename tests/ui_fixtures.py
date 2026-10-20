@@ -18,9 +18,12 @@ SECRET = "sk-or-v1-UI-TEST-SECRET-0123456789abcdef"  # a fake key; it must never
 MAGENTA = (255, 0, 255)
 
 # Internal project terms that must not reach the screen (W4.1): spec and decision references, check and predicate
-# codes as labels, oracle/witness/heuristic jargon and raw body ids.
+# codes as labels, oracle/witness/heuristic jargon, raw body ids, outcome codes and Judge/plan field names.
 JARGON = re.compile(r"spec §|§ ?\d|\bD\d{2}\b|\bV-\d\b|\b[SV]\d\b|\boracle\b|\bwitness\b|heuristic|\bW3\.\d|cube_red|"
-                    r"cube_green|wall_1|\bo_[0-9a-f]{6,}|robot:|panda_link|panda_joint|--cosmos-url", re.IGNORECASE)
+                    r"cube_green|wall_1|\bo_[0-9a-f]{6,}|robot:|panda_link|panda_joint|--cosmos-url|"
+                    r"\bmalformed|protocol_error|sim_error|stale_approval|service_failure|budget_exhausted|"
+                    r"visual_uncertain|\bdwell|\bsigma|target_id|place\.position|release_height_m|transport_via",
+                    re.IGNORECASE)
 
 
 def visible(markup_html: str) -> str:

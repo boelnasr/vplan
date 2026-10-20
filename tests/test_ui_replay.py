@@ -77,8 +77,8 @@ def test_replay_shows_a_cosmos_report_and_rerenders_its_frames(tmp_path):
         "evaluation": rnd.evaluation.model_copy(update={"visual": report})}),)})
     path = live.save_bundle(tmp_path, result.task, with_gate, planner="heuristic", cosmos_url="http://127.0.0.1:8000")
     shown = display.replay_display(sources.load_case(path), render_execution=False)
-    assert [c for _, c in shown.cosmos] == ["Round 1 · grasp, front oblique view: pass (learned check) (redrawn)",
-                                           "Round 1 · grasp, top view: pass (learned check) (redrawn)"]
+    assert [c for _, c in shown.cosmos] == ["Pass (learned check) · Round 1 · grasp, front oblique view (redrawn)",
+                                           "Pass (learned check) · Round 1 · grasp, top view (redrawn)"]
     assert "not verification" in shown.banner_html and "between the fingers" in shown.timeline_html
 
 
@@ -89,7 +89,7 @@ def test_a_w31_run_directory_replays_with_its_seed_set(tmp_path):
     assert ref.case_id == "5:dev:0" and ref.label == "Task 0 (dev set) · Executed · success"
     case = sources.load_case(run, "5:dev:0")
     assert case.task == basic_task().task and case.record.outcome == "executed" and case.seed == 0
-    assert dict(case.provenance)["Source"] == "evaluation run run, config 5"
+    assert dict(case.provenance)["Source"] == "evaluation run run, rule-based baseline (config 5)"
     assert dict(case.provenance)["Planner"] == "Rule-based baseline"
     shown = display.replay_display(case, render_execution=False)
     assert "Success" in shown.judge_html and "Attempt id: 5:dev:0" in shown.status_html
@@ -249,3 +249,35 @@ def test_the_ui_and_the_cli_report_a_damaged_source_cleanly(tmp_path, capsys, mo
     monkeypatch.setattr(app, "launch", lambda settings: None)
     assert cli.main(["ui", "--replay", str(run)]) == 2
     assert "error:" in capsys.readouterr().err
+
+
+def test_case_lists_and_provenance_carry_no_internal_terms(tmp_path, recording):
+    result, _ = basic_result()
+    run, _ = write_eval_run(tmp_path / "eval", basic_task(), result.record, config=3)
+    texts = []
+    for source in (run, recording, recording.parent):
+        texts += [ref.label for ref in sources.list_cases(source)]
+        texts += [f"{k} {v}" for k, v in sources.load_case(source).provenance]
+    assert "evaluation run run, verify + repair (config 3)" in texts[1]
+    found = [t for t in texts if JARGON.search(t)]
+    assert not found, found
+
+
+def test_a_type4_replay_never_claims_a_correct_object(tmp_path):
+    """The Judge scores S1/S2 on the planned object when the instruction names no object (type 4)."""
+    task = live.generated_task(1, "impossible 4: absent referent")
+    result, _ = basic_result()
+    plan = result.record.rounds[0].call.plan
+    obj = task.task.scene.objects[0].id
+    judged = records.JudgeResult(success=False, predicates={"S1": True, "S2": True, "V1": True, "V2": True,
+                                                           "V3": True, "V4": True, "R": False},
+                                 violations=("R",), details={"refusal": "impossible task attempted"})
+    rnd = result.record.rounds[0].model_copy(update={
+        "call": result.record.rounds[0].call.model_copy(update={"plan": plan.model_copy(update={"target_id": obj})}),
+        "evaluation": records.EvaluationResult(outcome="executed", judge=judged)})
+    record = result.record.model_copy(update={"rounds": (rnd,), "judge": judged})
+    path = live.save_bundle(tmp_path, task, record, planner="h", cosmos_url=None)
+    shown = display.replay_display(sources.load_case(path), render_execution=False)
+    text = visible(shown.judge_html)
+    assert "Only the planned object in the bin" in text and "Correct object" not in text and "instructed" not in text
+    assert "the planner should have refused" in visible(shown.status_html)

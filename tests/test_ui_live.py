@@ -103,7 +103,7 @@ def test_progress_display_follows_the_events():
     assert shown.timeline_html.count("Round ") == 2 and "Collision" in visible(shown.timeline_html)
     assert len(shown.findings) == len(result.shots) + sum(s.close_up is not None for s in result.shots)
     assert [c.endswith(("(overview)", "(close-up)")) for _, c in shown.findings] == [True] * len(shown.findings)
-    assert "geometric checks only" in shown.banner_html  # no Cosmos URL: the D22 banner
+    assert "kinematic and collision checks only" in shown.banner_html  # no Cosmos URL: the D22 banner
 
 
 def test_live_result_display_has_every_panel():
@@ -159,8 +159,8 @@ def test_cosmos_frames_and_verdicts_are_shown_with_the_round(monkeypatch):
         (s, v) for s in ("pregrasp", "grasp", "prerelease") for v in ("front_oblique", "top")]
     assert all(f.png.startswith(b"\x89PNG") and f.round_index == 0 for f in result.cosmos)
     shown = display.live_result_display(result)
-    assert len(shown.cosmos) == 6 and all("pass (learned check)" in caption for _, caption in shown.cosmos)
-    assert shown.cosmos[0][1] == "Round 1 · pregrasp, front oblique view: pass (learned check)"
+    assert len(shown.cosmos) == 6 and all(caption.startswith("Pass (learned check) · ") for _, caption in shown.cosmos)
+    assert shown.cosmos[0][1] == "Pass (learned check) · Round 1 · pregrasp, front oblique view"  # verdict first
     assert "not verification" in shown.banner_html and "Cosmos visual check" in visible(shown.timeline_html)
 
 
@@ -244,3 +244,27 @@ def test_live_panels_carry_no_internal_terms():
     status = visible(display.live_result_display(basic_result()[0]).status_html)
     assert "Task Pick the red cube and place it in the bin." in status
     assert "Ground truth (hidden from the planner) solvable" in status and "Planner Rule-based baseline" in status
+
+
+def test_only_collision_captions_pair_parts_with_an_arrow():
+    """"Release in bin: red cube ↔ bin" would read as a collision; other checks list their parts."""
+    from vplan.records import Finding
+    from vplan.ui import render
+    task = basic_task()
+    release = Finding(stage="plan", check="release", plan_field="place.position", measured=0.01, threshold=0.0,
+                      direction="carried object's footprint extends 0.010 m outside the bin interior")
+    (shot,) = render.finding_shots(task.oracle.reference_plan, task.task.scene, [release], seed=0,
+                                   verifier_cfg=__import__("vplan.config", fromlist=["x"]).config_snapshot()["verifier"],
+                                   label="Round 1 · ")
+    assert shot.caption.startswith("Round 1 · Release in bin: red cube, bin floor, bin wall") and "↔" not in shot.caption
+    _, events = enclosed_result()
+    assert all("↔" in s.caption for e in events if e.kind == "round" for s in e.shots if "Collision" in s.caption)
+
+
+def test_no_repair_rounds_read_as_at_most_one_call():
+    result, events = basic_result()
+    progress = display.LiveProgress(result.task, result.planner, None, 0)
+    text = visible(progress.display().status_html)
+    assert "Repair rounds none (at most 1 planner call)" in text and "up to 0" not in text
+    record = result.record.model_copy(update={"k": 0})
+    assert display._attempt_line(record) == "1 planner call; checked, no repair rounds"

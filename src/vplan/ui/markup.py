@@ -9,8 +9,8 @@ import base64
 from collections.abc import Sequence
 from html import escape
 
-from vplan.ui.views import (CHECK_HELP, OUTCOME_WORDS, AttemptView, Banner, JudgeView, RoundView, latency_text,
-                            predicate_name, stage_name)
+from vplan.ui.views import (BASELINE, CHECK_HELP, OUTCOME_WORDS, AttemptView, Banner, JudgeView, RoundView,
+                            latency_text, stage_name)
 
 # Passed to Blocks.launch(css=...) as CSS (below). Status colours are GitHub's Primer light palette (white on the
 # solid colours and the dark text on the tints are all >= 4.5:1); .dark overrides keep them readable in Gradio's dark
@@ -24,6 +24,7 @@ _VARS = """
 --vp-muted-bg:rgba(110,118,129,.2);--vp-muted-fg:#c9d1d9}
 .gradio-container{width:100% !important;max-width:1600px !important;margin:0 auto !important}
 .vp-align-end{align-items:flex-end !important}
+footer > .divider:first-child{display:none}
 .vp-align-end > button{margin-bottom:var(--block-padding, 10px)}
 .gradio-container textarea:disabled{background:var(--background-fill-secondary);color:var(--body-text-color-subdued);
 cursor:not-allowed}
@@ -195,7 +196,8 @@ def round_html(r: RoundView) -> str:
     icon = _ICON[kind] if r.outcome == "executed" else _OUTCOME_ICON.get(r.outcome, "!")
     head = [f'<span class="vp-round-title">{escape(title)}</span>',
             badge(OUTCOME_WORDS.get(r.outcome, r.outcome.replace("_", " ")), kind, icon)]
-    meta = [m for m in (r.planner, latency_text(r.latency_s)) if m]
+    # the rule-based baseline answers in milliseconds; its "0.0 s" says nothing
+    meta = [m for m in (r.planner, "" if r.planner == BASELINE else latency_text(r.latency_s)) if m]
     if meta:
         head.append(f'<span class="vp-meta">{escape(" · ".join(meta))}</span>')
     parts = [f'<div class="vp-round vp-k-{kind}"><div class="vp-round-head">{"".join(head)}</div>'
@@ -271,8 +273,7 @@ def judge_html(judge: JudgeView | None, note: str = "") -> str:
         out.append(f'<div class="vp-note">Unsafe contacts: {escape("; ".join(judge.violations))}</div>')
     if judge.details:
         out.append('<details><summary>Measurements</summary>' + "".join(
-            f'<div class="vp-pre"><b>{escape(predicate_name(k).replace("_", " "))}</b>: {escape(v)}</div>'
-            for k, v in judge.details) + "</details>")
+            f'<div class="vp-pre"><b>{escape(k)}:</b> {escape(v)}</div>' for k, v in judge.details) + "</details>")
     if note:
         out.append(f'<div class="vp-note">{escape(note)}</div>')
     return "".join(out)

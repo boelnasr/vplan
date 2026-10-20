@@ -20,6 +20,7 @@ import queue
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import gradio as gr
 
@@ -28,7 +29,7 @@ from vplan.ui.display import Display
 
 TITLE = "vplan: LLMs plan, physics verifies"
 BRAND, TAGLINE = "vplan", "LLMs plan, physics verifies"
-SUBTITLE = ("An LLM proposes a pick-and-place plan for a Panda arm. Kinematics and physics checks verify it before "
+SUBTITLE = ("An LLM proposes a pick-and-place plan for a Panda arm. Kinematic and collision checks verify it before "
             "anything moves, and an independent judge scores the result.")
 FLOW = ("Plan", "Verify", "Execute", "Judge")  # the header's pipeline; the result sections carry the same numbers
 SIM = "sim"  # the Gradio concurrency group of every handler that drives PyBullet (one at a time per event queue)
@@ -87,34 +88,39 @@ def make_task(source: str, seed, kind: str, instruction: str) -> live.LiveTask:
     return live.basic_task(instruction, obstacle=key[1])
 
 
-def load_task(source: str, seed, kind: str, instruction: str):
+def load_task(source: str, seed, kind: str, instruction: str, state=None):
     """(scene image, task panel, instruction, task state). A generated task fills in its own instruction; on a refused
-    task the panel holds the warning and the instruction comes back unchanged."""
+    task the panel holds the warning and the instruction comes back unchanged. state: the task already loaded, reused
+    when the inputs name it again (no second generation); kept as it is when the simulator is busy."""
     if not SIM_LOCK.acquire(timeout=BUSY_WAIT_S):
-        return None, markup.banner_html(display.Banner("warning", BUSY)), instruction, None
+        return None, markup.banner_html(display.Banner("warning", BUSY)), instruction, state
     try:
-        return _load_task(source, seed, kind, instruction)
+        return _load_task(source, seed, kind, instruction, state)
     finally:
         SIM_LOCK.release()
 
 
-def _load_task(source: str, seed, kind: str, instruction: str):
-    try:
-        task = make_task(source, seed, kind, instruction)
-    except live.LiveError as exc:
-        return None, markup.banner_html(display.Banner("warning", str(exc))), instruction, None
+def _load_task(source: str, seed, kind: str, instruction: str, state=None):
+    key = task_key(source, seed, kind, instruction if source != SOURCES[2] else "")
+    if state is not None and state[0] == key:
+        task = state[1]
+    else:
+        try:
+            task = make_task(source, seed, kind, instruction)
+        except live.LiveError as exc:
+            return None, markup.banner_html(display.Banner("warning", str(exc))), instruction, None
+        state = (key, task)
     scene = task.task.scene
     lines = [("Task", task.task.instruction), (display.TRUTH, task.truth),
              ("Objects", views.object_summary(scene)), ("Obstacles", views.obstacle_summary(scene, task.enclosure))]
-    key = task_key(source, seed, kind, instruction if source != SOURCES[2] else "")
-    return render.scene_image(scene), markup.status_html(lines), task.task.instruction, (key, task)
+    return render.scene_image(scene), markup.status_html(lines), task.task.instruction, state
 
 
-# Outputs of scene_change and task_change, in order (build_app wires them to these components)
-SCENE_CHANGE_OUTPUTS = ("generated_row", "instruction", "scene", "info", "state", "memory", "banner", "status",
-                        "plan", "timeline", "findings", "cosmos", "execution", "judge")
-TASK_CHANGE_OUTPUTS = ("instruction", "scene", "info", "state", "banner", "status", "plan", "timeline", "findings",
-                       "cosmos", "execution", "judge")
+# Outputs of load_scene, scene_change and task_change, in order (build_app wires them to these components)
+PANEL_NAMES = ("banner", "status", "plan", "timeline", "findings", "cosmos", "execution", "judge")
+LOAD_OUTPUTS = ("scene", "info", "instruction", "state", *PANEL_NAMES)
+SCENE_CHANGE_OUTPUTS = ("generated_row", "instruction", "scene", "info", "state", "memory", *PANEL_NAMES)
+TASK_CHANGE_OUTPUTS = ("instruction", "scene", "info", "state", *PANEL_NAMES)
 
 
 def _cleared() -> tuple:
@@ -122,7 +128,21 @@ def _cleared() -> tuple:
     return shown(display.idle_display("live").values())
 
 
-def scene_change(source: str, seed, kind: str, instruction: str, memory: tuple[str, str]) -> tuple:
+def _panels_after(old, new) -> tuple:
+    """The result panels after a load: kept when the task is still the one they show (a queued event whose inputs
+    name the current task again), else cleared, warnings included."""
+    if old is not None and new is not None and old[0] == new[0]:
+        return tuple(gr.skip() for _ in PANEL_NAMES)
+    return _cleared()
+
+
+def load_scene(source: str, seed, kind: str, instruction: str, state) -> tuple:
+    """Load scene and Enter in the instruction box (LOAD_OUTPUTS)."""
+    image, info, instruction, new = load_task(source, seed, kind, instruction, state)
+    return (image, info, instruction, new, *_panels_after(state, new))
+
+
+def scene_change(source: str, seed, kind: str, instruction: str, memory: tuple[str, str], state=None) -> tuple:
     """The Scene choice changed (SCENE_CHANGE_OUTPUTS). memory is (the previous scene choice, the last text typed for a
     basic scene). The new task is loaded at once; a generated task fills in its own instruction and locks the box, a
     basic scene unlocks it with the text last typed there. Any warning and the previous task's results are cleared."""
@@ -130,18 +150,29 @@ def scene_change(source: str, seed, kind: str, instruction: str, memory: tuple[s
     if last_source != SOURCES[2]:  # the box was editable, so it holds the user's text (loaded or not)
         typed = instruction
     generated = source == SOURCES[2]
-    image, info, filled, state = load_task(source, seed, kind, "" if generated else typed)
-    box = (gr.update(value=filled if state is not None else "", interactive=False, info=GENERATED_INFO)
+    image, info, filled, new = load_task(source, seed, kind, "" if generated else typed, state)
+    box = (gr.update(value=filled if new is not None else "", interactive=False, info=GENERATED_INFO)
            if generated else gr.update(value=typed, interactive=True, info=BASIC_INFO))
-    return (gr.update(visible=generated), box, image, info, state, (source, typed), *_cleared())
+    return (gr.update(visible=generated), box, image, info, new, (source, typed), *_panels_after(state, new))
 
 
-def task_change(source: str, seed, kind: str) -> tuple:
+def task_change(source: str, seed, kind: str, state=None) -> tuple:
     """The seed or task type of a generated task changed (TASK_CHANGE_OUTPUTS): reload it, as scene_change does."""
     if source != SOURCES[2]:
         return tuple(gr.skip() for _ in TASK_CHANGE_OUTPUTS)
-    image, info, instruction, state = load_task(source, seed, kind, "")
-    return (instruction if state is not None else "", image, info, state, *_cleared())
+    image, info, instruction, new = load_task(source, seed, kind, "", state)
+    return (instruction if new is not None else "", image, info, new, *_panels_after(state, new))
+
+
+CONTROLS = ("run", "load", "source", "seed", "kind")  # locked while a load or run is in progress
+
+
+def lock_controls() -> tuple:
+    return tuple(gr.update(interactive=False) for _ in CONTROLS)
+
+
+def unlock_controls() -> tuple:
+    return tuple(gr.update(interactive=True) for _ in CONTROLS)
 
 
 def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instruction: str, planner_label: str,
@@ -219,7 +250,16 @@ def replay_open(settings: UISettings, path: str):
         return gr.update(choices=[], value=None), markup.banner_html(display.Banner("warning", problem))
     choices = [(c.label, c.case_id) for c in cases]
     n = f"{len(cases)} recorded attempt{'s' if len(cases) != 1 else ''}"
-    return (gr.update(choices=choices, value=choices[0][1]), markup.status_html([("Opened", f"{path} ({n})")]))
+    return (gr.update(choices=choices, value=choices[0][1]),
+            markup.status_html([("Opened", f"{_shown_path(path)} ({n})")]))
+
+
+def _shown_path(path: str) -> str:
+    """The path relative to the working directory when it lies under it (shorter on screen), else as given."""
+    try:
+        return str(Path(path).resolve().relative_to(Path.cwd().resolve())) or "."
+    except (ValueError, OSError):
+        return path
 
 
 def replay_show(settings: UISettings, path: str, case_id: str | None, seed_dir: str | None = None) -> tuple:
@@ -270,7 +310,7 @@ def _panels(mode: str) -> Panels:
             gr.HTML(markup.step_html(1, "Plan", "the planner's proposal, latest round"))
             plan = gr.Code(language="json", label="Plan (JSON)", interactive=False, max_lines=30, buttons=["copy"])
         with gr.Column(scale=3, min_width=480):
-            gr.HTML(markup.step_html(2, "Verify", "kinematics and physics checks before anything moves"))
+            gr.HTML(markup.step_html(2, "Verify", f"{views.CHECKS_NAME} before anything moves"))
             timeline = gr.HTML(idle.timeline_html, label="Checks, round by round")
             findings = gr.Gallery(label="What failed: problem parts in magenta", columns=2, height="auto",
                                   object_fit="contain", visible=False, buttons=["fullscreen"])
@@ -279,7 +319,7 @@ def _panels(mode: str) -> Panels:
                                 buttons=["fullscreen"])
     with gr.Row(equal_height=False):
         with gr.Column(scale=1, min_width=360):
-            gr.HTML(markup.step_html(3, "Execute", "the approved plan in the PyBullet physics simulation"))
+            gr.HTML(markup.step_html(3, "Execute", "the executed plan in the PyBullet physics simulation"))
             execution = gr.HTML(idle.execution_html, label="Execution")
         with gr.Column(scale=1, min_width=360):
             gr.HTML(markup.step_html(4, "Judge", "independent scoring of the result"))
@@ -322,28 +362,40 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 live_panels = _panels("live")
                 state = gr.State(None)
                 memory = gr.State((SOURCES[0], live.BASIC_INSTRUCTION))  # see scene_change
-                task_outputs = [scene, info, instruction, state]
+                panels = live_panels.outputs()
+                controls = [run, load, source, seed, kind]  # CONTROLS order
+
+                def guard(trigger, fn, inputs, outputs, trigger_mode=None, **kwargs):
+                    """Lock the controls at once (queue=False, before the queue), run fn, unlock. Gradio reads
+                    component inputs when an event is triggered but State when it runs, so a second click meanwhile
+                    could pair new inputs with an old task."""
+                    return (trigger(lock_controls, None, controls, queue=False, show_progress="hidden",
+                                    api_visibility="private", trigger_mode=trigger_mode)
+                            .then(fn, inputs, outputs, concurrency_id=SIM, concurrency_limit=1, **kwargs)
+                            .then(unlock_controls, None, controls, queue=False, show_progress="hidden",
+                                  api_visibility="private"))
+
                 # Loads show one spinner on the scene picture, not one over every output they update
-                sim = dict(concurrency_id=SIM, concurrency_limit=1, show_progress_on=[scene])
-                load.click(load_task, [source, seed, kind, instruction], task_outputs, **sim)
-                instruction.submit(load_task, [source, seed, kind, instruction], task_outputs, **sim)
-                source.input(scene_change, [source, seed, kind, instruction, memory],
-                             [generated_row, instruction, scene, info, state, memory, *live_panels.outputs()],
-                             trigger_mode="always_last", **sim)
+                task_in, task_out = [source, seed, kind, instruction, state], [scene, info, instruction, state, *panels]
+                guard(load.click, load_scene, task_in, task_out, show_progress_on=[scene])
+                guard(instruction.submit, load_scene, task_in, task_out, show_progress_on=[scene])
+                guard(source.input, scene_change, [source, seed, kind, instruction, memory, state],
+                      [generated_row, instruction, scene, info, state, memory, *panels], trigger_mode="always_last",
+                      show_progress_on=[scene])
                 for control in (seed, kind):
-                    control.input(task_change, [source, seed, kind],
-                                  [instruction, scene, info, state, *live_panels.outputs()],
-                                  trigger_mode="always_last", **sim)
-                demo.load(load_task, [source, seed, kind, instruction], task_outputs,
-                          **sim)  # the page opens with the default scene shown
+                    guard(control.input, task_change, [source, seed, kind, state],
+                          [instruction, scene, info, state, *panels], trigger_mode="always_last",
+                          show_progress_on=[scene])
+                guard(demo.load, load_scene, task_in, task_out,
+                      show_progress_on=[scene])  # the page opens with the default scene shown
 
                 def run_live(*args):
                     for values in run_attempt(settings, *args):
                         yield shown(values)
 
                 # The status card says "Running" and the panels fill in as rounds finish, so no overlay on them
-                run.click(run_live, [state, source, seed, kind, instruction, planner, k], live_panels.outputs(),
-                          concurrency_id=SIM, concurrency_limit=1, show_progress="minimal")
+                guard(run.click, run_live, [state, source, seed, kind, instruction, planner, k], panels,
+                      show_progress="minimal")
             with gr.Tab("Replay", id="replay"):
                 gr.HTML(markup.step_html(None, "Recorded attempt",
                                          "replay a saved run with no API key, no GPU and no network"))

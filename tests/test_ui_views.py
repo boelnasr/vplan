@@ -181,7 +181,7 @@ def test_budget_exhausted_headline_counts_the_calls():
 
 def test_without_a_cosmos_url_the_banner_says_geometric_checks_only():
     banner = views.cosmos_banner(None, [])
-    assert banner.level == "warning" and "geometric checks only" in banner.text
+    assert banner.level == "warning" and "kinematic and collision checks only" in banner.text
 
 
 def test_an_unavailable_endpoint_gives_the_d58_banner_with_its_note():
@@ -239,6 +239,7 @@ def test_judge_markup_lists_predicates_and_verdict():
     html = markup.judge_html(view.judge)
     text = visible(html)
     assert "✕ Failure" in text and "Object resting in the bin" in text and "Failed: Object resting in the bin" in text
+    assert "Only the instructed object in the bin" in text  # S2: the target is in the bin and no other object is
     assert 'title="S1: the target is inside the bin, at rest"' in html
     assert not JARGON.search(text), JARGON.search(text)
 
@@ -252,10 +253,10 @@ def test_banner_markup_is_escaped_and_marked_by_level():
 def test_a_skipped_gate_reads_like_the_gate_being_off():
     skipped = records.VisualGateReport(status="skipped", note="no single instructed object")
     banner = views.cosmos_banner("http://127.0.0.1:8000/v1", [skipped])
-    assert banner.level == "warning" and "geometric checks only" in banner.text and "skipped" in banner.text
+    assert banner.level == "warning" and "kinematic and collision checks only" in banner.text and "skipped" in banner.text
     assert "learned visual check" not in banner.text
     record = attempt(rnd(0, PLAN, executed(visual=skipped)))
-    assert "geometric checks only" in views.replay_cosmos_banner(record).text
+    assert "kinematic and collision checks only" in views.replay_cosmos_banner(record).text
 
 
 # ---- plain names (W4.1) -------------------------------------------------------------------------------
@@ -296,7 +297,7 @@ def test_verifier_text_is_rewritten_with_plain_names():
                           names) == "The yellow cylinder is beyond reach; yellow cylinder is far."
     ev = views.finding_evidence(finding("joint_limits", plan_field="transport_via[0]", measured=2.8, threshold=2.9,
                                         direction="panda_joint4 within 2 deg of its limit", bodies=()), WALL_SCENE)
-    assert ev.startswith("joint 4 within 2 deg of its limit") and "plan field transport_via[0]" in ev
+    assert ev.startswith("joint 4 within 2 deg of its limit") and ev.endswith("in the plan: waypoint 1")
 
 
 def test_round_titles_and_planner_names_read_plainly():
@@ -351,3 +352,89 @@ def test_the_css_wins_over_gradio_prose_rules():
     assert scoped in markup.CSS and scoped.count("{") == markup._RULES.count("{")
     assert all(sel.strip().startswith(markup.SCOPE.strip()) for line in scoped.splitlines()
                for sel in line.split("{")[0].split(","))
+
+
+# ---- review round (W4.1) -------------------------------------------------------------------------------
+
+def test_without_an_oracle_target_s1_and_s2_are_about_the_planned_object():
+    """Type 4 (no matching object): the Judge scores S1/S2 on the object the planner picked (repair.run_task), so the
+    panel must not claim a correct object that does not exist."""
+    j = records.JudgeResult(success=False, predicates={"S1": True, "S2": True, "V1": True, "V2": True, "V3": True,
+                                                      "V4": True, "R": False}, violations=("R",), details={})
+    text = visible(markup.judge_html(views.judge_view(j, WALL_SCENE, no_target=True)))
+    assert "Planned object resting in the bin" in text and "Only the planned object in the bin" in text
+    assert "instructed" not in text and "Correct object" not in text
+    record = attempt(rnd(0, PLAN, records.EvaluationResult(outcome="executed", judge=j)))
+    view = views.attempt_view(record, WALL_SCENE, no_target=True)
+    assert [p.name for p in view.judge.predicates][:2] == ["Planned object resting in the bin",
+                                                         "Only the planned object in the bin"]
+
+
+def test_an_executed_impossible_task_says_the_planner_should_have_refused():
+    j = records.JudgeResult(success=False, predicates={"S1": True, "S2": True, "V1": True, "V2": True, "V3": True,
+                                                      "V4": True, "R": False}, violations=("R",), details={})
+    record = attempt(rnd(0, PLAN, records.EvaluationResult(outcome="executed", judge=j)))
+    assert views.attempt_view(record).headline == "Failure: the task is impossible, so the planner should have refused"
+
+
+def test_outcome_codes_and_protocol_names_never_reach_the_page():
+    def no_plan(index, outcome, **update):
+        return records.RoundRecord(call_id=f"a:{index + 1}", round_index=index,
+                                   call=call(None, outcome).model_copy(update=update))
+
+    malformed = no_plan(0, "malformed", errors=({"loc": ("plan", "grasp"), "msg": "Field required", "type": "missing"},))
+    protocol = no_plan(1, "protocol_error", next_protocol="content")
+    sim = rnd(2, PLAN, records.EvaluationResult(outcome="sim_error", error_type="RuntimeError",
+                                                error_message="NaN in solver"))
+    stale = rnd(3, PLAN, records.EvaluationResult(outcome="stale_approval", error_type="StaleApproval"))
+    refusal = rnd(0, records.Refusal(reason="no_matching_object", explanation="there is no cube_green here"),
+                  records.EvaluationResult(outcome="refused", judge=records.JudgeResult(
+                      success=True, predicates={"R": True}, violations=(), details={"refusal": "correct"})))
+    for r in (malformed, protocol, sim, stale, refusal):
+        view = views.round_view(r, mode="repair", names=WALL_SCENE)
+        text = visible(markup.round_html(view))
+        assert not JARGON.search(text), (r.call.outcome, JARGON.search(text), text)
+        assert "content" not in view.summary  # the protocol name
+    assert views.round_view(malformed, mode="repair").problems == ("Invalid reply: plan.grasp: Field required",)
+    assert views.round_view(sim, mode="repair").problems == ("Simulation error: RuntimeError: NaN in solver",)
+
+
+def test_plan_fields_read_as_parts_of_the_plan():
+    assert views.field_name("transport_via[1]") == "waypoint 2"
+    assert views.field_name("place.position") == "the drop-off point"
+    assert views.field_name("place.release_height_m") == "the release height"
+    assert views.field_name("grasp.yaw_deg") == "the grasp angle"
+    assert views.field_name("target_id") == "the target object"
+    release = finding("release", stage="descend_place", plan_field="place.position", measured=0.01, threshold=0.005,
+                      bodies=(), sample_index=None,
+                      direction="place.position z must be the object's resting height 0.031 m (bin floor z + half the "
+                                "object height); release_height_m sets the drop")
+    ev = views.finding_evidence(release, WALL_SCENE)
+    assert not JARGON.search(ev), ev
+    assert ev.startswith("the drop-off height must be the object's resting height 0.031 m") and "the release height" in ev
+    unknown = views.humanize("target_id 'cube_blue' is not an object in the scene; known ids: ['cube_green', "
+                             "'cube_red']", WALL_SCENE)
+    assert unknown == "the target name 'cube_blue' is not an object in the scene; objects here: green cube, red cube"
+
+
+def test_judge_measurements_have_plain_names():
+    j = records.JudgeResult(success=True, predicates={"S1": True}, violations=(), details={
+        "in_bin": "{'cube_red': True, 'cube_green': False}", "at_rest": "True", "dwell_ok": "True",
+        "dwell_containment": "True", "dwell_evidence_error": "", "sigma_evidence_steps": "2336"})
+    text = visible(markup.judge_html(views.judge_view(j, WALL_SCENE)))
+    assert not JARGON.search(text), text
+    assert "Objects in the bin: red cube yes, green cube no" in text and "Settled at rest: yes" in text
+    assert "Singularity samples recorded: 2336" in text and "problem" not in text  # an empty value is left out
+
+
+def test_check_tooltips_explain_singularity_and_allowed_contacts():
+    assert "locked" not in views.CHECK_HELP["singularity"]
+    assert "loses the ability to move in some direction" in views.CHECK_HELP["singularity"]
+    assert "fingers on the object" in views.CHECK_HELP["collision"] and "bin floor" in views.CHECK_HELP["collision"]
+
+
+def test_the_baseline_shows_no_planner_latency():
+    baseline = records.RoundRecord(call_id="a:1", round_index=0, evaluation=executed(), call=call(PLAN).model_copy(
+        update={"provider": "heuristic", "model": "template-heuristic", "latency_s": 0.004}))
+    html = markup.round_html(views.round_view(baseline, mode="repair"))
+    assert "Rule-based baseline" in visible(html) and " s<" not in html and "0.0 s" not in visible(html)

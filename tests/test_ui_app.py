@@ -122,7 +122,7 @@ def test_live_handlers_load_a_scene_and_stream_an_attempt_to_the_judge():
     assert len(steps) >= 4  # start, request, plan, round, status ... final
     final = dict(zip(app.display.Display.FIELDS, steps[-1]))
     assert "Success" in final["judge_html"] and "data:image/gif;base64," in final["execution_html"]
-    assert "geometric checks only" in final["banner_html"]
+    assert "kinematic and collision checks only" in final["banner_html"]
 
 
 def test_live_handlers_report_bad_input_in_the_banner():
@@ -360,7 +360,78 @@ def test_progress_shows_on_one_panel_not_over_every_output():
     timelines = [c["id"] for c in config["components"] if c.get("props", {}).get("label") == "Checks, round by round"]
     deps = {d["api_name"]: d for d in config["dependencies"]}
     scene = ids[("image", "Scene")]
-    for name in ("load_task", "load_task_1", "load_task_2", "scene_change", "task_change", "task_change_1"):
+    for name in ("load_scene", "load_scene_1", "load_scene_2", "scene_change", "task_change", "task_change_1"):
         assert deps[name]["show_progress_on"] == [scene], name
     assert deps["run_live"]["show_progress"] == "minimal"  # the status card itself says "Running"
     assert deps["show_replay"]["show_progress_on"] == [timelines[1]]
+
+
+
+# ---- review round (W4.1): stale results, click-time races, fixed texts --------------------------------------------
+
+def _done_state():
+    """The state after loading the basic scene with its wall."""
+    return app.load_task(app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION)[3]
+
+
+def test_load_and_enter_clear_old_results_when_the_task_changes():
+    state = _done_state()
+    out = dict(zip(app.LOAD_OUTPUTS, app.load_scene(app.SOURCES[0], 0, "feasible", live.BASIC_INSTRUCTION, state)))
+    assert out["state"][0] != state[0] and out["banner"] == "" and "appear here" in out["timeline"]
+    bad = dict(zip(app.LOAD_OUTPUTS, app.load_scene(app.SOURCES[0], 0, "feasible", "Pick the blue cube.", state)))
+    assert bad["state"] is None and "exactly one object" in bad["info"] and bad["banner"] == ""
+
+
+def test_reloading_the_same_task_keeps_its_results_and_reuses_it(monkeypatch):
+    """Gradio reads inputs when an event is triggered but State when it runs: a queued load, scene or seed change
+    whose task equals the current one must not wipe a finished result (or generate the task again)."""
+    state, generated = _done_state(), app.load_task(app.SOURCES[2], 1, KIND3, "")[3]
+    monkeypatch.setattr(app, "make_task", lambda *a: (_ for _ in ()).throw(AssertionError("task rebuilt")))
+    skipped = tuple(app.gr.skip() for _ in app.PANEL_NAMES)
+    out = app.load_scene(app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION, state)
+    assert out[4:] == skipped and out[3] is state
+    out = app.scene_change(app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION, (app.SOURCES[1], ""), state)
+    assert out[-len(skipped):] == skipped and dict(zip(app.SCENE_CHANGE_OUTPUTS, out))["state"] is state
+    out = app.task_change(app.SOURCES[2], 1, KIND3, generated)
+    assert out[-len(skipped):] == skipped and dict(zip(app.TASK_CHANGE_OUTPUTS, out))["state"] is generated
+
+
+def test_controls_are_locked_while_a_load_or_run_is_in_progress():
+    assert all(u == {"__type__": "update", "interactive": False} for u in app.lock_controls())
+    assert all(u == {"__type__": "update", "interactive": True} for u in app.unlock_controls())
+    config = app.build_app(app.UISettings()).get_config_file()
+    ids = {c.get("props", {}).get("label") or c.get("props", {}).get("value"): c["id"] for c in config["components"]
+           if c["type"] in ("button", "radio", "number", "dropdown")}
+    controls = sorted(ids[n] for n in ("Plan, verify, execute", "Load scene", "Scene", "Task seed", "Task type"))
+    deps = config["dependencies"]
+    by_id = {d["id"]: d for d in deps}
+    guarded = [d for d in deps if d["api_name"] in ("run_live", "load_scene", "load_scene_1", "load_scene_2",
+                                                    "scene_change", "task_change", "task_change_1")]
+    assert len(guarded) == 7
+    for d in guarded:
+        lock = by_id[d["trigger_after"]]
+        assert sorted(lock["outputs"]) == controls and lock["queue"] is False, d["api_name"]
+        unlock = [u for u in deps if u["trigger_after"] == d["id"]]
+        assert len(unlock) == 1 and sorted(unlock[0]["outputs"]) == controls and unlock[0]["queue"] is False
+
+
+def test_fixed_texts_and_task_cards_carry_no_internal_terms():
+    texts = [app.BASIC_INFO, app.GENERATED_INFO, app.BUSY, app.SUBTITLE]
+    for source, seed, kind in ((app.SOURCES[0], 0, "feasible"), (app.SOURCES[1], 0, "feasible"),
+                               (app.SOURCES[2], 1, KIND3), (app.SOURCES[2], 1, "impossible 4: absent referent")):
+        texts.append(visible(app.load_task(source, seed, kind, live.BASIC_INSTRUCTION)[1]))
+    found = [t for t in texts if JARGON.search(t)]
+    assert not found, found
+    assert "Kinematic and collision checks verify it before anything moves" in app.SUBTITLE
+
+
+def test_the_replay_path_is_shown_relative_to_the_working_directory(tmp_path, monkeypatch):
+    result, _ = basic_result()
+    monkeypatch.chdir(tmp_path)
+    saved = live.save_bundle(tmp_path / "runs" / "ui", result.task, result.record, planner="h", cosmos_url=None)
+    _, info = app.replay_open(app.UISettings(record_dir="runs/ui"), str(saved.parent.resolve()))
+    assert os.path.join("runs", "ui") in info and str(tmp_path) not in info
+
+
+def test_the_footer_has_no_leading_divider():
+    assert "footer > .divider:first-child{display:none}" in app.markup.CSS

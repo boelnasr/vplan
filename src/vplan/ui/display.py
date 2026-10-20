@@ -68,13 +68,14 @@ def _verdict(report: VisualGateReport | None, stage: str, view: str) -> str:
     if report is None:
         return ""
     checks = [c for c in report.checks if c.stage == stage and view in c.views]
-    return f": {checks[-1].verdict.verdict} (learned check)" if checks else ""
+    return f"{checks[-1].verdict.verdict.capitalize()} (learned check) · " if checks else ""
 
 
 def cosmos_gallery(frames: Sequence[CosmosFrame], rounds: Sequence[RoundRecord], note: str = "") -> Gallery:
+    """Verdict first: the gallery cuts each caption to one line."""
     reports = {r.round_index: r.evaluation.visual for r in rounds if r.evaluation is not None}
-    return [(render.png_rgb(f.png), f"Round {f.round_index + 1} · {stage_name(f.stage)}, {stage_name(f.view)} view"
-             + _verdict(reports.get(f.round_index), f.stage, f.view) + note) for f in frames]
+    return [(render.png_rgb(f.png), _verdict(reports.get(f.round_index), f.stage, f.view)
+             + f"Round {f.round_index + 1} · {stage_name(f.stage)}, {stage_name(f.view)} view" + note) for f in frames]
 
 
 def _latest_plan(rounds: Sequence[RoundRecord], pending_plan=None) -> str:
@@ -97,20 +98,27 @@ def _attempt_line(record: AttemptRecord) -> str:
     how = {"repair": f"checked, with up to {rounds} of repair from the failed checks",
            "resample": f"checked, with up to {rounds} of fresh samples (no feedback)",
            "unverified": "executed without checks"}.get(record.mode, record.mode)
+    if record.k == 0 and record.mode != "unverified":
+        how = "checked, no repair rounds"
     return f"{calls}; {how}"
+
+
+def _budget(k: int) -> str:
+    return (f"up to {k} (at most {k + 1} planner calls)" if k > 0 else "none (at most 1 planner call)")
 
 
 def attempt_display(*, record: AttemptRecord, instruction: str, truth: str | None, planner: str, banner: Banner,
                     shots: Sequence[render.Shot], cosmos: Gallery, execution_gif: bytes | None, execution_note: str,
                     names: Mapping[str, str] | None = None, extra: Sequence[tuple[str, str]] = (),
-                    notes: Sequence[str] = ()) -> Display:
-    view = attempt_view(record, names)
+                    notes: Sequence[str] = (), no_target: bool = False) -> Display:
+    view = attempt_view(record, names, no_target)
     headline, kind, icon = markup.attempt_status(view)
     lines = _task_lines(instruction, truth, planner) + list(extra) + [("Attempt", _attempt_line(record))]
     notes = [*notes, f"Attempt id: {view.attempt_id}"]
     judge_note = ("" if view.judge is not None else
                   f"No judge verdict: {OUTCOME_WORDS.get(view.outcome, view.outcome).lower()}, so nothing was scored.")
-    return Display(banner_html=markup.banner_html(banner), status_html=markup.status_html(lines, headline, kind, notes, icon),
+    return Display(banner_html=markup.banner_html(banner),
+                   status_html=markup.status_html(lines, headline, kind, notes, icon),
                    plan_json=_latest_plan(record.rounds), timeline_html=markup.timeline_html(view.rounds),
                    findings=_shots(shots), cosmos=cosmos, execution_html=markup.gif_html(execution_gif, execution_note),
                    judge_html=markup.judge_html(view.judge, judge_note))
@@ -124,7 +132,8 @@ def live_result_display(result: LiveResult, outage: Banner | None = None) -> Dis
                            planner=result.planner, banner=banner, shots=result.shots,
                            cosmos=cosmos_gallery(result.cosmos, result.record.rounds),
                            execution_gif=result.execution_gif, execution_note=result.execution_note,
-                           names=scene_names(result.task.task.scene, result.task.enclosure), extra=extra)
+                           names=scene_names(result.task.task.scene, result.task.enclosure), extra=extra,
+                           no_target=result.task.oracle.target_id is None)
 
 
 class LiveProgress:
@@ -161,7 +170,8 @@ class LiveProgress:
 
     def display(self) -> Display:
         names = scene_names(self.task.task.scene, self.task.enclosure)
-        views = [round_view(r, mode="repair", names=names) for r in self.rounds]
+        no_target = self.task.oracle.target_id is None
+        views = [round_view(r, mode="repair", names=names, no_target=no_target) for r in self.rounds]
         pending_plan = None
         if self.pending is not None:
             index, call = self.pending
@@ -170,7 +180,7 @@ class LiveProgress:
         reports = [r.evaluation.visual for r in self.rounds if r.evaluation is not None]
         banner = self.outage or cosmos_banner(self.cosmos_url, reports)
         lines = _task_lines(self.task.task.instruction, self.task.truth, self.planner) + [
-            ("Repair rounds", f"up to {self.k} (at most {self.k + 1} planner calls)"), ("Status", self.status)]
+            ("Repair rounds", _budget(self.k)), ("Status", self.status)]
         return Display(banner_html=markup.banner_html(banner),
                        status_html=markup.status_html(lines, "Running", "info", icon="…"),
                        plan_json=_latest_plan(self.rounds, pending_plan), timeline_html=markup.timeline_html(views),
@@ -227,4 +237,5 @@ def replay_display(case: ReplayCase, *, cfgs: dict[str, dict] | None = None, ren
                            planner=dict(case.provenance).get("Planner", ""), banner=replay_cosmos_banner(record),
                            shots=shots, cosmos=cosmos_gallery(frames, record.rounds, " (redrawn)"), execution_gif=gif,
                            execution_note=note, names=scene_names(scene, enclosure),
-                           extra=[(k, v) for k, v in case.provenance if k != "Planner"], notes=notes)
+                           extra=[(k, v) for k, v in case.provenance if k != "Planner"], notes=notes,
+                           no_target=case.oracle is not None and case.oracle.target_id is None)

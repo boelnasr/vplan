@@ -170,8 +170,10 @@ def finding_shot(plan: PickPlacePlan, scene: Scene, f: Finding, traj: CandidateT
         lit = highlight(h, offending(f, plan))
         parts = list(dict.fromkeys(body_name(b, names) for b in lit))  # the bin's five bodies read as one or two
         title = next((t for _, c, t in CHECKS if c == f.check), f.check)
-        # the parts first: the gallery shows one line per caption and cuts the rest
-        caption = f"{title}: " + (" ↔ ".join(parts) if parts else "no single part to highlight") + f" {where}"
+        # the parts first: the gallery shows one line per caption and cuts the rest. "↔" pairs the two bodies of a
+        # collision; other checks only list the parts they concern
+        join = " ↔ " if f.check == "collision" else ", "
+        caption = f"{title}: " + (join.join(parts) if parts else "no single part to highlight") + f" {where}"
         camera = close_up(h, lit)
         return Shot(render_rgb(h, size), caption, None if camera is None else render_rgb(h, size, camera))
     finally:

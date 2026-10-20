@@ -133,6 +133,16 @@ def _result_words(record: dict) -> str:
     return words
 
 
+# Evaluation configurations (evaluate.metrics.CONFIGURATIONS) in the README's words
+CONFIG_NAMES = {1: "unverified", 2: "verify only", 3: "verify + repair", 5: "rule-based baseline",
+                6: "frontier model, no verifier", 7: "equal-budget resampling"}
+
+
+def config_text(config: object) -> str:
+    name = CONFIG_NAMES.get(config) if isinstance(config, int) else None
+    return f"{name} (config {config})" if name else f"config {config}"
+
+
 # Recordings made before W4.1 name the rule-based planner by its old label
 _OLD_PLANNER_LABELS = {"Template heuristic (no LLM, no key)": "Rule-based baseline (no LLM)"}
 
@@ -227,7 +237,7 @@ def _eval_case(run_dir: Path, case_id: str | None, seed_dir: str | Path | None, 
     if where is None:
         raise ReplayError(f"{run_dir.name} does not record its seed set; pass the seed-set directory")
     task, oracle = _seed_set_task(where, attempt.task_index, attempt.task_id, str(manifest.get("seed_set_hash")))
-    provenance = (("Source", f"evaluation run {run_dir.name}, config {manifest.get('config')}"),
+    provenance = (("Source", f"evaluation run {run_dir.name}, {config_text(manifest.get('config'))}"),
                   ("Planner", planner_name(str(manifest.get("provider") or ""), str(manifest.get("model") or ""))),
                   ("Task set", f"{manifest.get('split')} set, task {attempt.task_index}"))
     return ReplayCase(attempt.attempt_id, f"{attempt.attempt_id} {attempt.task_id}", task.task, oracle,
