@@ -1922,6 +1922,18 @@ All model and provider text is HTML-escaped.
 
 **Headline and README (owner, Oct 19):** the spec §1 headline is filled in with these numbers: 24.7% → 65.0% on 300 tasks, and +29.3 points over equal-budget resampling. The feedback gain at equal budget is what the pilot could not show (D46), so the claim that credits verifier feedback now stands. The spec adds the caveat that unverified first attempts succeed on 43.3% with 169 of 346 executions unsafe. The README gains a Results section, and the report (`report.html`, `metrics.json`) is copied to `docs/results/` so the public repo carries it.
 
+## D71. Resumed-run source provenance in reports (2026-10-20)
+
+**Ruling:** reports carry the prepared seed-set source digest, the initial run provenance, and the `git`, `source_digest` and `source_drift` recorded by every runner session. A session is marked as contributing when one or more included attempts came from it; every attempt must map to a recorded contributing session. A configuration is not a headline source when provenance is missing, its contributing sessions have different source digests, have recorded source drift, or differ from the prepared seed-set or initial run digest. All required digests must be nonempty SHA-256 values. Paired configurations must also share the same contributing digest. Comparisons that use an ineligible configuration are labelled ineligible. The source digest is the compatibility check; git SHAs remain visible context because documentation-only commits can change a SHA without changing evaluated source.
+
+**Consequence:** an unresumed D70 run stays eligible. A resumed comparison that combines attempts evaluated under different hashed source trees cannot support the headline.
+
+## D71. Resumed-run source provenance in reports (2026-10-20)
+
+**Ruling:** reports carry the prepared seed-set source digest, the initial run provenance, and the `git`, `source_digest` and `source_drift` recorded by every runner session. A session is marked as contributing when one or more included attempts came from it; every attempt must map to a recorded contributing session. A configuration is not a headline source when provenance is missing, its contributing sessions have different source digests, have recorded source drift, or differ from the prepared seed-set or initial run digest. All required digests must be nonempty SHA-256 values. Paired configurations must also share the same contributing digest. Comparisons that use an ineligible configuration are labelled ineligible. The source digest is the compatibility check; git SHAs remain visible context because documentation-only commits can change a SHA without changing evaluated source.
+
+**Consequence:** an unresumed D70 run stays eligible. A resumed comparison that combines attempts evaluated under different hashed source trees cannot support the headline.
+
 ## D73. The Cosmos shadow study (W4.2, 2026-10-20)
 
 **What ran (spec §11 "Shadow study", config 4):** `vplan eval shadow` over the final config 3 run (`runs/dryrun-tf/c3-test`, D70), on the local GPU at no cost. Cosmos never influenced that run, so this measures what a visual gate would have caught or falsely rejected. It is a learned visual check, not verification, and makes no incremental-success claim.

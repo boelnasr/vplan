@@ -287,4 +287,9 @@ def local_manifest() -> dict:
 def run_manifest(config: int, n: int, prepared: int) -> dict:
     """The run-coverage fields of a W3.1 manifest: n planned tasks (a prefix with --n) of the seed set's prepared."""
     return {"schema_version": 1, "kind": "eval_run", "run_id": f"c{config}-test", "config": config, "n": n,
-            "n_prepared": prepared, "limited": n < prepared, "seed_set_hash": SEED_SET_HASH}
+            "n_prepared": prepared, "limited": n < prepared, "seed_set_hash": SEED_SET_HASH,
+            "source_digest": "a" * 64, "prepared_source_digest": "a" * 64,
+            "source_drift": [],
+            "session_provenance_complete": True,
+            "sessions": [{"session": 0, "git": {"sha": "frozen-commit"}, "source_digest": "a" * 64,
+                           "source_drift": [], "contributed": True}]}

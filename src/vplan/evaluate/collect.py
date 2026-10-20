@@ -102,12 +102,12 @@ def read_run_manifest(run_dir: Path) -> dict[str, Any]:
     return manifest
 
 
-def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[AttemptRow]:
+def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> tuple[list[AttemptRow], set[int]]:
     path = run_dir / "attempts.jsonl"
     if not path.exists():
-        return []  # a run that recorded nothing yet is reported as INCOMPLETE 0/n
+        return [], set()  # a run that recorded nothing yet is reported as INCOMPLETE 0/n
     where = f"{run_dir.name}/attempts.jsonl"
-    rows, seen = [], set()
+    rows, seen, contributing_sessions = [], set(), set()
     with open(path, "rb") as f:
         # Line by line, and each row drops its streams once validated, so only one full record is in memory at a time.
         for number, line in enumerate(f, 1):
@@ -125,6 +125,7 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
             if attempt.attempt_id in seen:
                 raise EvalError(f"{where} records {attempt.attempt_id} twice (duplicate)")
             seen.add(attempt.attempt_id)
+            contributing_sessions.add(attempt.session)
             task = seeds.tasks[attempt.task_index]
             if attempt.task_id != task.task_id:
                 raise EvalError(f"{where} line {number}: task id {attempt.task_id!r} differs from the seed set's "
@@ -140,7 +141,37 @@ def _rows(run_dir: Path, manifest: dict[str, Any], seeds: SeedSet) -> list[Attem
                 first = exc.errors()[0]["msg"]
                 raise EvalError(f"{where} line {number} does not join its seed-set task and run "
                                 f"({exc.error_count()} errors; first: {first})") from None
-    return rows
+    return rows, contributing_sessions
+
+
+def _session_provenance(run_dir: Path, contributing: set[int]) -> list[dict[str, Any]]:
+    """Expose the source provenance recorded when each runner session started."""
+    path = run_dir / "sessions.jsonl"
+    if not path.exists():
+        return []
+    sessions = []
+    with open(path, "r", encoding="utf-8") as f:
+        for number, line in enumerate(f, 1):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                raise EvalError(f"{run_dir.name}/sessions.jsonl line {number} is not valid JSON") from None
+            if isinstance(event, dict) and event.get("event") == "start":
+                session = event.get("session")
+                if type(session) is not int or session < 0:
+                    raise EvalError(f"{run_dir.name}/sessions.jsonl line {number} has an invalid session number")
+                required = ("git", "source_digest", "source_drift")
+                missing = [key for key in required if key not in event]
+                if missing:
+                    raise EvalError(f"{run_dir.name}/sessions.jsonl line {number} is missing required fields: "
+                                    + ", ".join(missing))
+                if not isinstance(event["source_digest"], str) or not isinstance(event["source_drift"], list):
+                    raise EvalError(f"{run_dir.name}/sessions.jsonl line {number} has invalid provenance fields")
+                sessions.append({"session": event.get("session"), "git": event.get("git"),
+                                 "source_digest": event.get("source_digest"),
+                                 "source_drift": event.get("source_drift", []),
+                                 "contributed": session in contributing})
+    return sessions
 
 
 def collect_runs(run_dirs: Sequence[str | Path], seed_dir: str | Path | None = None) -> Collected:
@@ -179,7 +210,15 @@ def collect_runs(run_dirs: Sequence[str | Path], seed_dir: str | Path | None = N
     excluded = seeds.manifest.get("excluded")  # not among the W3.1 loader's required keys
     if not isinstance(excluded, int) or isinstance(excluded, bool) or excluded < 0:
         raise EvalError(f"the seed set in {seed_dir} does not record its excluded candidates as a count: {excluded!r}")
-    rows = [row for d, m in zip(dirs, manifests) for row in _rows(d, m, seeds)]
+    rows = []
+    for d, manifest in zip(dirs, manifests):
+        run_rows, contributing = _rows(d, manifest, seeds)
+        sessions = _session_provenance(d, contributing)
+        manifest["sessions"] = sessions
+        recorded_sessions = {s["session"] for s in sessions}
+        manifest["session_provenance_complete"] = contributing <= recorded_sessions
+        manifest["prepared_source_digest"] = seeds.manifest.get("source_digest")
+        rows.extend(run_rows)
     return Collected(rows, manifests, seeds, excluded, size)
 
 
