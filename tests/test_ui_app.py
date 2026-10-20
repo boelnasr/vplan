@@ -2,6 +2,7 @@
 starts with no .env, and LLM credentials come only from --env-file behind the free-model guard (D33)."""
 import os
 import threading
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -247,11 +248,31 @@ def test_replay_paths_outside_the_roots_are_refused(tmp_path, monkeypatch):
     assert case["value"] == outside.name
 
 
-@pytest.mark.parametrize("path", ["\\\\server\\share\\runs", "//server/share/runs"])
+@pytest.mark.parametrize("path", ["\\\\server\\share\\runs", "//server/share/runs",
+                                  r"\/server/share/runs", r"/\server/share/runs"])
 def test_network_paths_are_refused(path):
     settings = app.UISettings(replay=path)
     assert "network" in app.replay_open(settings, path)[1]
     assert "network" in app.replay_show(settings, path, None)[0]
+
+
+@pytest.mark.parametrize("path", [r"\/server/share/runs", r"/\server/share/runs"])
+def test_mixed_separator_unc_paths_are_refused_before_resolving(path, monkeypatch):
+    from vplan.ui import sources
+
+    def resolve_would_access_network(self, *args, **kwargs):
+        raise AssertionError("UNC paths must be rejected before Path.resolve()")
+
+    monkeypatch.setattr(Path, "resolve", resolve_would_access_network)
+    with pytest.raises(sources.ReplayError, match=r"network \(UNC\)"):
+        sources.check_path(path, roots=(r"C:\local\runs",))
+
+
+@pytest.mark.parametrize("path", ["/local/runs", r"C:\local\runs", r"\rooted\local"])
+def test_local_absolute_paths_are_not_classified_as_network_paths(path):
+    from vplan.ui import sources
+
+    assert not sources.is_network_path(path)
 
 
 def test_cli_refuses_a_network_replay_path(launched, capsys):
