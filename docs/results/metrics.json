@@ -2818,7 +2818,22 @@
             "source": "git"
           }
         },
-        "image_digest": null
+        "image_digest": null,
+        "sessions": [
+          {
+            "session": 0,
+            "git": {
+              "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+              "dirty": true,
+              "source": "git"
+            },
+            "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+            "source_drift": [],
+            "contributed": true
+          }
+        ],
+        "session_provenance_complete": true,
+        "prepared_source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32"
       },
       {
         "schema_version": 1,
@@ -2944,7 +2959,22 @@
             "source": "git"
           }
         },
-        "image_digest": null
+        "image_digest": null,
+        "sessions": [
+          {
+            "session": 0,
+            "git": {
+              "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+              "dirty": true,
+              "source": "git"
+            },
+            "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+            "source_drift": [],
+            "contributed": true
+          }
+        ],
+        "session_provenance_complete": true,
+        "prepared_source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32"
       },
       {
         "schema_version": 1,
@@ -3069,7 +3099,22 @@
             "source": "git"
           }
         },
-        "image_digest": null
+        "image_digest": null,
+        "sessions": [
+          {
+            "session": 0,
+            "git": {
+              "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+              "dirty": true,
+              "source": "git"
+            },
+            "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+            "source_drift": [],
+            "contributed": true
+          }
+        ],
+        "session_provenance_complete": true,
+        "prepared_source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32"
       },
       {
         "schema_version": 1,
@@ -3195,7 +3240,22 @@
             "source": "git"
           }
         },
-        "image_digest": null
+        "image_digest": null,
+        "sessions": [
+          {
+            "session": 0,
+            "git": {
+              "head": "22f7bd2f8bf46c0708a9a5e9d69b1491d7855b91",
+              "dirty": true,
+              "source": "git"
+            },
+            "source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32",
+            "source_drift": [],
+            "contributed": true
+          }
+        ],
+        "session_provenance_complete": true,
+        "prepared_source_digest": "1a023ffcbfeb07c4b034382a29d4c8815460e64b3450c3ebf921bf2e76434d32"
       }
     ]
   }
