@@ -17,6 +17,7 @@ from tests import eval_rows as ev
 from vplan import records
 from vplan.config import config_snapshot
 from vplan.evaluate.seedsets import EvalError, SeedSet
+from vplan.tasks.scenes import make_basic_scene
 from vplan.visual.cosmos import CosmosUnavailable
 
 SEED, INDEX = 7, 4
@@ -36,7 +37,8 @@ def verdict(v: str, latency_s: float = 0.1) -> records.VisualVerdict:
 
 
 class FakeAsk:
-    """Scripted ask_cosmos: one reply (a verdict name or an exception) per request, in order; records each request."""
+    """Scripted ask_cosmos: one reply (a verdict name, an exception, or a callable that runs instead) per request, in
+    order; records each request."""
 
     def __init__(self, replies):
         self.replies, self.sent = list(replies), []
@@ -47,18 +49,48 @@ class FakeAsk:
         reply = self.replies.pop(0)
         if isinstance(reply, BaseException):
             raise reply
-        return verdict(reply)
+        return reply() if callable(reply) else verdict(reply)
 
 
 @pytest.fixture(scope="module")
-def run_dir(tmp_path_factory):
-    """A W3.1-style config 3 run directory: task 0 refused (no frames), task 4 executed with its 9 key frames."""
-    from vplan.evaluate.frames import export_frames
+def executed():
+    """The canonical plan for cube_red, verified, executed and judged a success on SPEC's scene."""
     from vplan.planners.heuristic import HeuristicPlanner
     from vplan.repair import run_task
-    executed = run_task(SPEC, ev.FEASIBLE, HeuristicPlanner(), k=3, mode="repair", attempt_id=ATTEMPT, seed=SEED,
-                        config_snapshot=config_snapshot())
-    assert executed.outcome == "executed" and executed.success
+    record = run_task(SPEC, ev.FEASIBLE, HeuristicPlanner(), k=3, mode="repair", attempt_id=ATTEMPT, seed=SEED,
+                      config_snapshot=config_snapshot())
+    assert record.outcome == "executed" and record.success
+    return record
+
+
+def manifest(n: int) -> dict:
+    return {"schema_version": 1, "kind": "eval_run", "run_id": "c3-dev", "config": 3, "split": "dev",
+            "seed_set_hash": HASH, "provider": "openrouter", "model": "m", "n": n, "n_prepared": n, "frames": True,
+            "seed_set": {"dir": "seeds-not-used"}}
+
+
+def write_run(run: Path, rows: list[records.EvalAttempt], n: int) -> Path:
+    (run / "attempts.jsonl").write_text("".join(r.model_dump_json() + "\n" for r in rows), encoding="utf-8")
+    (run / "manifest.json").write_text(json.dumps(manifest(n)), encoding="utf-8")
+    return run
+
+
+def executed_row(record: records.AttemptRecord, spec: records.TaskSpec, run: Path, index: int) -> records.EvalAttempt:
+    """record (re-labelled as attempt 3:dev:<index>) with its key frames exported as eval run exports them."""
+    from vplan.evaluate.frames import export_frames
+    record = record.model_copy(update={"attempt_id": f"3:dev:{index}"})
+    frames = export_frames(record, spec, seed=SEED, config_snapshot=config_snapshot(),
+                           out_dir=run / "frames" / f"{index:04d}", rel_dir=f"frames/{index:04d}")
+    assert frames.status == "written"
+    return records.EvalAttempt(attempt_id=record.attempt_id, config=3, split="dev", task_index=index,
+                               task_id=f"dev_{index:04d}", session=0, outcome="executed", tries=1, wall_s=5.0,
+                               record=record, frames=frames)
+
+
+@pytest.fixture(scope="module")
+def run_dir(executed, tmp_path_factory):
+    """A W3.1-style config 3 run directory: task 0 refused (no frames), task 4 executed with its 9 key frames."""
+    from vplan.evaluate.frames import export_frames
     run = tmp_path_factory.mktemp("shadow") / "c3-dev"
     frames = export_frames(executed, SPEC, seed=SEED, config_snapshot=config_snapshot(),
                            out_dir=run / "frames" / f"{INDEX:04d}", rel_dir=f"frames/{INDEX:04d}")
@@ -69,12 +101,7 @@ def run_dir(tmp_path_factory):
                                 frames=records.FrameExport(status="none")),
             records.EvalAttempt(attempt_id=ATTEMPT, config=3, split="dev", task_index=INDEX, task_id=f"dev_{INDEX:04d}",
                                 session=0, outcome="executed", tries=1, wall_s=5.0, record=executed, frames=frames)]
-    (run / "attempts.jsonl").write_text("".join(r.model_dump_json() + "\n" for r in rows), encoding="utf-8")
-    manifest = {"schema_version": 1, "kind": "eval_run", "run_id": "c3-dev", "config": 3, "split": "dev",
-                "seed_set_hash": HASH, "provider": "openrouter", "model": "m", "n": 5, "n_prepared": 5,
-                "frames": True, "seed_set": {"dir": "seeds-not-used"}}
-    (run / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return run
+    return write_run(run, rows, 5)
 
 
 def seed_set(seed_set_hash: str = HASH) -> SeedSet:
@@ -191,15 +218,17 @@ def test_the_summary_reports_natural_and_injected_negatives_separately(studied):
         "n": 4, "pass": 1, "fail": 2, "uncertain": 1}
     assert injected["all"]["uncertain_rate"] == 0.25 and injected["grasp"]["n"] == 2
     assert c["wrong_object"]["all"]["n"] == 3 and c["misaligned_grasp"]["all"]["fail"] == 1
-    assert s["balanced_accuracy"]["natural"]["all"] is None  # no natural negatives here
-    assert s["balanced_accuracy"]["injected"]["all"] == pytest.approx((2 / 3 + 2 / 4) / 2)
+    assert s["balanced_accuracy"]["natural"]["all"] == {"value": None, "n_true": 3, "n_false": 0}
+    injected_ba = s["balanced_accuracy"]["injected"]["all"]
+    assert injected_ba["value"] == pytest.approx((2 / 3 + 2 / 4) / 2) and injected_ba["n_false"] == 4
     # Replaying the live gate (stop at the first stage that does not pass) on the natural frames: the correct plan
     # would have been stopped at the grasp.
     assert s["gate"]["predicate_true"] == {"n": 1, "pass": 0, "fail": 1, "uncertain": 0,
                                            "stopped_at": {"pregrasp": 0, "grasp": 1, "prerelease": 0}}
     assert s["latency_s"]["request"] == {"n": 9, "median": 0.1, "p90": 0.1, "max": 0.1}
     md = (studied[2] / "summary.md").read_text(encoding="utf-8")
-    assert "not verification" in md and "incremental" in md
+    assert "not verification" in md and "incremental" in md and "about 0.60" in md
+    assert "| injected: misaligned grasp | pregrasp |" not in md  # a misaligned grasp exists at the grasp only
 
 
 def test_an_injected_pose_that_misses_its_ik_target_is_skipped_not_asked(run_dir, tmp_path, monkeypatch):
@@ -230,6 +259,110 @@ def test_an_injected_frame_whose_predicate_holds_is_skipped_not_asked(run_dir, t
     assert result.summary["classes"]["misaligned_grasp"]["all"]["n"] == 0
 
 
+# ---- rounds aimed at another object, two executed rounds, no single instructed object ----------------------------
+BASIC = make_basic_scene()  # cube_red, the oracle target (ev.FEASIBLE), and cube_green; no obstacle
+YELLOW = records.SceneObject(id="cube_yellow", shape="cube", color="yellow", size=(0.04, 0.04, 0.04),
+                             pose=records.Pose(position=(0.62, -0.25, 0.02)))
+THREE = SPEC.model_copy(update={"scene": records.Scene.model_validate(
+    {**BASIC.model_dump(), "objects": [*BASIC.model_dump()["objects"], YELLOW.model_dump()]})})
+TWO = SPEC.model_copy(update={"scene": BASIC})
+NO_SUBJECT = SPEC.model_copy(update={"instruction": "Pick the purple sphere and place it in the bin."})
+MIXED_SPECS = (THREE, TWO, NO_SUBJECT, SPEC)
+TIMED_OUT = CosmosUnavailable("APITimeoutError: Request timed out.")
+
+
+def mixed_seed_set() -> SeedSet:
+    tasks = tuple(records.SeedSetTask(task_id=f"dev_{i:04d}", index=i, seed=SEED, split="dev",
+                                      distractors=len(spec.scene.objects) - 1, obstacles=len(spec.scene.obstacles),
+                                      task=spec) for i, spec in enumerate(MIXED_SPECS))
+    return seed_set()._replace(tasks=tasks, oracles=(ev.FEASIBLE,) * len(tasks))
+
+
+@pytest.fixture(scope="module")
+def mixed(executed, tmp_path_factory):
+    """Four executed attempts, all instructed to move cube_red: 0 grasps cube_green, with cube_yellow as the only other
+    object; 1 grasps cube_green with no other object; 2's instruction names no single object; 3 has two executed
+    rounds of the canonical plan. The first question's side-view re-ask times out; every other answer is pass."""
+    from vplan.evaluate import shadow
+    from vplan.planners.heuristic import heuristic_geometry
+    from vplan.repair import run_task
+    run = tmp_path_factory.mktemp("mixed") / "c3-dev"
+    rows = []
+    for i, spec in enumerate(MIXED_SPECS[:2]):
+        wrong = run_task(spec, ev.FEASIBLE, ev.Scripted([ev.call(heuristic_geometry(spec.scene, "cube_green"))]), k=0,
+                         mode="repair", attempt_id=f"3:dev:{i}", seed=SEED, config_snapshot=config_snapshot())
+        assert wrong.outcome == "executed" and not wrong.success
+        rows.append(executed_row(wrong, spec, run, i))
+    rows.append(executed_row(executed, NO_SUBJECT, run, 2))
+    (rnd,) = [r for r in executed.rounds if r.evaluation is not None and r.evaluation.outcome == "executed"]
+    twice = records.AttemptRecord.model_validate({**executed.model_dump(), "call_count": 2, "rounds": [
+        {**rnd.model_dump(), "round_index": i, "call_id": f"c{i}"} for i in (0, 1)]})
+    rows.append(executed_row(twice, SPEC, run, 3))
+    write_run(run, rows, len(MIXED_SPECS))
+    out = tmp_path_factory.mktemp("mixed-out") / "shadow"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(shadow, "load_seed_set", lambda path, **kw: mixed_seed_set())
+        result, ask = shadow_run(run, out, ["uncertain", TIMED_OUT, *["pass"] * 24])
+    return result, ask, out, run
+
+
+def by_attempt(out) -> dict[str, list[records.ShadowRecord]]:
+    got: dict[str, list[records.ShadowRecord]] = {}
+    for r in lines(out):
+        got.setdefault(r.attempt_id, []).append(r)
+    return got
+
+
+def test_a_round_aimed_at_another_object_is_a_natural_negative_whose_wrong_object_is_a_third_one(mixed):
+    got = by_attempt(mixed[2])["3:dev:0"]
+    assert [(r.stage, r.source) for r in got] == ORDER
+    assert all(r.posed == "cube_green" and r.truth is False
+               for r in got if r.source in ("natural", "misaligned_grasp"))
+    # the wrong object is neither the oracle target (cube_red) nor the plan's own (cube_green)
+    assert all(r.posed == "cube_yellow" and r.truth is False for r in got if r.source == "wrong_object")
+    assert mixed[0].summary["natural_negative_rounds"] == {"n": 2, "wrong_target": 2}
+
+
+def test_with_no_other_object_a_round_gets_no_wrong_object_question(mixed):
+    got = by_attempt(mixed[2])["3:dev:1"]
+    assert [(r.stage, r.source) for r in got] == [q for q in ORDER if q[1] != "wrong_object"]
+    assert all(r.truth is False for r in got)
+
+
+def test_misaligned_grasps_on_wrong_target_rounds_are_reported_apart(mixed):
+    c = mixed[0].summary["classes"]
+    assert c["misaligned_grasp"]["all"]["n"] == 2  # attempt 3's two rounds, aimed at the oracle target
+    assert c["misaligned_grasp_wrong_target"]["all"]["n"] == 2  # attempts 0 and 1
+    assert c["injected_negative"]["grasp"]["n"] == 2 + 2 + 3  # both misaligned subclasses and 3 wrong-object grasps
+
+
+def test_an_instruction_naming_no_single_object_is_listed_not_asked(mixed):
+    assert "3:dev:2" not in by_attempt(mixed[2]) and mixed[0].summary["no_single_object"] == ["3:dev:2"]
+    assert "3:dev:2" in (mixed[2] / "summary.md").read_text(encoding="utf-8")
+
+
+def test_every_executed_round_is_asked_about(mixed):
+    got = by_attempt(mixed[2])["3:dev:3"]
+    assert [(r.round_index, r.stage, r.source) for r in got] == [(i, s, src) for i in (0, 1) for s, src in ORDER]
+
+
+def test_an_endpoint_error_on_the_re_ask_is_recorded_and_the_question_asked_again(mixed, tmp_path, monkeypatch):
+    from vplan.evaluate import shadow
+    result, _, out, run = mixed
+    first = lines(out)[0]
+    assert (first.question_id, first.verdict, first.error) == ("3:dev:0/r0/pregrasp/natural", None,
+                                                               "APITimeoutError: Request timed out.")
+    assert [(c.views, c.verdict.verdict) for c in first.checks] == [(GATE_VIEWS, "uncertain")]
+    assert result.status == "incomplete" and result.summary["questions"]["errors"] == 1
+    copy = tmp_path / "shadow"
+    shutil.copytree(out, copy)
+    monkeypatch.setattr(shadow, "load_seed_set", lambda path, **kw: mixed_seed_set())
+    again, ask = shadow_run(run, copy, ["fail"])
+    assert again.status == "complete" and [s["views"] for s in ask.sent] == [GATE_VIEWS]
+    assert (lines(copy)[-1].question_id, lines(copy)[-1].verdict) == (first.question_id, "fail")
+    assert len(lines(copy)) == len(lines(out))
+
+
 # ---- outages and reruns ---------------------------------------------------------------------------------------
 def test_an_outage_stops_after_three_errors_in_a_row_and_a_rerun_asks_only_what_is_missing(run_dir, tmp_path):
     out = tmp_path / "shadow"
@@ -250,15 +383,24 @@ def test_an_outage_stops_after_three_errors_in_a_row_and_a_rerun_asks_only_what_
     assert all(r.verdict is not None and r.error is None for r in again)
     third, ask = shadow_run(run_dir, out, [])
     assert third.status == "complete" and ask.sent == [] and lines(out) == again
+    sessions = [json.loads(line) for line in (out / "sessions.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(sessions) == 3 and all(set(s) == {"started_utc", "git"} for s in sessions)
+    assert third.summary["git"] == sessions[-1]["git"]
 
 
 def test_the_summary_is_rewritten_when_a_session_ends_with_an_exception(run_dir, tmp_path):
     out = tmp_path / "shadow"
+
+    def killed_mid_write():  # a partial final line must not turn the interrupt into a parsing error
+        with open(out / "shadow.jsonl", "a", encoding="utf-8") as f:
+            f.write('{"question_id": "3:dev:4/r0/gr')
+        raise KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
-        shadow_run(run_dir, out, ["pass", KeyboardInterrupt()])
+        shadow_run(run_dir, out, ["pass", killed_mid_write])
     s = json.loads((out / "summary.json").read_text(encoding="utf-8"))
     assert s["status"] == "incomplete" and s["questions"]["answered"] == 1
-    assert s["executed_without_frames"] is None  # the session never reached the end of attempts.jsonl
+    # the session never reached the end of attempts.jsonl
+    assert s["executed_without_frames"] is None and s["no_single_object"] is None
 
 
 def test_executed_attempts_without_frames_are_named_in_the_summary(run_dir, tmp_path):
@@ -323,11 +465,12 @@ def test_a_run_over_another_seed_set_is_refused(run_dir, tmp_path, monkeypatch):
 
 
 # ---- records and the summary --------------------------------------------------------------------------------
-def record(stage, source, truth, verdicts=(), *, error=None, skipped=None, latency_s=1.0, attempt="3:test:1"):
+def record(stage, source, truth, verdicts=(), *, error=None, skipped=None, latency_s=1.0, attempt="3:test:1",
+           posed="cube_red"):
     checks = tuple(records.VisualCheck(stage=stage, views=GATE_VIEWS if i == 0 else RETRY_VIEWS,
                                        verdict=verdict(v, latency_s)) for i, v in enumerate(verdicts))
     return records.ShadowRecord(question_id=f"{attempt}/r0/{stage}/{source}", attempt_id=attempt, task_index=1,
-                                round_index=0, stage=stage, source=source, subject="red cube", posed="cube_red",
+                                round_index=0, stage=stage, source=source, subject="red cube", posed=posed,
                                 frames=("a.png",), truth=truth, checks=checks,
                                 verdict=verdicts[-1] if verdicts and error is None else None, error=error,
                                 skipped=skipped)
@@ -355,8 +498,9 @@ def test_the_summary_counts_rejections_misses_uncertain_and_latency_by_class_and
           record("grasp", "misaligned_grasp", False, ["pass"], latency_s=7.0, attempt="3:test:2"),
           record("grasp", "wrong_object", False, error="down", attempt="3:test:2"),
           record("prerelease", "wrong_object", True, skipped="predicate holds", attempt="3:test:2")]
-    s = summarize(rs)
+    s = summarize(rs, {1: "cube_red"})
     assert s["questions"] == {"recorded": 9, "answered": 7, "errors": 1, "skipped": {"predicate holds": 1}}
+    assert s["natural_negative_rounds"] == {"n": 1, "wrong_target": 0}
     neg = s["classes"]["natural_negative"]
     assert {k: neg["all"][k] for k in ("n", "pass", "fail", "uncertain", "errors")} == {
         "n": 3, "pass": 2, "fail": 1, "uncertain": 0, "errors": 0}
@@ -366,15 +510,26 @@ def test_the_summary_counts_rejections_misses_uncertain_and_latency_by_class_and
         "uncertain_rate": 0.0, "latency_s": {"n": 1, "median": 7.0, "p90": 7.0, "max": 7.0}}
     assert s["classes"]["predicate_true"]["prerelease"]["n"] == 1  # the skipped injected frame is not a question
     assert s["classes"]["wrong_object"]["all"]["n"] == 0
-    assert s["balanced_accuracy"]["natural"]["all"] == pytest.approx((1.0 + 1 / 3) / 2)
-    assert s["balanced_accuracy"]["injected"]["grasp"] == pytest.approx((1.0 + 0.0) / 2)
-    assert s["balanced_accuracy"]["injected"]["pregrasp"] is None
+    assert s["balanced_accuracy"]["natural"]["all"] == {"value": pytest.approx((1.0 + 1 / 3) / 2), "n_true": 3,
+                                                        "n_false": 3}
+    assert s["balanced_accuracy"]["injected"]["grasp"]["value"] == pytest.approx((1.0 + 0.0) / 2)
+    assert s["balanced_accuracy"]["injected"]["pregrasp"] == {"value": None, "n_true": 1, "n_false": 0}
     assert s["gate"]["predicate_false"] == {"n": 1, "pass": 0, "fail": 1, "uncertain": 0,
                                             "stopped_at": {"pregrasp": 1, "grasp": 0, "prerelease": 0}}
     assert s["gate"]["predicate_true"]["pass"] == 1
     # Per request: 1, 2, 3, 4, 5, 5, 6, 7 s (the re-asked question counts twice); per question: 1, 2, 3, 4, 10, 6, 7 s.
     assert s["latency_s"]["request"] == {"n": 8, "median": 4.5, "p90": pytest.approx(6.3), "max": 7.0}
     assert s["latency_s"]["question"]["median"] == 4.0 and s["latency_s"]["question"]["max"] == 10.0
+
+
+def test_a_misaligned_grasp_is_classed_by_whether_its_round_aimed_at_the_oracle_target():
+    from vplan.evaluate.shadow import summarize
+    rs = [record("grasp", "misaligned_grasp", False, ["fail"], posed="cube_red", attempt="3:test:1"),
+          record("grasp", "misaligned_grasp", False, ["pass"], posed="cube_green", attempt="3:test:2")]
+    c = summarize(rs, {1: "cube_red"})["classes"]
+    assert (c["misaligned_grasp"]["all"]["n"], c["misaligned_grasp"]["all"]["fail"]) == (1, 1)
+    assert (c["misaligned_grasp_wrong_target"]["all"]["n"], c["misaligned_grasp_wrong_target"]["all"]["pass"]) == (1, 1)
+    assert c["injected_negative"]["all"]["n"] == 2
 
 
 # ---- the command line -----------------------------------------------------------------------------------------

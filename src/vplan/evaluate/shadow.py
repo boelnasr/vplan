@@ -11,17 +11,21 @@ views first and every view after `uncertain`), asked about three kinds of frames
 - misaligned_grasp (injected): the grasp key pose slid 3-4 cm along the TCP x axis, normal to the finger plane, as the
   D34 pilot's offset grasps, so the fingers straddle the table beside the object.
 Truth is the spec §11 state predicate for the seed set's oracle target, read back from the posed simulator state at
-shadow time (D59). An injected pose that misses its IK target, or whose predicate holds, is recorded as skipped: it is
-not a negative. Cosmos hears the object only as the instruction's '<color> <shape>'; an attempt whose instruction names
-no single object is not asked about, as the gate skips it.
+shadow time (D59): it describes the kinematic key frame, not the executed outcome the Judge scored. An injected pose
+that misses its IK target, or whose predicate holds, is recorded as skipped: it is not a negative. A misaligned grasp
+of a round whose plan grasped another object than the oracle target is reported as its own class, so the misaligned
+grasps of the instructed object stand alone. Cosmos hears the object only as the instruction's '<color> <shape>'; an
+attempt whose instruction names no single object is not asked about, as the gate skips it.
 
 Output directory OUT (default runs/shadow-<run directory name>), never inside the run directory, which is only read:
 - manifest.json: the run, seed set and Cosmos settings (model, thinking, endpoint, timeout); a rerun with other
   settings is refused.
+- sessions.jsonl: each session's start time and git provenance, appended as it starts.
 - shadow.jsonl: one records.ShadowRecord per question, appended as each is answered.
 - injected/<frames stem>/r<round>-<stage>-<source>-<view>.png: the injected renders.
-- summary.json and summary.md: summarize() over shadow.jsonl, rewritten at the end of every session, and naming the
-  executed attempts the run has no key frames of.
+- summary.json and summary.md: summarize() over shadow.jsonl, rewritten at the end of every session with its git
+  provenance, and naming the executed attempts the run has no key frames of and those whose instruction names no
+  single object.
 Rerun the same command to continue: answered and skipped questions are kept; endpoint errors and a partial final line
 are dropped and asked again. Three endpoint errors in a row stop the session, as three failed requests stop a run (D33).
 """
@@ -55,21 +59,27 @@ from vplan.visual.predicates import grasp_truth, pregrasp_truth, prerelease_trut
 from vplan.visual.render import render_views, to_png
 
 KIND, SCHEMA_VERSION = "shadow_study", 1
-SHADOW, SUMMARY_JSON, SUMMARY_MD, INJECTED = "shadow.jsonl", "summary.json", "summary.md", "injected"
+SHADOW, SESSIONS, SUMMARY_JSON, SUMMARY_MD, INJECTED = ("shadow.jsonl", "sessions.jsonl", "summary.json", "summary.md",
+                                                       "injected")
 ENABLE_THINKING = True  # the live gate's default (D47), the better D34 mode
 MAX_CONSECUTIVE_ERRORS = 3
 OFFSET_M = (0.03, 0.04)  # misaligned grasp: the D34 pilot's offset range along TCP x, m
 IK_ITERATIONS = 500  # as the D34 pilot's single-pose IK
-CLASSES = ("predicate_true", "natural_negative", "injected_negative", "wrong_object", "misaligned_grasp")
+CLASSES = ("predicate_true", "natural_negative", "injected_negative", "wrong_object", "misaligned_grasp",
+           "misaligned_grasp_wrong_target")
 CLASS_LABELS = {"predicate_true": "predicate true (natural)", "natural_negative": "natural negatives",
                 "injected_negative": "injected negatives, all", "wrong_object": "injected: wrong object",
-                "misaligned_grasp": "injected: misaligned grasp"}
+                "misaligned_grasp": "injected: misaligned grasp",
+                "misaligned_grasp_wrong_target": "injected: misaligned grasp on a wrong-target round"}
 VERDICTS = ("pass", "fail", "uncertain")
 NOTE = ("A learned visual check, not verification. Cosmos never influenced the run, so this measures what a visual "
-        "gate would have caught or falsely rejected, never incremental success (spec §11, D8 item 4).")
+        "gate would have caught or falsely rejected, never incremental success (spec §11, D8 item 4). Truth is the "
+        "state predicate of each kinematic key frame, posed from the plan's trajectory, not the executed outcome the "
+        "Judge scored.")
 READING = ("For predicate-true frames a fail is a false rejection and a pass a correct acceptance. For negatives a "
            "fail is a true rejection (a catch) and a pass a catch the gate missed. In the live gate a final uncertain "
-           "also stops execution (visual_uncertain).")
+           "also stops execution (visual_uncertain). A misaligned grasp on a wrong-target round is the misaligned "
+           "grasp of a round whose plan grasped another object than the instructed one.")
 
 
 class ShadowResult(NamedTuple):
@@ -266,17 +276,20 @@ def _ask(q: _Question, gate_views: tuple[str, ...], retry_views: tuple[str, ...]
     return ShadowRecord(**q.fields, checks=tuple(checks), verdict=v.verdict)
 
 
+def _lines(path: Path) -> tuple[list[bytes], bytes]:
+    """shadow.jsonl's complete lines, and its partial final line (b"" unless a session was killed mid-write)."""
+    complete, _, partial = path.read_bytes().rpartition(b"\n")
+    return [line for line in complete.split(b"\n") if line.strip()], partial
+
+
 def _kept(path: Path) -> list[ShadowRecord]:
     """The records a rerun keeps (answered or skipped), in file order. The file is rewritten without endpoint errors
-    and without a partial final line (a session killed mid-write), so each question keeps one line."""
+    and without a partial final line, so each question keeps one line."""
     if not path.is_file():
         return []
-    raw = path.read_bytes()
-    complete, _, partial = raw.rpartition(b"\n")
+    complete, partial = _lines(path)
     kept, seen = [], set()
-    for number, line in enumerate(complete.split(b"\n"), 1):
-        if not line.strip():
-            continue
+    for number, line in enumerate(complete, 1):
         try:
             rec = ShadowRecord.model_validate_json(line)
         except ValidationError:
@@ -292,7 +305,8 @@ def _kept(path: Path) -> list[ShadowRecord]:
 
 
 def _records(path: Path) -> list[ShadowRecord]:
-    return [ShadowRecord.model_validate_json(line) for line in path.read_bytes().splitlines() if line.strip()]
+    """Every complete record; a partial final line is left for the next session's _kept to drop."""
+    return [ShadowRecord.model_validate_json(line) for line in _lines(path)[0]]
 
 
 def _open(out_dir: Path, identity: dict[str, Any], extra: dict[str, Any]) -> None:
@@ -308,13 +322,19 @@ def _open(out_dir: Path, identity: dict[str, Any], extra: dict[str, Any]) -> Non
     _write_atomic(path, json.dumps({**identity, **extra}, indent=2) + "\n")
 
 
+class _Ended(NamedTuple):
+    stop: str | None  # None when every attempt was reached
+    asked: int
+    # executed attempts the run has no key frames of, and those whose instruction names no single object; None when
+    # the session stopped before the end of attempts.jsonl
+    without_frames: list[str] | None
+    no_single_object: list[str] | None
+
+
 def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, ask: Callable, base_url: str,
-             model: str, timeout_s: float, limit: int | None, echo: Callable[[str], None]
-             ) -> tuple[str | None, int, list[str] | None]:
-    """Ask every pending question, appending each record as it is answered. Returns the stop reason (None when every
-    attempt was reached), the questions asked, and the executed attempts the run has no key frames for (None when the
-    session stopped before the end of attempts.jsonl)."""
-    asked, in_row, without = 0, 0, []
+             model: str, timeout_s: float, limit: int | None, echo: Callable[[str], None]) -> _Ended:
+    """Ask every pending question, appending each record as it is answered."""
+    asked, in_row, without, no_subject = 0, 0, [], []
     with open(out_dir / SHADOW, "a", encoding="utf-8", newline="\n") as f:
         for attempt in _attempts(run_dir):
             i = attempt.task_index
@@ -327,6 +347,7 @@ def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, as
             index, rel, pngs = _read_frames(run_dir, attempt)
             if index.subject is None:
                 echo(f"{attempt.attempt_id}: skipped, the instruction names no single object")
+                no_subject.append(attempt.attempt_id)
                 continue
             for q in _questions(attempt, index, rel, pngs, seeds.tasks[i], seeds.oracles[i], seeds.config, out_dir,
                                 done):
@@ -335,7 +356,7 @@ def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, as
                 if q.skipped is not None:
                     rec = ShadowRecord(**q.fields, skipped=q.skipped)
                 elif limit is not None and asked >= limit:
-                    return f"--limit {limit} reached", asked, None
+                    return _Ended(f"--limit {limit} reached", asked, None, None)
                 else:
                     rec = _ask(q, index.gate_views, index.retry_views, ask, base_url, model, timeout_s)
                     asked += 1
@@ -349,18 +370,20 @@ def _session(run_dir: Path, out_dir: Path, seeds: SeedSet, done: set[str], *, as
                 elif rec.verdict:  # a skipped record neither breaks nor extends a streak
                     in_row = 0
                 if in_row >= MAX_CONSECUTIVE_ERRORS:
-                    return f"{in_row} endpoint errors in a row at {base_url} (last: {rec.error})", asked, None
-    return None, asked, without
+                    return _Ended(f"{in_row} endpoint errors in a row at {base_url} (last: {rec.error})", asked, None,
+                                  None)
+    return _Ended(None, asked, without, no_subject)
 
 
-def _finish(out_dir: Path, identity: dict[str, Any], stop: str | None, without: list[str] | None) -> dict[str, Any]:
+def _finish(out_dir: Path, header: dict[str, Any], ended: _Ended, targets: dict[int, str | None]) -> dict[str, Any]:
     """Write summary.json and summary.md over every record in shadow.jsonl; returns the summary as written."""
     records = _records(out_dir / SHADOW)
-    errors = sum(r.error is not None for r in records)
+    errors, stop = sum(r.error is not None for r in records), ended.stop
     if stop is None and errors:
         stop = f"{errors} questions ended in an endpoint error"
-    summary = {**identity, "status": "complete" if stop is None else "incomplete", "stop_reason": stop,
-               "executed_without_frames": without, **summarize(records)}
+    summary = {**header, "status": "complete" if stop is None else "incomplete", "stop_reason": stop,
+               "executed_without_frames": ended.without_frames, "no_single_object": ended.no_single_object,
+               **summarize(records, targets)}
     text = json.dumps(summary, indent=2) + "\n"
     _write_atomic(out_dir / SUMMARY_JSON, text)
     _write_atomic(out_dir / SUMMARY_MD, summary_markdown(summary))
@@ -396,22 +419,30 @@ def run_shadow(run_dir: str | Path, out_dir: str | Path, *, base_url: str, seed_
     identity = {"kind": KIND, "schema_version": SCHEMA_VERSION, "run_id": manifest.get("run_id", run_dir.name),
                 "config": manifest["config"], "split": manifest["split"], "seed_set_hash": manifest["seed_set_hash"],
                 "model": model, "enable_thinking": ENABLE_THINKING, "base_url": base_url, "timeout_s": timeout_s}
-    _open(out_dir, identity, {"created_utc": _utc_now(), "git": _git()})
+    _open(out_dir, identity, {"created_utc": _utc_now()})
+    session = {"started_utc": _utc_now(), "git": _git()}
+    with open(out_dir / SESSIONS, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(session) + "\n")
     done = {r.question_id for r in _kept(out_dir / SHADOW)}
-    stop, asked, without = "the session ended early", 0, None
+    targets = {i: oracle.target_id for i, oracle in enumerate(seeds.oracles)}
+    ended = _Ended("the session ended early", 0, None, None)
     try:
-        stop, asked, without = _session(run_dir, out_dir, seeds, done, ask=ask, base_url=base_url, model=model,
-                                        timeout_s=timeout_s, limit=limit, echo=echo)
+        ended = _session(run_dir, out_dir, seeds, done, ask=ask, base_url=base_url, model=model, timeout_s=timeout_s,
+                         limit=limit, echo=echo)
     finally:
-        summary = _finish(out_dir, identity, stop, without)
-    return ShadowResult(summary["status"], summary["stop_reason"], asked, summary, out_dir)
+        summary = _finish(out_dir, {**identity, "git": session["git"]}, ended, targets)
+    return ShadowResult(summary["status"], summary["stop_reason"], ended.asked, summary, out_dir)
 
 
 # ---- the summary ------------------------------------------------------------------------------------------------
-def _classes(r: ShadowRecord) -> tuple[str, ...]:
+def _classes(r: ShadowRecord, targets: dict[int, str | None]) -> tuple[str, ...]:
     if r.source == "natural":
         return ("predicate_true",) if r.truth else ("natural_negative",)
-    return ("injected_negative", r.source) if not r.truth else ()  # a true injected frame is skipped, never asked
+    if r.truth:
+        return ()  # a true injected frame is skipped, never asked
+    if r.source == "misaligned_grasp" and r.posed != targets[r.task_index]:  # posed is the round's planned target
+        return "injected_negative", "misaligned_grasp_wrong_target"
+    return "injected_negative", r.source
 
 
 def _latency(values: Sequence[float]) -> dict[str, Any]:
@@ -429,11 +460,12 @@ def _cell(rs: Sequence[ShadowRecord]) -> dict[str, Any]:
             "latency_s": _latency([ch.verdict.latency_s for r in answered for ch in r.checks])}
 
 
-def _balanced(pos: Sequence[ShadowRecord], neg: Sequence[ShadowRecord]) -> float | None:
-    """D34's pilot measure: pass <=> predicate true, a final uncertain counts as wrong in both classes."""
-    if not pos or not neg:
-        return None
-    return score([True] * len(pos) + [False] * len(neg), [r.verdict for r in [*pos, *neg]])["balanced_accuracy"]
+def _balanced(pos: Sequence[ShadowRecord], neg: Sequence[ShadowRecord]) -> dict[str, Any]:
+    """D34's pilot measure: pass <=> predicate true, a final uncertain counts as wrong in both classes. value is None
+    unless both classes are present."""
+    value = (score([True] * len(pos) + [False] * len(neg), [r.verdict for r in [*pos, *neg]])["balanced_accuracy"]
+             if pos and neg else None)
+    return {"value": value, "n_true": len(pos), "n_false": len(neg)}
 
 
 def _gate(records: Sequence[ShadowRecord]) -> dict[str, Any]:
@@ -459,13 +491,16 @@ def _gate(records: Sequence[ShadowRecord]) -> dict[str, Any]:
     return out
 
 
-def summarize(records: Sequence[ShadowRecord]) -> dict[str, Any]:
+def summarize(records: Sequence[ShadowRecord], targets: dict[int, str | None]) -> dict[str, Any]:
     """Per class and stage: answered n, verdict counts and rates, endpoint errors and request latency; balanced
-    accuracy against natural and injected negatives; the gate replayed on natural frames; overall latency."""
+    accuracy against natural and injected negatives; the gate replayed on natural frames; overall latency. targets:
+    the oracle target id per task index."""
     by: dict[str, list[ShadowRecord]] = {k: [] for k in CLASSES}
     for r in records:
-        for k in _classes(r):
+        for k in _classes(r, targets):
             by[k].append(r)
+    # natural negative rounds, and whether each one's plan targeted another object than the instructed one
+    negative_rounds = {(r.attempt_id, r.round_index): r.posed != targets[r.task_index] for r in by["natural_negative"]}
     stages = (*STAGES, "all")
 
     def at(rs, stage):
@@ -479,6 +514,7 @@ def summarize(records: Sequence[ShadowRecord]) -> dict[str, Any]:
                       "errors": sum(r.error is not None for r in records),
                       "skipped": dict(Counter(r.skipped for r in records if r.skipped is not None))},
         "attempts": len({r.attempt_id for r in records}),
+        "natural_negative_rounds": {"n": len(negative_rounds), "wrong_target": sum(negative_rounds.values())},
         "classes": {k: {s: _cell(at(by[k], s)) for s in stages} for k in CLASSES},
         "balanced_accuracy": {
             name: {s: _balanced(at(positives, s), at([r for r in by[neg] if r.verdict is not None], s))
@@ -498,19 +534,26 @@ def _s(value: float | None) -> str:
     return "—" if value is None else f"{value:.2f}"
 
 
+def _ids(ids: list[str] | None) -> str:
+    if ids is None:
+        return "not counted (the session ended early)"
+    return f"{len(ids)} ({', '.join(ids)})" if ids else "none"
+
+
 def summary_markdown(s: dict[str, Any]) -> str:
     q, lat = s["questions"], s["latency_s"]
     status = "complete" if s["status"] == "complete" else f"INCOMPLETE ({s['stop_reason']}; rerun to continue)"
     skipped = ", ".join(f"{n} {why}" for why, n in sorted(q["skipped"].items())) or "none"
-    without = s["executed_without_frames"]
-    without = ("not counted (the session ended early)" if without is None
-               else f"{len(without)} ({', '.join(without)})" if without else "none")
+    without, no_subject = (_ids(s[k]) for k in ("executed_without_frames", "no_single_object"))
+    neg = s["natural_negative_rounds"]
     lines = [f"# Cosmos shadow study of {s['run_id']}: a learned visual check, not verification", "", s["note"], "",
              f"- Status: {status}. Model `{s['model']}`, thinking {'on' if s['enable_thinking'] else 'off'}; config "
              f"{s['config']} on the {s['split']} seed set `{s['seed_set_hash'][:12]}`; {s['attempts']} attempts.",
              f"- Questions: {q['recorded']} recorded, {q['answered']} answered, {q['errors']} endpoint errors; "
-             f"injected frames skipped: {skipped}. Executed attempts without key frames, never asked about: "
-             f"{without}.",
+             f"injected frames skipped: {skipped}. Executed attempts never asked about: without key frames "
+             f"{without}; instruction names no single object {no_subject}.",
+             f"- Natural negatives: {neg['n']} executed rounds whose key frames fail a predicate, {neg['wrong_target']}"
+             f" of them rounds whose plan grasped another object than the instructed one.",
              f"- Latency per request: n {lat['request']['n']}, median {_s(lat['request']['median'])} s, p90 "
              f"{_s(lat['request']['p90'])} s, max {_s(lat['request']['max'])} s. Per question (with re-asks): median "
              f"{_s(lat['question']['median'])} s, p90 {_s(lat['question']['p90'])} s.", "",
@@ -519,15 +562,20 @@ def summary_markdown(s: dict[str, Any]) -> str:
              "latency median / p90 (s) |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for k in CLASSES:
         for stage, c in s["classes"][k].items():
+            if stage != "all" and not (c["n"] or c["errors"]):
+                continue  # e.g. a misaligned grasp exists at the grasp stage only
             lines.append(f"| {CLASS_LABELS[k]} | {stage} | {c['n']} | {c['pass']} | {c['fail']} | {c['uncertain']} | "
                          f"{_pct(c['fail_rate'])} | {_pct(c['pass_rate'])} | {_pct(c['uncertain_rate'])} | "
                          f"{c['errors']} | {_s(c['latency_s']['median'])} / {_s(c['latency_s']['p90'])} |")
     ba = s["balanced_accuracy"]
     lines += ["", "## Balanced accuracy", "",
               "The D34 pilot's measure (pass for predicate-true frames, fail for negatives; a final uncertain counts "
-              "as wrong). The D34 pilot measured 0.70 with thinking on, on 30 injected-negative frames.", "",
-              "| Negatives | " + " | ".join(ba["natural"]) + " |", "|---|" + "---|" * len(ba["natural"])]
-    lines += [f"| {name} | " + " | ".join(_s(v) for v in ba[name].values()) + " |" for name in ba]
+              "as wrong), with the predicate-true and negative N in brackets. The D34 pilot scored 30 frames (15 "
+              "predicate-true, 15 injected negatives: wrong object, offset grasp and outside the bin) with a lenient "
+              "parser: 0.70 with thinking on. Its D36 note puts that at about 0.60 under the strict parser used here.",
+              "", "| Negatives | " + " | ".join(ba["natural"]) + " |", "|---|" + "---|" * len(ba["natural"])]
+    lines += [f"| {name} | " + " | ".join(f"{_s(v['value'])} ({v['n_true']} / {v['n_false']})"
+                                          for v in ba[name].values()) + " |" for name in ba]
     lines += ["", "## The live gate replayed on the natural frames", "",
               "The gate asks the stages in order and stops at the first that does not pass. A round's frames are "
               "predicate true when all three stage predicates hold.", "",
