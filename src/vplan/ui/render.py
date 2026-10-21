@@ -24,8 +24,9 @@ from vplan.ui.views import CHECKS, body_name, scene_names, stage_name
 
 UI_SIZE_PX = 480  # sharp enough at 1080p; 512 px would add about 3 s to every execution render (384 px: 5.5 s)
 FOV_DEG = 45.0
-# (eye, target, up) in the world (= robot base) frame, m: the whole arm, the table workspace and the bin.
-OVERVIEW = ((1.75, -1.35, 1.25), (0.45, 0.1, 0.2), (0.0, 0.0, 1.0))
+# (eye, target, up) in the world (= robot base) frame, m: the whole arm, the objects, obstacles and the bin, framed
+# closely enough that the objects read at video size (tests keep every scene body in the picture).
+OVERVIEW = ((1.5, -1.1, 1.1), (0.45, 0.05, 0.33), (0.0, 0.0, 1.0))
 CLOSE_UP_OFFSET = (0.55, 0.1, 0.45)  # eye minus target for the close-up on highlighted bodies, m (from +x, above)
 HIGHLIGHT_RGBA = (1.0, 0.0, 1.0, 1.0)  # magenta: no scene colour uses it (sim.scene.COLORS)
 REPLAY_HZ = 60  # ExecutionRecord.q_replay rate (executor.REPLAY_EVERY at 240 Hz)
@@ -86,8 +87,10 @@ def highlight(h: SceneHandles, names: Sequence[str]) -> list[str]:
 
 def _segment(traj: CandidateTrajectory, f: Finding) -> int | None:
     """The finding's segment: label and source field together identify it (transport segments share a label but not
-    a source field); whole-plan checks name a plan field such as grasp.yaw_deg, so fall back to the first label."""
-    exact = [i for i, s in enumerate(traj.segments) if s.label == f.stage and s.source_field == f.plan_field]
+    a source field); whole-plan checks name a plan field such as grasp.yaw_deg, so fall back to the first label. A
+    collision after the last waypoint names transport_via (D74; place in earlier recordings): the leg into place."""
+    field = "place" if (f.stage, f.plan_field) == ("transport", "transport_via") else f.plan_field
+    exact = [i for i, s in enumerate(traj.segments) if s.label == f.stage and s.source_field == field]
     if exact:
         return exact[0]
     return next((i for i, s in enumerate(traj.segments) if s.label == f.stage), None)

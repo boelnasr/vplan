@@ -69,7 +69,7 @@ font-weight:700;line-height:1.35;white-space:nowrap}
 .vp-outcome-text{font-size:1.15rem;font-weight:600}
 .vp-card{border:1px solid var(--border-color-primary);border-radius:10px;padding:14px 16px;
 background:var(--block-background-fill)}
-.vp-kv{display:grid;grid-template-columns:fit-content(15em) 1fr;gap:5px 18px;margin:12px 0 0;font-size:1rem}
+.vp-kv{display:grid;grid-template-columns:fit-content(20em) 1fr;gap:5px 18px;margin:12px 0 0;font-size:1rem}
 .vp-kv dt{font-weight:600;color:var(--body-text-color-subdued);margin:0}
 .vp-kv dd{margin:0}
 .vp-round{border:1px solid var(--border-color-primary);border-radius:10px;padding:10px 14px;margin:0 0 10px;

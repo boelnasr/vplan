@@ -408,7 +408,18 @@ def judge_view(result: JudgeResult, names: Mapping[str, str] | None = None, no_t
 
 
 def plan_json(plan) -> str | None:
-    return None if plan is None else json.dumps(plan.model_dump(mode="json"), indent=2)
+    """The plan as indented JSON, with each list of numbers (a position, a waypoint) kept on one line."""
+    return None if plan is None else _json_lines(plan.model_dump(mode="json"), 0)
+
+
+def _json_lines(value, depth: int) -> str:
+    pad, inner = "  " * depth, "  " * (depth + 1)
+    if isinstance(value, dict) and value:
+        items = (f"{inner}{json.dumps(k)}: {_json_lines(v, depth + 1)}" for k, v in value.items())
+        return "{\n" + ",\n".join(items) + f"\n{pad}}}"
+    if isinstance(value, list) and value and any(isinstance(v, (dict, list)) for v in value):
+        return "[\n" + ",\n".join(f"{inner}{_json_lines(v, depth + 1)}" for v in value) + f"\n{pad}]"
+    return json.dumps(value, separators=(", ", ": "))
 
 
 def _call_problems(call: PlannerCall) -> list[str]:

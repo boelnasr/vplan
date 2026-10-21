@@ -1,5 +1,7 @@
 """W3.5 UI view models (spec §15): the check timeline, finding evidence, the Judge panel and the Cosmos banner are
 plain data built from records, so they are tested here without Gradio or PyBullet."""
+import json
+
 import pytest
 
 from tests.test_repair import generated
@@ -160,6 +162,13 @@ def test_plan_json_is_pretty_printed():
     view = views.round_view(rnd(0, PLAN, executed()), mode="repair")
     assert view.plan_json.startswith("{\n  ") and f'"target_id": "{PLAN.target_id}"' in view.plan_json
 
+
+
+def test_plan_json_keeps_each_coordinate_list_on_one_line():
+    view = views.round_view(rnd(0, PLAN, executed()), mode="repair")
+    position = json.dumps(list(PLAN.place.position), separators=(", ", ": "))
+    assert f'"position": {position}' in view.plan_json
+    assert json.loads(view.plan_json) == PLAN.model_dump(mode="json")  # still the same, valid JSON
 
 # ---- attempt, judge and banner -------------------------------------------------------------------------
 

@@ -260,7 +260,7 @@ All records are pydantic models, and JSONL lines are `model_dump_json()` output.
 | V-3 | Joint limits | a joint is within 2° of a limit, or over 100% of its velocity limit after timing | the segment |
 | V-4 | Singularity | σ_min(J_s) < σ_thr (definition below) | the segment |
 | V-5 | Continuity | a joint step > 0.2 rad between samples | the segment |
-| V-6 | Collision | closest distance < 0.01 m between the robot or carried object and the table, obstacles, bin or non-target objects, or between non-adjacent robot links, outside the allowed-contact list | the segment, `transport_via[i]` |
+| V-6 | Collision | closest distance < 0.01 m between the robot or carried object and the table, obstacles, bin or non-target objects, or between non-adjacent robot links, outside the allowed-contact list | the segment: `transport_via[i]` for the leg into waypoint i, `transport_via` for the leg after the last waypoint (all of the transport when there are none) [D74] |
 | V-7 | Grasp preconditions | the object center is outside the closing band (\|offset\| > 0.01 m), or the object width along the closing axis > 0.08 − 2×0.005 m, or the approach axis is off by > 10° | `grasp.*` |
 | V-8 | Release | the carried object's footprint is not fully inside the bin interior, the release height is out of range, or `place.position` z is not the resting height (bin floor + half the object height, ±0.005 m) | `place.*` |
 

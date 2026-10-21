@@ -1934,6 +1934,8 @@ All model and provider text is HTML-escaped.
 
 **Consequence:** the UI communicates the existing task, verifier and Judge results without changing planning, verification or execution behavior.
 
+**Addendum (Oct 20):** the overview camera (`ui/render.py`, scene picture and execution GIF) moves closer, from 2.2 m to 1.7 m from the workspace, so the objects read at video size; a test keeps the arm and every scene body in frame for the basic scene and several generated tasks. The plan JSON keeps each coordinate list on one line, so a whole plan fits in the panel without scrolling. Only the UI uses this camera; Cosmos frames and the D73 study are unaffected. Like the rest of W4.1, it changes the hashed source digest.
+
 ## D73. The Cosmos shadow study (W4.2, 2026-10-20)
 
 **What ran (spec §11 "Shadow study", config 4):** `vplan eval shadow` over the final config 3 run (`runs/dryrun-tf/c3-test`, D70), on the local GPU at no cost. Cosmos never influenced that run, so this measures what a visual gate would have caught or falsely rejected. It is a learned visual check, not verification, and makes no incremental-success claim.
@@ -1966,3 +1968,11 @@ All model and provider text is HTML-escaped.
 - **`uncertain` is mostly reply format:** 161 of the 168 final `uncertain` verdicts are replies the strict parser rejects (a VERDICT line without REASON, or a bare `pass`/`fail`). A lenient reading, as a one-off sensitivity check, gives 0.71 and 0.58; the conclusion stands.
 
 **Ruling (owner's plan, Oct 19):** Cosmos stays a shadow annotator and the opt-in, advisory demo gate of D47. These are `test` frames, so the question wording, cameras and parser are not tuned against them. The source change (`records.py`, `frames.py`, `gate.py`, `cli.py`, new `evaluate/shadow.py`) changes the hashed digest after the freeze (D68); week 4 `dev` runs need `--allow-source-drift` or a re-prepared seed set.
+
+## D74. A transport collision names the waypoints, not place (2026-10-20)
+
+**Problem (D70 finding):** the leg into the drop-off approach ends at a pose built from `place`, so its V-6 collision Finding named `plan_field` `place`. With no waypoints, the whole straight transport is that leg. Repair then often moved the drop-off point, which does not clear an obstacle between the object and the bin. Spec V-6 already names `transport_via[i]`; the code never produced the bare list name that the repair, planner and runner test fixtures already used.
+
+**Ruling (owner, Oct 20):** a V-6 collision on that leg names `transport_via`: the path after the last waypoint, or the empty list when there are none. A collision on the leg into waypoint i still names `transport_via[i]`. Only the collision check changes; IK accuracy, joint limits, singularity and continuity on that leg keep `place`, because they concern the pose. The `Segment` record and the approval token are unchanged. The UI draws a `transport_via` finding on the leg into the drop-off approach, and recordings made before, which name `place`, still match that leg.
+
+**Scope:** `verify/checks.py` and `ui/render.py`. It changes the hashed source after the freeze (D68), so it never touches the D70 numbers. Only feedback runs see it (config 3, and the live UI): config 1 has no feedback and config 7 resamples without it. Measuring it needs its own paired config 3 comparison on `dev`, run after W4.0 and not combined with the prompt change, so the two effects stay apart. That spend needs the owner's OK.

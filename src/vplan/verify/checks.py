@@ -119,8 +119,12 @@ def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.nda
     carrying = seg.carrying and tb is not None and attach is not None
     scene_bodies = {n: b for n, b in h.bodies.items() if not (carrying and n == target)}
 
+    # The leg into the drop-off approach ends at a pose built from place, but its path is the transport's: a
+    # collision there names the waypoints (spec V-6, D74). Other checks keep the pose's field.
+    field = "transport_via" if (seg.label, seg.source_field) == ("transport", "place") else seg.source_field
+
     def hit(k: int, dist: float, a: str, b: str, what: str) -> Finding:
-        return Finding(stage=seg.label, check="collision", plan_field=seg.source_field, measured=float(dist),
+        return Finding(stage=seg.label, check="collision", plan_field=field, measured=float(dist),
                        threshold=margin, sample_index=k, bodies=(a, b), direction=f"{what} ({dist * 100:.1f} cm)")
 
     for k, q in enumerate(seg.q):

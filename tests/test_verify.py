@@ -52,6 +52,21 @@ def test_transport_through_wall_is_collision(client) -> None:
     assert hit and "wall_1" in hit[0].bodies and hit[0].stage == "transport"
 
 
+@pytest.mark.parametrize("via", [(), ((0.48, 0.08, 0.10),)], ids=["no waypoints", "after the last waypoint"])
+def test_a_collision_on_the_leg_into_the_drop_off_names_the_waypoints(client, via) -> None:
+    """Spec V-6 names the transport path, not place: the leg after the last waypoint (the whole straight path when
+    there are none) is the transport, and moving the drop-off point does not clear it (D74)."""
+    f = run(plan(via=via), make_basic_scene(with_obstacle=True), client)
+    hit = [x for x in f if x.check == "collision"]
+    assert hit and "wall_1" in hit[0].bodies and (hit[0].stage, hit[0].plan_field) == ("transport", "transport_via")
+
+
+def test_a_collision_on_the_way_to_a_waypoint_names_that_waypoint(client) -> None:
+    f = run(plan(via=((0.45, 0.20, 0.12),)), make_basic_scene(with_obstacle=True), client)
+    hit = [x for x in f if x.check == "collision"]
+    assert hit and "wall_1" in hit[0].bodies and (hit[0].stage, hit[0].plan_field) == ("transport", "transport_via[0]")
+
+
 def test_wall_avoiding_plan_passes_obstacle_scene(client) -> None:
     assert run(plan(), make_basic_scene(with_obstacle=True), client) == []
 

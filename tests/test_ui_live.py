@@ -12,7 +12,7 @@ from tests.ui_fixtures import (JARGON, SECRET, basic_result, basic_task, enclose
 from vplan import pipeline
 from vplan.evaluate.pilot import PilotError
 from vplan.planners.heuristic import heuristic_geometry
-from vplan.ui import display, live, views
+from vplan.ui import display, live, render, views
 from vplan.visual import gate as visual_gate
 from vplan.visual.cosmos import CosmosUnavailable
 
@@ -89,6 +89,66 @@ def test_rejected_rounds_render_the_offending_bodies_highlighted():
     assert collision and all(magenta_pixels(s.image) > 50 for s in collision)
     assert all(s.close_up is not None and magenta_pixels(s.close_up) > magenta_pixels(s.image) for s in collision)
     assert result.execution_gif is None and result.execution_note == "Nothing was executed."
+
+
+def _outside_frame(h, camera, margin: float = 0.03) -> list[str]:
+    """Names of bodies (and robot links) with a bounding-box corner outside the camera's image, with a margin."""
+    import itertools
+
+    import numpy as np
+    import pybullet as p
+    eye, target, up = camera
+    view = np.reshape(p.computeViewMatrix(eye, target, up, physicsClientId=h.client), (4, 4), order="F")
+    proj = np.reshape(p.computeProjectionMatrixFOV(render.FOV_DEG, 1.0, 0.02, 6.0, physicsClientId=h.client), (4, 4),
+                      order="F")
+    boxes = [(n, p.getAABB(b, physicsClientId=h.client)) for n, b in h.bodies.items() if n != "table"]
+    boxes += [(f"link {j}", p.getAABB(h.robot, j, physicsClientId=h.client)) for j in range(-1, 12)]
+    out = []
+    for name, (lo, hi) in boxes:
+        for corner in itertools.product(*zip(lo, hi)):
+            clip = proj @ view @ np.append(corner, 1.0)
+            if np.any(np.abs(clip[:2] / clip[3]) > 1 - margin):
+                out.append(name)
+                break
+    return out
+
+
+@pytest.mark.parametrize("plan_field, leg", [("transport_via", -1), ("place", -1), ("transport_via[0]", 0)])
+def test_a_transport_finding_is_drawn_on_its_own_leg(plan_field, leg):
+    """A collision after the last waypoint names transport_via (D74); recordings made before name place. Both are the
+    leg into the drop-off approach, not the leg into waypoint 1."""
+    from vplan import records
+    from vplan.config import load_config
+    from vplan.motion.trajectory import build_trajectory
+    from vplan.robot import HOME_Q
+    task = basic_task()
+    plan = task.oracle.reference_plan
+    assert len(plan.transport_via) >= 1
+    traj = build_trajectory(plan, task.task.scene, HOME_Q, cfg=load_config("verifier"))
+    legs = [i for i, s in enumerate(traj.segments) if s.label == "transport"]
+    f = records.Finding(stage="transport", check="collision", plan_field=plan_field, measured=0.0, threshold=0.01,
+                        sample_index=0, bodies=("cube_red", "wall_1"), direction="x")
+    assert render._segment(traj, f) == legs[leg]
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 5, 8])
+def test_the_overview_keeps_the_arm_and_every_scene_body_in_frame(seed):
+    import pybullet as p
+
+    from vplan.robot import HOME_Q
+    from vplan.sim.scene import build_scene
+    for task in (basic_task(), live.generated_task(seed, "feasible")):
+        cid = render._client()
+        try:
+            assert _outside_frame(build_scene(task.task.scene, cid, HOME_Q), render.OVERVIEW) == []
+        finally:
+            p.disconnect(cid)
+
+
+def test_the_overview_frames_the_workspace_closely():
+    """The table's work area fills the picture: objects are not specks (the camera is no farther than 2 m)."""
+    eye, target, _ = render.OVERVIEW
+    assert sum((a - b) ** 2 for a, b in zip(eye, target)) ** 0.5 < 2.0
 
 
 def test_progress_display_follows_the_events():
