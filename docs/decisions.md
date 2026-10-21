@@ -1976,3 +1976,45 @@ All model and provider text is HTML-escaped.
 **Ruling (owner, Oct 20):** a V-6 collision on that leg names `transport_via`: the path after the last waypoint, or the empty list when there are none. A collision on the leg into waypoint i still names `transport_via[i]`. Only the collision check changes; IK accuracy, joint limits, singularity and continuity on that leg keep `place`, because they concern the pose. The `Segment` record and the approval token are unchanged. The UI draws a `transport_via` finding on the leg into the drop-off approach, and recordings made before, which name `place`, still match that leg.
 
 **Scope:** `verify/checks.py` and `ui/render.py`. It changes the hashed source after the freeze (D68), so it never touches the D70 numbers. Only feedback runs see it (config 3, and the live UI): config 1 has no feedback and config 7 resamples without it. Measuring it needs its own paired config 3 comparison on `dev`, run after W4.0 and not combined with the prompt change, so the two effects stay apart. That spend needs the owner's OK.
+
+
+## D75. The W4.0 prompt facts on `dev`: repair got worse, not merged (2026-10-22)
+
+**What ran (W4.0, owner's OK Oct 19, about $0.50):** `SYSTEM_PROMPT` gained five lines (`w4/prompt` e85afa9). They say:
+- left is world +y;
+- after the grasp the gripper visits lift (0.10 m straight up), each `transport_via` point, preplace (0.05 m above the release point) and release;
+- each move is a straight line that avoids nothing;
+- `transport_via` points are held-object centers;
+- the arm and the held object keep at least 0.01 m from obstacles, bin walls and other objects.
+
+These are facts, not fixes (D17), and tests tie each number to `motion/poses.py`, `config/verifier.json` and `tasks/referents.py`.
+- Seed set: `vplan eval prepare --seeds dev` at the frozen source (digest `1a023ffc…`): 100 tasks, 75 feasible and 25 impossible, 3 excluded, hash `1143c9aa…`.
+- Configs 1 and 3 on all 100 tasks, Token Factory Lightning, `--max-rpm 15`, the 60 s deadline. The frozen prompt ran on Oct 19; the new prompt on Oct 20, with `--allow-source-drift` (drift `planners/nemotron.py` only). Run directories are in `runs/w4-prompt/` (local). 692 calls, $0.52 at catalog prices.
+
+**Result (feasible success, 75 paired tasks; paired bootstrap, exact McNemar):**
+
+| Config | Frozen | New | Difference (95% CI) | p |
+|---|---|---|---|---|
+| 1, unverified | 34 (45.3%) | 37 (49.3%) | +4.0 (−6.7 to +14.7) | 0.61 |
+| 3, verify + repair | 50 (66.7%) | 42 (56.0%) | −10.7 (−26.7 to +4.0) | 0.24 |
+| 2, round 1 of 3 | 14 (18.7%) | 25 (33.3%) | +14.7 (+6.7 to +24.0) | 0.003 |
+
+- **Config 3:** an observed regression, not a statistically established loss, since the interval crosses zero.
+- **Service failures:** config 3 had 4 → 10 failed calls, 9 of them at the deadline. Leaving out the tasks that hit one changes little: config 3 is −10.6 (−27.3 to +6.1) on 66 tasks.
+- **Config 3 by scene:** with obstacles 37 → 25 of 56, −21.4 (−39.3 to −3.6), post hoc; without obstacles 13 → 17 of 19.
+
+**Findings:**
+- **Repair waypoints sit lower.** In config 3's obstacle tasks the new prompt proposed more waypoint plans (90 against 68), but lower ones:
+  - lowest waypoint 0.150 m against 0.200 m (medians);
+  - the held object's bottom −0.002 m against +0.034 m above the tallest obstacle;
+  - 15 of 90 passed the Verifier, against 30 of 68;
+  - budget exhaustion doubled (26 against 13).
+
+  The stated lift and clearance numbers seem to anchor the model on minimum-margin waypoints.
+- **First verified plans improve,** mostly without obstacles (config 2: 9 → 16 of 19).
+- **First plans still rarely use waypoints:** in config 1's obstacle tasks, 2 of 56 → 8 of 54.
+- **Longer replies:** output tokens are up 37–43%, and config 3's median answered latency went from 8.7 to 15.3 s.
+- **"Leftmost":** `dev` has only 5 feasible leftmost tasks (4 → 5 correct), too few to measure.
+- **Impossible tasks:** correct refusals went 9 → 7 (config 1) and 15 → 13 (config 3) of 25.
+
+**Ruling (owner, Oct 21–22, after a Codex second opinion):** not merged; the frozen prompt stays, and `w4/prompt` stays as the record. D74's own effect is measured next with the frozen prompt (W4.0b, D76, spend cap $0.20). Further prompt work (W4.0c, `w4/prompt2`) is deferred until after the video: its config 1 run is complete and its config 3 run was stopped at 30 of 100 tasks.
