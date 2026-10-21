@@ -103,19 +103,18 @@ The gate prints one line per checked stage. A Cosmos `fail` blocks the plan with
 ### Gradio UI (live and replay)
 
 ```powershell
-python -m vplan ui                                  # http://127.0.0.1:7860; the template heuristic plans, no key needed
+python -m vplan ui                                  # http://127.0.0.1:7860; the rule-based baseline plans, no key needed
 python -m vplan ui --replay runs/ui                 # open the recorded attempts in the Replay tab
 python -m vplan ui --cosmos-url http://127.0.0.1:8000/v1                      # add the live Cosmos gate
 python -m vplan ui --env-file path\to\llm.env --model <model id> [--allow-paid]  # add the Nemotron planner
 ```
 
-- **Live tab.** Pick the basic scene (with or without its wall) and type a template instruction such as "Pick the red cube and place it in the bin.", or pick a generated task by seed and kind (feasible, or impossible types 1–4). One attempt runs with verifier-feedback repair (k ≤ 3), and the panels fill in as it runs:
-  - the plan as JSON;
-  - a check timeline per round (V-1 … V-8), with the offending link or object and the measured clearance;
-  - each finding rendered with the offending bodies in magenta (overview and close-up);
-  - the Cosmos key frames and verdicts, or a banner saying the plan executes on the geometric checks only;
-  - the execution, played back as an animated image;
-  - the Judge's verdict.
+- **Live tab.** Pick a scene: the basic scene (with or without its wall) with a typed instruction such as "Pick the red cube and place it in the bin.", or a generated task by seed and type (solvable, or one of four impossible types; its instruction fills in and is locked). Choosing a scene loads it. One attempt runs with verifier-feedback repair (up to 3 rounds), and the numbered panels fill in as it runs:
+  - **1 Plan:** the plan as JSON;
+  - **2 Verify:** each round's checks by name, failures with the offending part and the measured clearance, the failing parts drawn in magenta (overview and close-up), and the Cosmos key frames and verdicts or a banner saying the plan executes on the geometric checks only;
+  - **3 Execute:** the execution, played back as an animated image;
+  - **4 Judge:** the verdict per criterion.
+- **Theme.** For a recording, open the page with `?__theme=light` (or `?__theme=dark`); otherwise it follows the system theme.
 - **Recording.** Every live attempt is saved under `runs/ui/` (`--record-dir`, `--no-record`).
 - **Replay tab.** Opens any of these:
   - a W3.1 run directory (pass its seed-set directory if the recorded path does not resolve on this machine);
