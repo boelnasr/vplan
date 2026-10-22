@@ -2096,3 +2096,22 @@ The output (`runs/video/vplan-demo.mp4`, `captions.srt`, `frames/`) is local and
 - The chapter is a live rule-based-baseline run on the basic scene with the Cosmos check on, served locally with D73's command. The plan passes all 8 checks, but Cosmos's pre-grasp replies could not be parsed, even after the third view, so nothing moved (`visual_uncertain`).
 - The captions say it is advisory, not verification, and cite the shadow study's 0.61 and 0.52 (the UI banner, boxed on screen, says the same).
 - Cosmos verdicts vary between runs: one probe falsely rejected the grasp. The take therefore reads the verdict from the page and uses the caption written for that outcome. All 9 new frames were checked, and the chapter was re-recorded once to fix a scene caption.
+
+## D79. The submission write-ups (W4.4, 2026-10-22)
+
+**What was written:**
+- **`README.md`, final for judges:**
+  - a summary, the D70 headline and the demo video (the YouTube link is still to fill in);
+  - the status, and the NVIDIA models and Nebius;
+  - the results, with the week 4 `dev` measurements (D75–D77) kept apart from D70;
+  - setup checked against `cli.py` and `pyproject.toml`;
+  - limitations (spec §18).
+- **`docs/submission/description.md`:** the Devpost text, about 790 words, including how the NVIDIA models are used.
+- **`docs/submission/feedback.md`:** the required feedback on the Nebius and NVIDIA tools, about 1,600 words.
+
+Both new files use only numbers recorded in this log and in `docs/results/`.
+
+**Open:**
+- the YouTube link;
+- `demo-once` still prints the pilot's 0.70 (D73 addendum);
+- `.env.example` lists `COSMOS_BASE_URL`, which no code reads.
