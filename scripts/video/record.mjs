@@ -9,7 +9,10 @@
 // reading time after the state is reached. A take that cannot find what its caption names throws instead of logging
 // a caption that does not match the screen: re-record it with --chapter.
 //
-//   node record.mjs [--url URL] [--chapter NAME[,NAME...]] [--out DIR] [--headed] [--list]
+//   node record.mjs [--url URL] [--chapter NAME[,NAME...]] [--cosmos] [--out DIR] [--headed] [--list]
+//
+// Without --chapter it records every chapter except the optional cosmos chapter, which needs the UI started with
+// --cosmos-url while the others need it without; --cosmos records that chapter alone.
 //
 // The UI must already run (see README.md). The replay chapters need it started with --replay on the c3-test run and
 // --seed-dir on its seed set.
@@ -33,6 +36,8 @@ const CHAPTERS = [
   { name: 'live', run: liveTake },
   { name: 'repair', run: repairTake },
   { name: 'refusal', run: refusalTake },
+  // Optional: needs the UI started with --cosmos-url (record it alone with --cosmos); every other take needs it off
+  { name: 'cosmos', run: cosmosTake, optional: true },
   { name: 'results', run: resultsTake },
   { name: 'closing', run: closingTake },
 ];
@@ -103,6 +108,10 @@ const CARDS = {
   refusal: cardPage(`
     <div class="kicker">Part 3 of 3</div><h2>Knowing when to refuse</h2>
     <p class="lead">Also recorded: a task the arm cannot do, from the same held-out evaluation.</p>`),
+  cosmos: cardPage(`
+    <div class="kicker">Optional</div><h2>A learned visual check</h2>
+    <p class="lead">NVIDIA Cosmos3-Edge, served locally, looks at rendered key frames after the checks pass. It is
+    advisory, never verification.</p>`),
   results: cardPage(`
     <h2 class="reveal" style="font-size:60px">Results on 300 held-out tasks</h2>
     <div class="lead reveal" style="font-size:30px;margin-top:14px;animation-delay:.2s">NVIDIA Nemotron 3.5 Lightning on
@@ -518,6 +527,8 @@ async function liveTake(take) {
 
   await take.caption('1 Plan: a typed plan with the grasp, waypoints over the wall and the drop-off point.');
   await take.expectText(ui.plan(page), /transport_via/, 'the plan JSON');
+  await take.expectText(tab(page).locator('.vp-banner'), /Cosmos visual check off/,
+    'the Cosmos-off banner (start the UI without --cosmos-url for this take)');
   await take.box(ui.plan(page));
   await take.hold(4.5);
 
@@ -642,6 +653,77 @@ async function refusalTake(take) {
   await take.hold(4.5);
 }
 
+// The Cosmos gate's verdicts vary between runs (D73: false rejections, and replies the strict parser cannot read), so
+// this take reads the round's verdict from the page and takes the caption written for it.
+async function cosmosTake(take) {
+  const { page } = take;
+  await take.card('cosmos', 3);
+  const t0 = take.now();
+  await openPage(take);
+  // One round only: the chapter shows one plan and what Cosmos makes of it (the slider stays visible at 0)
+  const rounds = tab(page).locator('.block').filter({ hasText: 'Repair rounds' });
+  await rounds.locator('input[type="number"]').fill('0');
+  await rounds.locator('input[type="number"]').press('Enter');
+  await page.waitForFunction(() => [...document.querySelectorAll('input[type="range"]')]
+    .some((r) => r.offsetParent && r.value === '0'), null, { timeout: 10_000 });
+  await take.scrollToY(0, false);
+  take.cutSince(t0, 'page load');
+
+  await take.caption('Now with the Cosmos visual check on: the same rule-based baseline, on the basic scene without ' +
+    'the wall.', { pos: 'top' });
+  await take.hold(0.6);
+  await take.click(ui.button(page, 'Plan, verify, execute'), 'Plan, verify, execute');
+  await take.hold(1.2);
+  await take.until('the Cosmos verdicts', async () => {
+    await ui.outcome(page).waitFor({ state: 'visible', timeout: 120_000 });
+    await liveIdle(page);
+  });
+  await take.painted();
+  const banner = tab(page).locator('.vp-banner');
+  await take.expectText(banner, /Cosmos visual check on: a learned, advisory check.*0\.61.*0\.52/,
+    'the Cosmos-on banner with the shadow-study numbers (start the UI with --cosmos-url for this take)');
+  const round = ui.rounds(page).first();
+  const visual = await round.evaluate((r) => {
+    const badge = r.querySelector('.vp-visual .vp-badge');
+    const rows = [...r.querySelectorAll('table.vp-checks')].filter((t) => /Moment/i.test(t.innerText))
+      .flatMap((t) => [...t.querySelectorAll('tr')].slice(1).map((tr) => [...tr.cells].map((c) => c.innerText.trim())));
+    return { status: badge ? badge.innerText.replace(/[^A-Za-z]/g, '') : null, rows };
+  });
+  log(`cosmos: the gate said ${visual.status}; ${visual.rows.map((r) => `${r[0]}: ${r[2]} (${r[3]})`).join('; ')}`);
+  const stage = { pregrasp: 'pre-grasp', grasp: 'grasp', prerelease: 'pre-release', pre_release: 'pre-release' };
+  let verdict;
+  if (visual.status === 'Fail') {
+    const failed = visual.rows.find((r) => /Fail/.test(r[2]));
+    const where = stage[failed?.[0]] ?? failed?.[0];
+    verdict = `The eight checks pass, but Cosmos rejects the plan at the ${where} frame, so nothing moves.`;
+  } else if (visual.status === 'Unsure') {
+    verdict = 'The eight checks pass, but Cosmos gives no usable answer, even with a third view, so nothing moves.';
+  } else if (visual.status === 'Pass') {
+    verdict = 'The eight checks pass, and Cosmos agrees at every key frame, so the plan runs.';
+  } else {
+    throw new TakeError(`cosmos: the gate reported ${visual.status ?? 'nothing'}; is the Cosmos server answering?`);
+  }
+  await take.expectText(round, /All 8 checks ran/, 'all eight checks passed');
+
+  await take.caption('It is advisory, not verification: in our shadow study its balanced accuracy was 0.61 on real ' +
+    'attempts and 0.52 on injected errors.', { pos: 'top' });
+  await take.box(banner);
+  await take.hold(4.5);
+
+  await take.scrollTo(ui.step(page, 'Verify'), 20);
+  await take.caption(verdict);
+  await take.box(round);
+  await take.hold(4.5);
+
+  const gallery = tab(page).locator('.block:has(.grid-wrap)').filter({ hasText: 'What Cosmos saw' });
+  await take.caption(visual.status === 'Pass'
+    ? 'These are the frames it saw. Even when it agrees, it only advises: the checks decide.'
+    : 'These are the frames it saw. The plan passed every check, yet it was stopped: this is why Cosmos stays advisory.',
+  { pos: 'top' });
+  await take.box(gallery);
+  await take.hold(4.5);
+}
+
 // ---- recording ---------------------------------------------------------------------------------------------------
 
 function log(message) {
@@ -700,7 +782,8 @@ async function recordChapter(browser, chapter, opts) {
 }
 
 function parseArgs(argv) {
-  const opts = { url: DEFAULT_URL, chapters: null, out: path.join(REPO, 'runs', 'video'), headed: false, list: false };
+  const opts = { url: DEFAULT_URL, chapters: null, out: path.join(REPO, 'runs', 'video'), headed: false, list: false,
+    cosmos: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -711,9 +794,10 @@ function parseArgs(argv) {
     else if (a === '--chapter') opts.chapters = [...(opts.chapters ?? []), ...value().split(',')];
     else if (a === '--out') opts.out = path.resolve(value());
     else if (a === '--headed') opts.headed = true;
+    else if (a === '--cosmos') opts.cosmos = true;
     else if (a === '--list') opts.list = true;
     else if (a === '-h' || a === '--help') {
-      log('usage: node record.mjs [--url URL] [--chapter NAME[,NAME...]] [--out DIR] [--headed] [--list]');
+      log('usage: node record.mjs [--url URL] [--chapter NAME[,NAME...]] [--cosmos] [--out DIR] [--headed] [--list]');
       process.exit(0);
     } else throw new Error(`unknown argument ${a}`);
   }
@@ -723,16 +807,19 @@ function parseArgs(argv) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.list) {
-    log(CHAPTERS.map((c) => c.name).join('\n'));
+    log(CHAPTERS.map((c) => c.name + (c.optional ? ' (optional: --cosmos)' : '')).join('\n'));
     return;
   }
   const names = CHAPTERS.map((c) => c.name);
   const unknown = (opts.chapters ?? []).filter((n) => !names.includes(n));
   if (unknown.length) throw new Error(`unknown chapter ${unknown.join(', ')} (chapters: ${names.join(', ')})`);
-  const chosen = opts.chapters ? CHAPTERS.filter((c) => opts.chapters.includes(c.name)) : CHAPTERS;
+  const wanted = [...(opts.chapters ?? []), ...(opts.cosmos ? ['cosmos'] : [])];
+  const chosen = wanted.length ? CHAPTERS.filter((c) => wanted.includes(c.name)) : CHAPTERS.filter((c) => !c.optional);
   await fs.mkdir(opts.out, { recursive: true });
-  // burn.mjs joins the chapters in this order (the full list, also when only some chapters are re-recorded)
-  await fs.writeFile(path.join(opts.out, 'order.json'), `${JSON.stringify(names)}\n`);
+  // burn.mjs joins the chapters in this order (the full list, also when only some chapters are re-recorded); an
+  // optional chapter joins only once it is recorded
+  const order = { chapters: names, optional: CHAPTERS.filter((c) => c.optional).map((c) => c.name) };
+  await fs.writeFile(path.join(opts.out, 'order.json'), `${JSON.stringify(order)}\n`);
   opts.playwrightVersion = JSON.parse(await fs.readFile(path.join(HERE, 'node_modules', 'playwright', 'package.json'), 'utf8')).version;
 
   // The UI asks for Segoe UI and Consolas; on WSL, fonts.conf points this Chromium (only) at the Windows copies, so
