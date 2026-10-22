@@ -1,10 +1,24 @@
 # vplan: LLMs plan, physics verifies
 
-A language model proposes a pick-and-place plan for a Franka Panda arm. Deterministic kinematic and collision checks then approve or reject the plan **before anything moves**. A rejected plan comes back with structured findings the model can use to repair it. An independent Judge scores every executed run in physics simulation.
+NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda arm, and deterministic kinematic and collision checks approve or reject it **before anything moves**. Rejected plans go back to the model with structured findings for repair, and an independent Judge scores every executed run in PyBullet physics.
 
-Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/) (Physical AI track, simulation only). The planner is NVIDIA **Nemotron**: **3.5 Lightning** for the evaluation and **3 Ultra** for the live demo, both served by **Nebius Token Factory** in the final runs (D62).
+> **Bounded repair with verifier feedback raised Nemotron 3.5 Lightning's task success from 24.7% (verified first attempts) to 65.0% across 300 held-out, reference-solvable generated tasks. At equal budget, feedback beat resampling by 29.3 points (95% CI 23–36).**
+>
+> Nemotron 3.5 Lightning on Nebius Token Factory, held-out `test` set, Oct 18 (D70). Intervals and every configuration are under [Results](#results).
 
-> **Status: week 4 of 4.** The final held-out evaluation ran on Nebius Token Factory on Oct 18 ([results below](#results), D70), and the Cosmos shadow study on Oct 19 (D73). The plan → verify → execute → judge loop runs with both a rule-based planner and Nemotron (3 Ultra and 3.5 Lightning). Also in place: a task generator with provably impossible tasks, verifier-feedback repair, keyless replay of recorded runs, a demo-only Cosmos visual gate, the evaluation pipeline (frozen seed sets, a supervised resumable runner and a self-contained HTML report) and a Gradio UI that shows live attempts and replays recorded ones without keys. ManipulaPy 1.4.2 carries the upstream fixes this project needed ([below](#manipulapy-updates-during-the-submission-period)). Still to come in week 4: planner-prompt work on the `dev` set, the demo video and the submission write-ups.
+## Demo video
+
+[Watch on YouTube](<YOUTUBE_LINK>): 2:54, silent with burned-in captions, more than two minutes of it showing the modules in action.
+
+- **Live run:** the Gradio UI plans, verifies, executes and judges one task on the basic scene with a wall. The planner in this part is the rule-based baseline, so no key is needed.
+- **Repair (replay):** a recorded Nemotron 3.5 Lightning attempt from the held-out evaluation, replayed without keys. The checks reject a drop-off 8 cm too high, then a 0.95 cm transport clearance against the 1 cm minimum; the third plan adds high waypoints, executes and is judged a success.
+- **Refusal (replay):** Nemotron refuses an out-of-reach target and says why.
+- **Cosmos check (live):** a rule-based run with the Cosmos gate on. The plan passes all 8 checks, but Cosmos's replies cannot be read even with a third view, so nothing moves. It is captioned as advisory, with the shadow study's balanced accuracy of 0.61 and 0.52.
+- **Results:** the D70 numbers.
+
+The video makes no live Nemotron calls (D78). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md).
+
+> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 22, D78). Planner-prompt work on the `dev` set stays open (D77); it never changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
 
 ## How it works
 
@@ -27,11 +41,22 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 - **Repair:** when the verifier blocks a plan, `run_task` sends its findings back to the planner (fixed-text directions, never a ready-made fix) and tries again within a call budget.
 - **Cosmos gate (demo only, optional):** after the verifier passes a plan, NVIDIA **Cosmos3-Edge** looks at rendered key frames (pre-grasp, grasp, pre-release) and can still block it. It is a learned visual check, not verification: it can add rejections but never approves a geometric failure, and the evaluation uses physics only (D34, D47).
 
+**Diagrams:** [system overview](docs/diagrams/system-overview.html) and [one attempt](docs/diagrams/attempt-loop.html), each with a `-dark` variant in [`docs/diagrams/`](docs/diagrams/). They are self-contained HTML files with inline SVG; GitHub shows their source, so download them and open them in a browser.
+
+## NVIDIA models and Nebius
+
+| Model | Role | Served by |
+|---|---|---|
+| Nemotron 3.5 Lightning, `nvidia/Nemotron-3_5-Lightning` | Planner in every evaluation configuration (D62) | Nebius Token Factory: 2,510 calls in the final runs, about $1.61 at catalog prices (D70) |
+| Nemotron 3 Ultra, `nvidia/Nemotron-3-Ultra-550b-a55b` | Planner for live demos in the UI (D62) | Nebius Token Factory |
+| Cosmos3-Edge, `nvidia/Cosmos3-Edge` | Advisory learned visual check: the opt-in demo gate and the shadow study (D47, D73) | vLLM on a local 16 GB GPU |
+
+- **Forced tool calls.** Both Nemotron models get one tool, `submit_plan`, whose parameters are the plan schema, and a forced `tool_choice`. Token Factory tags no Nemotron for JSON mode, so the tool call is the structured-output path (D13). In the Token Factory smoke test, Lightning returned 19 valid forced tool calls of 20 (the other hit a client-side connect timeout) and Ultra 20 of 20, with every reply carrying its `kind`; median 8.2 s and 8.6 s, slowest 28.5 s (D13).
+- **No Serverless Jobs.** The hackathon credit covers tokens, so the evaluation batch ran locally, with the [R8 container](#setup) as its reproducible environment (D57).
+
 ## Results
 
 The held-out `test` seed set holds 300 feasible and 100 provably impossible generated tasks (seed-set hash `834d1931…`). Every Nemotron configuration used **Nemotron 3.5 Lightning on Nebius Token Factory**, with a 60 s deadline per call ([D70](docs/decisions.md)). The full report is [`docs/results/report.html`](docs/results/report.html), a self-contained file to download and open in a browser; its numbers are in [`metrics.json`](docs/results/metrics.json).
-
-> **Bounded repair with verifier feedback raised Nemotron 3.5 Lightning's task success from 24.7% (verified first attempts) to 65.0% across 300 held-out, reference-solvable generated tasks. At equal budget, feedback beat resampling by 29.3 points (95% CI 23–36).**
 
 | Config | Planner and gate | Feasible success (n = 300) | 95% CI | Impossible tasks refused (n = 100) | Executions with a safety violation |
 |---|---|---|---|---|---|
@@ -46,23 +71,34 @@ The held-out `test` seed set holds 300 feasible and 100 provably impossible gene
 - **The verifier is conservative.** Unverified first attempts succeed more often (43.3%) than verified ones (24.7%), because the verifier also blocks plans the Judge would pass, for example clearances under its 1 cm threshold. Repair more than recovers the gap.
 - **Where Lightning fails.** It almost never gives transport waypoints (212 of 218 unverified plans for feasible tasks with obstacles), and the motion layer does not avoid obstacles by design (spec §2), so the carried object hits them. Unverified success falls from 58 of 75 obstacle-free tasks to 20 of 75 with three obstacles. With repair it stays between 45 and 51 of 75 at every obstacle count.
 - **Refusals are the weak spot.** Lightning refuses 40–57 of the 100 impossible tasks, and no planner refuses an enclosed target (type 3, 0 of 25 in every config). The verifier blocks most of the rest before they move. One wrongly refused feasible task in 900 Lightning attempts on feasible tasks.
-- **Cost and reliability.** 2,510 Token Factory calls cost about $1.61 (median 7.5–8.7 s per call). 35 calls (1.4%) failed at the provider and count as failures, which is why the report title says "DEGRADED".
-- These findings were made on `test`, so the frozen prompt stays as it is for these numbers. Prompt work moves to week 4 on `dev` (D70).
+- **The heuristic's 100% is by construction.** A feasible task is accepted only if the heuristic's witness plan passes and the Judge accepts it (D38), so config 5 checks the pipeline end to end; it is not a rival planner.
+- **Cost and reliability.** 2,510 Token Factory calls cost about $1.61 at catalog prices (median 7.5–8.7 s per call). 35 calls (1.4%) failed at the provider and count as failures, which is why the report title says "DEGRADED".
+- These findings were made on `test`, so the frozen prompt stays as it is for these numbers. Prompt work moved to week 4 on `dev` (D70).
+
+**Development measurements on `dev` (week 4).** These ran after the freeze on the 100-task `dev` set (75 feasible), with Token Factory Lightning, each paired with a frozen-prompt run on the same tasks. They never change the D70 headline above.
+
+- **First prompt revision: not merged (D75).** Stating the lift and clearance numbers anchored repair waypoints too low. Config 3 (repair) fell from 50 to 42 of 75, −10.7 points (95% CI −26.7 to +4.0): an observed regression, not an established one, since the interval crosses zero. Verified first attempts (config 2) rose from 14 to 25.
+- **Transport collisions name the waypoints: kept (D74, D76).** A collision on the transport leg now names `transport_via` instead of `place`. With the frozen prompt, config 3 showed no harm and fewer exhausted repairs (13 against 18), but no established success gain: −2.7 points (−17.3 to +12.0), or +8.5 (−6.8 to +23.7) on the 59 tasks without a provider failure on either side. It ran on a slow provider day.
+- **A revised prompt on top of D74: open (D77).** Config 1 is complete, 29 of 75 against 34 (−6.7 points, −17.3 to +2.7); config 3 stopped at 47 of 100 tasks. It is to be revisited with a complete paired config 3 run.
+
+The three measurements cost $0.79 at catalog prices (D77).
 
 **Cosmos shadow study (config 4, [D73](docs/decisions.md)).** NVIDIA **Cosmos3-Edge**, served locally, answered the live gate's three stage questions about the key frames of all 215 executed config 3 attempts, plus 692 injected wrong-object and misaligned-grasp renders: 1,337 questions, scored against simulator state predicates. It never influenced the evaluation, so this measures only what a visual gate would have caught, not added success. It is not a usable gate: it falsely rejected 27% of correct pre-release frames (it reads the object as inside the bin, not over it), caught 1 of 159 wrong-object pre-grasps and 25 of 196 misaligned grasps, and reached balanced accuracy 0.61 against natural negatives and 0.52 against injected ones, at 1.3 s per request. The demo's Cosmos gate stays an advisory, learned check. Summary: [`docs/results/shadow/summary.md`](docs/results/shadow/summary.md).
 
 ## Setup
 
-Requires **Python 3.10**.
+Requires **Python 3.10** (`pyproject.toml` allows 3.10 only).
 
 ```bash
 pip install "ManipulaPy[simulation]==1.4.2" pybullet==3.2.7 numpy==2.2.6 pydantic==2.13.5 openai==3.24.0 matplotlib==3.10.9 gradio==6.30.0 pytest==9.1.1
-cp .env.example .env   # LLM endpoint and key for the Nemotron planner; never commit .env
+cp .env.example .env   # only for Nemotron: LLM_BASE_URL, LLM_API_KEY, LLM_MODEL; never commit .env
 ```
 
-The pinned versions are listed in [`pyproject.toml`](pyproject.toml).
-
-On Windows, `pip` may build pybullet from source, which needs the MSVC build tools.
+- The pinned versions are listed in [`pyproject.toml`](pyproject.toml). There is no console script; run everything as `python -m vplan` from the repo root with `src` on `PYTHONPATH` ([Run](#run)).
+- No command reads `.env` by itself: the Nemotron commands take the file with `--env-file`. For Token Factory, set `LLM_BASE_URL=https://api.tokenfactory.nebius.com/v1/` and pass `--allow-paid`, because without it only free `nvidia/...:free` models on OpenRouter run (D33). The rule-based planner, replay and the tests need no key.
+- On Windows, `pip` may build pybullet from source, which needs the MSVC build tools.
+- **Linux container:** `docker/run-local.sh` builds the locked image and runs the test suite and 10 tasks inside it, with no network and no env file (R8).
+- **Demo video:** the recorder (Node, Playwright and ffmpeg; not Python dependencies) has its own setup in [`scripts/video/README.md`](scripts/video/README.md).
 
 ## ManipulaPy updates during the submission period
 
@@ -83,22 +119,24 @@ On Windows (PowerShell), from the repo root:
 ```powershell
 $env:PYTHONUTF8 = "1"        # UTF-8 file and console I/O on Windows
 $env:PYTHONPATH = "src;."    # use "src:." on Linux/macOS
-python -m vplan demo-once                     # one attempt, headless
+python -m vplan demo-once                     # one rule-based attempt on the basic scene, headless, no key
 python -m vplan demo-once --obstacle --gui    # with a wall in the way, watched in the PyBullet GUI
 python -m pytest -q                           # test suite (~100 s)
 ```
 
-`demo-once` prints the outcome, any verifier findings and the Judge result. It exits `0` when the Judge reports success.
+`demo-once` plans with the rule-based heuristic (no model call), then prints the outcome, any verifier findings and the Judge result. It exits `0` when the Judge reports success.
 
 ### Live Cosmos gate (optional, demo only)
 
-Serve `nvidia/Cosmos3-Edge` with an OpenAI-compatible endpoint (we use vLLM on a local 16 GB GPU), then pass its URL:
+Serve `nvidia/Cosmos3-Edge` with an OpenAI-compatible endpoint, then pass its URL:
 
 ```powershell
 python -m vplan demo-once --cosmos-url http://127.0.0.1:8000/v1
 ```
 
-The gate prints one line per checked stage. A Cosmos `fail` blocks the plan with one visual finding; `uncertain` is re-asked once with a side view and otherwise stops the attempt. If the endpoint is down or errors, the run says so and executes on the physics checks alone. The first live check showed false rejections and 6–16 s per question, so treat its verdicts as advisory.
+- **What we ran (D34, D47, D73):** vLLM 0.31.0 in its own environment on an RTX 5070 Ti (16 GB), model revision `344d602b…`, listening on `127.0.0.1:8000`, with `--max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 --limit-mm-per-prompt '{"image":3,"video":0}' --mm-processor-kwargs '{"do_resize":true,"min_pixels":4096,"max_pixels":409600}'` and `VLLM_USE_FLASHINFER_SAMPLER=0` (the FlashInfer sampler compiles at startup and needs `nvcc`). It used 15.2 of 16.3 GB.
+- **Behaviour:** the gate prints one line per checked stage. A Cosmos `fail` blocks the plan with one visual finding; `uncertain` is re-asked once with a side view and otherwise stops the attempt. If the endpoint is down or errors, the run says so and executes on the physics checks alone.
+- **Treat its verdicts as advisory.** In the shadow study it falsely rejected 27% of correct pre-release frames, at 1.3 s median per request ([Results](#results), D73).
 
 ### Gradio UI (live and replay)
 
@@ -123,7 +161,7 @@ python -m vplan ui --env-file path\to\llm.env --model <model id> [--allow-paid] 
 
   Replay needs no `.env`, no keys, no GPU and no network: Gradio's telemetry is off, and the page loads nothing from the internet.
   It opens paths only under the working directory, `--record-dir`, `--replay` and `--seed-dir`, and never network (UNC) paths.
-- **Credentials.** They come only from the file named by `--env-file`. Without `--allow-paid`, only free `nvidia/...:free` models on OpenRouter run (D33). Every planner call has the spec's 60 s deadline (D63).
+- **Credentials.** They come only from the file named by `--env-file`. Without `--allow-paid`, only free `nvidia/...:free` models on OpenRouter run (D33). The live demo planner is Nemotron 3 Ultra on Token Factory: `--model nvidia/Nemotron-3-Ultra-550b-a55b --allow-paid` (D62). Every planner call has the spec's 60 s deadline (D63).
 - **Serving.** The server listens on 127.0.0.1. With Windows Python under WSL2 (NAT networking), a browser inside WSL cannot reach that address. Pass `--host` with the Windows address of the WSL network (the default gateway in WSL's `ip route`) instead of `0.0.0.0`, which would expose the planner to the LAN. `vplan ui` warns whenever `--host` is not a loopback address.
 
 ## Feedback pilot
@@ -201,7 +239,7 @@ python -m vplan eval shadow --run runs/<c3_run> --cosmos-url http://127.0.0.1:80
 - **Provenance:** every manifest records the git commit (read from `.git` directly when the git command is unavailable); `eval run` refuses to start without one unless `--allow-no-git`.
 - **Frames:** config 3 saves 9 key frames per executed attempt under `frames/` for the Cosmos shadow study (`--frames`/`--no-frames` to change). Report wall times exclude the rendering.
 - **The report labels its own status:** INCOMPLETE, LIMITED and DEGRADED (provider failures) runs, and a "not a headline result" stamp unless configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. The repair gain (3 − 2) includes the extra attempts. Only the feedback gain (3 − 7) separates feedback from retrying at the same budget.
-- **Container (R8):** `docker/run-local.sh` builds the locked Linux image and runs the test suite and 10 tasks inside it, with no network and no env file.
+- **Container (R8):** the reproducible environment for a batch is the locked Linux image ([Setup](#setup)).
 
 ### Metric definitions
 
@@ -224,6 +262,14 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 - **Breakdowns:** by stratum (distractors × obstacles, feasible tasks), by diagnostic attribution (spec §10), and by tokens and latency per configuration. Latency excludes the key-frame rendering.
 - **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Everything else is labelled a dry run or a development result. The final runs meet these conditions (D70).
 
+## Limitations
+
+- **Simulation only.** There is no physical robot. Grasping is attachment-assisted: a kinematic constraint at the grasp pose, not contact-based grasp reliability (spec §2).
+- **Independent logic on the same engine.** The Judge shares no code with the Verifier and computes its own Jacobian, but both rely on PyBullet: the Verifier for its distance queries, the Judge for the executed run.
+- **No obstacle avoidance in the motion layer** (spec §2). Clearing obstacles is the planner's job, through `transport_via`.
+- **One task family on generated scenes:** pick-and-place into one bin; feasible tasks have 0–3 distractors and 0–3 obstacles.
+- **Cosmos is advisory.** The shadow study measures what a visual gate would have caught or falsely rejected; it makes no success claim, and the evaluation uses physics only.
+
 ## Repository layout
 
 | Path | Contents |
@@ -244,8 +290,9 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `src/vplan/sim/` | PyBullet scene building and self-collision exclusions |
 | `src/vplan/evaluate/` | Seed sets, the supervised evaluation runner, the feedback pilot, statistics, metrics and the HTML report |
 | `docker/` | The locked Linux image and the R8 local check |
+| `scripts/video/` | The scripted demo-video recorder ([README](scripts/video/README.md), [storyboard](scripts/video/storyboard.md)) |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
-| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [related work](docs/related-work.md), reviews |
+| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [diagrams](docs/diagrams/), [submission texts](docs/submission/), [related work](docs/related-work.md), reviews |
 
 ## Conventions
 
