@@ -2184,3 +2184,16 @@ Both new files use only numbers recorded in this log and in `docs/results/`.
 **Result:** every chapter re-recorded on Oct 22–23. `runs/video/vplan-demo.mp4` runs **2:56.9** (176.9 s), 1080p30, with 29 captions; 2:03 of it shows the modules in action (live, repair, refusal and Cosmos). All 74 event frames were checked. One take was re-recorded: a single box around the Verifier and the planner cut through the Cosmos node, so the findings caption now draws two boxes. The previous cut is kept locally as `vplan-demo.d78.mp4`.
 - The Cosmos take got Fail at the grasp frame this time: Cosmos said the cube was already held, a false rejection of a plan that passed all 8 checks. The take uses the caption written for that outcome (D78 addendum).
 - No live Nemotron calls and no cost.
+
+## D84. Richer collision evidence is merged after the evaluation (2026-10-23)
+
+**Ruling (owner, Oct 23):** merge `w4/evidence` (D80) into `main`, reversing D80's "not merged" for the submission.
+
+**What it changes:** only the `direction` text of a collision Finding: which part came too close to what kind of body, in which phase, and the part's vertical gap to that body's top. `measured`, `threshold`, `bodies`, `plan_field`, `stage` and `sample_index` are unchanged, so every check's verdict is the same; only the text sent back for repair differs. `verifier.py` passes the scene to `checks.collision`.
+
+**Consequences:**
+- The published numbers come from the code before it: D70 from the frozen `32cbd6d`, D82 from `0e4d54b`. `main` now differs from both in this direction text.
+- Only config 3 (repair) can change, since configs 1, 2 and 7 send no Findings. Its effect on `test` is not measured; the measured effect is on `dev`, +7.3 points over two pairs (−2.0 to +17.3), not established.
+- A `test` measurement needs config 3 again: about $0.65 with Lightning, paired with D70's config 3 on another day, or about $5.60 with Ultra, which is likely more than the credit left. Not run; it needs the owner's OK.
+- Live repair rounds in the UI now get the richer directions. The video replays recorded attempts and is unchanged.
+- The full suite passes on the merge: 1266 tests.

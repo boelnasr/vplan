@@ -38,6 +38,6 @@ We then ran Nemotron 3 Ultra on the same 300 tasks. It reached 92.7% with repair
 
 ## What's next
 
-- Finish testing a revised prompt that states the motion facts without numbers, and richer collision evidence, which added +7.3 points over two paired development runs (CI −2.0 to +17.3).
+- Finish testing a revised prompt that states the motion facts without numbers, and measure the richer collision evidence we merged after the evaluation on the held-out set: it added +7.3 points over two paired development runs (CI −2.0 to +17.3).
 - Refusals: Lightning never refused an enclosed target (0 of 25 in every configuration); Ultra refused 17–24 of 25.
 - Cosmos: 49 of its 53 false pre-release rejections said the object was inside the bin, not over it. A reworded question needs fresh frames, not the held-out ones.

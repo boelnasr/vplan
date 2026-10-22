@@ -21,7 +21,7 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 
 The video makes no live Nemotron calls (D78, D83). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md).
 
-> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt and feedback work on the `dev` set stays open (D77, D80); it never changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
+> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt work on the `dev` set stays open (D77), and richer collision evidence was merged after the evaluation (D84); neither changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
 
 ## How it works
 
@@ -97,7 +97,7 @@ The held-out `test` seed set holds 300 feasible and 100 provably impossible gene
 - **First prompt revision: not merged (D75).** Stating the lift and clearance numbers anchored repair waypoints too low. Config 3 (repair) fell from 50 to 42 of 75, −10.7 points (95% CI −26.7 to +4.0): an observed regression, not an established one, since the interval crosses zero. Verified first attempts (config 2) rose from 14 to 25.
 - **Transport collisions name the waypoints: kept (D74, D76).** A collision on the transport leg now names `transport_via` instead of `place`. With the frozen prompt, config 3 showed no harm and fewer exhausted repairs (13 against 18), but no established success gain: −2.7 points (−17.3 to +12.0), or +8.5 (−6.8 to +23.7) on the 59 tasks without a provider failure on either side. It ran on a slow provider day.
 - **A revised prompt on top of D74: open (D77).** Config 1 is complete, 29 of 75 against 34 (−6.7 points, −17.3 to +2.7); config 3 stopped at 47 of 100 tasks. It is to be revisited with a complete paired config 3 run.
-- **Richer collision evidence: promising, not merged (D80).** A collision Finding also says which part hit what kind of body, and how far the part's bottom sits below the body's top. Two paired config 3 runs: 53 → 55 and 49 → 58 of 75; together +7.3 points (−2.0 to +17.3). It stays on its branch, because the Ultra `test` runs used `main` without it.
+- **Richer collision evidence: merged after the evaluation (D80, D84).** A collision Finding also says which part hit what kind of body, and how far the part's bottom sits below the body's top. Two paired config 3 runs: 53 → 55 and 49 → 58 of 75; together +7.3 points (−2.0 to +17.3), not established. It was merged after the `test` runs, so the numbers above come from the code before it, and its effect on `test` is not measured.
 - **Earlier rounds as facts: dropped (D81).** 53 → 51 of 75, with more repeated failures.
 - **Nemotron 3 Ultra (D82).** Config 3: 66 of 75 against Lightning's 53 on the same tasks, +17.3 points (+5.3 to +29.3), with 1 exhausted repair against 13.
 
