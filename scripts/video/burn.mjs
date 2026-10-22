@@ -5,12 +5,12 @@
 // writes:
 //   ass/<chapter>.ass        captions, highlight boxes and click rings for that chapter (burned in with libass)
 //   chapters/<chapter>.mp4   the chapter: H.264, yuv420p, 1920x1080, 30 fps
-//   vplan-demo.mp4           all chapters joined, in order.json's order
+//   vplan-demo.mp4           all chapters joined, in order.json's order (an optional chapter only once recorded)
 //   captions.srt             the captions on the joined timeline (for the upload)
 //   vplan-demo.ass           every overlay on the joined timeline
 //   frames/                  one PNG per event from vplan-demo.mp4, and index.tsv (time, chapter, type, text)
 //
-//   node burn.mjs [--out DIR] [--ffmpeg PATH] [--ffprobe PATH] [--chapter NAME[,NAME...]] [--no-frames]
+//   node burn.mjs [--out DIR] [--ffmpeg PATH] [--ffprobe PATH] [--chapter NAME[,NAME...]] [--no-cosmos] [--no-frames]
 //
 // ffmpeg: --ffmpeg, else $FFMPEG, else `ffmpeg` on PATH. It runs with DIR as its working directory and only relative
 // paths, so a Windows ffmpeg.exe called from WSL works without path conversion (DIR must be on a Windows drive then).
@@ -39,7 +39,7 @@ const BOX_RADIUS = 12;
 
 function parseArgs(argv) {
   const opts = { out: path.join(REPO, 'runs', 'video'), ffmpeg: process.env.FFMPEG || 'ffmpeg', ffprobe: null,
-    chapters: null, frames: true };
+    chapters: null, frames: true, cosmos: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -51,8 +51,9 @@ function parseArgs(argv) {
     else if (a === '--ffprobe') opts.ffprobe = value();
     else if (a === '--chapter') opts.chapters = [...(opts.chapters ?? []), ...value().split(',')];
     else if (a === '--no-frames') opts.frames = false;
+    else if (a === '--no-cosmos') opts.cosmos = false;
     else if (a === '-h' || a === '--help') {
-      console.log('usage: node burn.mjs [--out DIR] [--ffmpeg PATH] [--ffprobe PATH] [--chapter NAME[,NAME...]] [--no-frames]');
+      console.log('usage: node burn.mjs [--out DIR] [--ffmpeg PATH] [--ffprobe PATH] [--chapter NAME[,NAME...]] [--no-cosmos] [--no-frames]');
       process.exit(0);
     } else throw new Error(`unknown argument ${a}`);
   }
@@ -247,7 +248,17 @@ async function burnChapter(opts, name, doc, tl) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cwd = opts.out;
-  const order = JSON.parse(await fs.readFile(path.join(cwd, 'order.json'), 'utf8'));
+  // record.mjs writes {chapters, optional}. The optional cosmos chapter joins when it has been recorded, unless
+  // --no-cosmos leaves it out.
+  const saved = JSON.parse(await fs.readFile(path.join(cwd, 'order.json'), 'utf8'));
+  const optional = saved.optional ?? [];
+  const order = (saved.chapters ?? saved).filter((name) => {
+    if (!optional.includes(name)) return true;
+    if (name === 'cosmos' && !opts.cosmos) return false;
+    const recorded = existsSync(path.join(cwd, `${name}.events.json`));
+    if (!recorded) console.log(`${name}: optional and not recorded, left out`);
+    return recorded;
+  });
   const unknown = (opts.chapters ?? []).filter((n) => !order.includes(n));
   if (unknown.length) throw new Error(`unknown chapter ${unknown.join(', ')} (chapters: ${order.join(', ')})`);
   for (const dir of ['ass', 'chapters']) await fs.mkdir(path.join(cwd, dir), { recursive: true });
