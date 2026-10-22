@@ -2066,3 +2066,28 @@ It gives no lift, preplace or clearance numbers, since in D75 they anchored low 
 - Cost: $0.13 (all W4.0 runs together: $0.79).
 
 **Ruling (owner, Oct 22):** not merged, but kept open. Revisit after the video with a complete paired config 3 run (about $0.20, needs the owner's OK), ideally on a normal-latency day.
+
+## D78. The demo video is recorded as scripted takes (W4.3, 2026-10-22)
+
+**Ruling (owner, Oct 22):** `scripts/video/` records the demo video as repeatable takes, following the owner's tutorial-video method.
+- `record.mjs` (Playwright 1.63.0, Chromium at 1920×1080) records one clean take per chapter, each from a fresh page load. It logs caption, box, click and cut events against the take's video clock, waits on UI state, and stops when a caption's text is not on screen.
+- `burn.mjs` (ffmpeg with libass) burns the overlays in afterwards, cuts the waits, joins the chapters into a 1080p30 H.264 MP4, and writes `captions.srt` and one frame per event for review.
+- A take that drifts is re-recorded, never patched. All 55 event frames were checked; all six chapters were re-recorded once, and the repair chapter twice.
+
+**Content (2:33 in total, 2:04 of it showing the modules; no live Nemotron calls, no cost):**
+- a title card;
+- a live run on the basic scene with the wall, using the rule-based baseline;
+- the keyless replay of `3:test:1`: the drop-off 8 cm too high, then a 0.95 cm transport clearance against the 1 cm minimum, then high waypoints, executed and judged a success;
+- the replay of `3:test:3`: Nemotron refuses an out-of-reach target and says why;
+- a D70 results card;
+- a closing card.
+
+The recorded attempts predate D74, so the round 2 finding names the drop-off; that is the record as it ran. The video is silent with burned-in captions, and `captions.srt` is for the upload.
+
+**No Cosmos chapter yet:** the take was recorded before the banner fix (D73 addendum). Adding it needs the local Cosmos server and about 20 s, which still fits under 3 minutes.
+
+**Tools:** these are video tools only; neither enters `pyproject.toml`, `uv.lock` or the Docker image.
+- `playwright` 1.63.0 and its Chromium `chromium-1243` (owner's OK, Oct 22), in `scripts/video/node_modules` and `~/.cache/ms-playwright`.
+- ffmpeg 9.0.2 (gyan.dev build, winget, Windows; the owner chose Windows over WSL).
+
+The output (`runs/video/vplan-demo.mp4`, `captions.srt`, `frames/`) is local and gitignored.
