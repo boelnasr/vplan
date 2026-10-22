@@ -18,7 +18,7 @@
 // --seed-dir on its seed set.
 
 import { chromium } from 'playwright';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +33,7 @@ const WINDOWS_FONTS = '/mnt/c/Windows/Fonts';
 
 const CHAPTERS = [
   { name: 'title', run: titleTake },
+  { name: 'architecture', run: architectureTake },
   { name: 'live', run: liveTake },
   { name: 'repair', run: repairTake },
   { name: 'refusal', run: refusalTake },
@@ -74,6 +75,18 @@ box-shadow:0 1px 2px rgba(15,23,42,.06)}
 .hero .tile{flex:1}
 .arrow{font-size:72px;color:var(--muted)}
 .reveal{opacity:0;animation:in .6s ease forwards}
+body:has(.diagram){align-items:flex-start;padding-top:48px}
+.wrap:has(.diagram){width:1300px}
+.diagram{margin-top:22px;border:1px solid var(--line);border-radius:16px;overflow:hidden;background:#fff}
+.diagram svg{display:block}
+.rows{display:grid;gap:22px;margin-top:30px}
+.row{display:grid;grid-template-columns:330px 1fr 1fr 1fr;gap:22px;align-items:stretch}
+.row .who{display:flex;flex-direction:column;justify-content:center}
+.who .m{font-size:34px;font-weight:700;line-height:1.15}
+.who .s{font-size:22px;color:var(--muted);margin-top:8px;line-height:1.35}
+.row .big{font-size:52px}
+.big .blue{color:var(--blue)}
+.row .lbl{font-size:23px}
 body::after{content:"";position:fixed;right:0;bottom:0;width:4px;height:4px;background:#f8fafc;animation:hb .25s steps(2) infinite}
 @keyframes hb{50%{background:#f7f9fb}}
 @keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -90,6 +103,14 @@ function cardPage(body) {
 const FLOW = `<ol class="flow"><li><span class="n">1</span>Plan</li><li><span class="n">2</span>Verify</li>` +
   `<li><span class="n">3</span>Execute</li><li><span class="n">4</span>Judge</li></ol>`;
 
+// The architecture card shows the SVG of a diagram in docs/diagrams, cropped by viewBox (the system overview without
+// its legend strip: the captions say what each part does).
+function diagramSvg(file, viewBox) {
+  const html = readFileSync(path.join(REPO, 'docs', 'diagrams', file), 'utf8');
+  const svg = html.slice(html.indexOf('<svg'), html.indexOf('</svg>') + '</svg>'.length);
+  return svg.replace(/viewBox="[^"]*"/, `viewBox="${viewBox}" width="100%"`);
+}
+
 const CARDS = {
   title: cardPage(`
     <h1><span class="brand">vplan</span> LLMs plan, physics verifies</h1>
@@ -97,6 +118,9 @@ const CARDS = {
     it before anything moves, and an independent judge scores the result in physics simulation.</p>
     ${FLOW}
     <div class="foot">Nebius × NVIDIA Global AI Hackathon · Physical AI track · simulation only</div>`),
+  architecture: cardPage(`
+    <div class="kicker">How it works</div><h2 style="font-size:52px">The model proposes, physics decides</h2>
+    <div class="diagram">${diagramSvg('system-overview.html', '30 30 900 470')}</div>`),
   live: cardPage(`
     <div class="kicker">Part 1 of 3</div><h2>A live run in the browser</h2>
     <p class="lead">Plan, verify, execute and judge one task. The planner here is the rule-based baseline, so no API
@@ -112,30 +136,40 @@ const CARDS = {
     <div class="kicker">Optional</div><h2>A learned visual check</h2>
     <p class="lead">NVIDIA Cosmos3-Edge, served locally, looks at rendered key frames after the checks pass. It is
     advisory, never verification.</p>`),
+  // Lightning (D70) is the headline; Ultra (D82) ran on code changed after the freeze, so it is shown beside it
   results: cardPage(`
     <h2 class="reveal" style="font-size:60px">Results on 300 held-out tasks</h2>
-    <div class="lead reveal" style="font-size:30px;margin-top:14px;animation-delay:.2s">NVIDIA Nemotron 3.5 Lightning on
-    Nebius Token Factory. Share of solvable tasks done correctly:</div>
-    <div class="hero reveal" style="margin-top:30px;animation-delay:.8s">
-      <div class="tile"><div class="big">24.7%</div><div class="lbl">first plan, verified</div>
-        <div class="ci">95% CI 20.1–29.8%</div></div>
-      <div class="arrow">→</div>
-      <div class="tile"><div class="big blue">65.0%</div><div class="lbl">with up to 3 repairs from the checks' findings</div>
-        <div class="ci">95% CI 59.4–70.2%</div></div>
+    <div class="lead reveal" style="font-size:30px;margin-top:14px;animation-delay:.2s">Share of solvable tasks done
+    correctly. NVIDIA Nemotron on Nebius Token Factory.</div>
+    <div class="rows">
+      <div class="row reveal" style="grid-template-columns:300px 1.45fr 1fr 1fr;animation-delay:.8s">
+        <div class="who"><div class="m">Nemotron 3.5 Lightning</div><div class="s">the headline: prompt and code
+          frozen before the held-out set</div></div>
+        <div class="tile"><div class="big">24.7% → <span class="blue">65.0%</span></div>
+          <div class="lbl">first plan verified → up to 3 repairs from the findings</div>
+          <div class="ci">95% CI 20.1–29.8% → 59.4–70.2%</div></div>
+        <div class="tile"><div class="big blue">+29.3 pts</div><div class="lbl">over retrying as often without
+          feedback</div><div class="ci">95% CI 23–36</div></div>
+        <div class="tile"><div class="big green">0 of 215</div><div class="lbl">verified runs unsafe. Without the
+          checks: 169 of 346.</div></div>
+      </div>
+      <div class="row reveal" style="grid-template-columns:300px 1.45fr 1fr 1fr;animation-delay:6.4s">
+        <div class="who"><div class="m">Nemotron 3 Ultra</div><div class="s">run later, on code changed after the
+          freeze</div></div>
+        <div class="tile"><div class="big">75.7% → <span class="blue">92.7%</span></div>
+          <div class="lbl">first plan verified → up to 3 repairs from the findings</div>
+          <div class="ci">95% CI 70.5–80.2% → 89.1–95.1%</div></div>
+        <div class="tile"><div class="big">−2.0 pts</div><div class="lbl">over retrying: the stronger model gains
+          nothing from feedback</div><div class="ci">95% CI −5.7 to +1.7</div></div>
+        <div class="tile"><div class="big green">0 of 298</div><div class="lbl">verified runs unsafe. Without the
+          checks: 42 of 304.</div></div>
+      </div>
     </div>
-    <div class="tiles t3">
-      <div class="tile reveal" style="animation-delay:3.4s"><div class="big blue">+29.3 pts</div>
-        <div class="lbl">over retrying the same number of times without feedback</div><div class="ci">95% CI 23–36</div></div>
-      <div class="tile reveal" style="animation-delay:5.4s"><div class="big green">0 unsafe</div>
-        <div class="lbl">verified executions. Without the checks: 169 of 346 broke a safety rule.</div></div>
-      <div class="tile reveal" style="animation-delay:7.4s"><div class="big">100%</div>
-        <div class="lbl">rule-based baseline with the same checks. By design, every solvable task is one it can solve.</div></div>
-    </div>
-    <div class="foot reveal" style="margin-top:34px;animation-delay:8.4s">Held-out set: 300 solvable and 100 impossible
-    generated tasks. The planner prompt was frozen before it was generated.</div>`),
+    <div class="foot reveal" style="margin-top:34px;animation-delay:11.4s">Held-out set: 300 solvable and 100
+    impossible generated tasks. Ultra is reported beside the headline, not instead of it.</div>`),
   closing: cardPage(`
     <h1 style="font-size:84px"><span class="brand">vplan</span> LLMs plan, physics verifies</h1>
-    <p class="lead" style="font-size:35px;max-width:1440px">Planner: NVIDIA Nemotron, served by Nebius Token Factory.<br>Checks: ManipulaPy kinematics and
+    <p class="lead" style="font-size:35px;max-width:1440px">Planner: NVIDIA Nemotron 3.5 Lightning and 3 Ultra, served by Nebius Token Factory.<br>Checks: ManipulaPy kinematics and
     PyBullet collision checks, before anything moves.<br>Judge: independent scoring in PyBullet physics.</p>
     <div class="foot">Open source under AGPL-3.0 · Every recorded attempt replays without keys</div>`),
 };
@@ -479,7 +513,44 @@ async function replay(take, label, expectHeadline) {
 // ---- the takes ---------------------------------------------------------------------------------------------------
 
 async function titleTake(take) {
-  await take.card('title', 6.5);
+  await take.card('title', 4.5);
+}
+
+// The architecture, one part at a time, on the system-overview diagram. A node is the nearest node-sized rect
+// (at least 144 units wide) before its label; a zone is the nearest 120-unit-high band before its label.
+async function architectureTake(take) {
+  const { page } = take;
+  await take.card('architecture', 0.8);
+  const before = (label, rect) => page.locator(`xpath=//*[local-name()="text" and normalize-space(.)="${label}"]` +
+    `/preceding-sibling::*[local-name()="rect" and ${rect}][1]`);
+  const node = (label) => before(label, '@width >= 144');
+  const zone = (label) => before(label, '@height = 120');
+
+  await take.caption('A harness generates solvable and provably impossible tasks, runs them and builds the report.');
+  await take.box(zone('EVALUATION HARNESS'));
+  await take.hold(3.5);
+
+  await take.caption('NVIDIA Nemotron on Nebius Token Factory answers each task with a typed plan, or a refusal.');
+  await take.box(node('Nemotron planner'));
+  await take.hold(4);
+
+  await take.caption('The plan becomes a joint trajectory. Eight kinematic and collision checks test it in a preview simulation.');
+  await take.box([node('Motion layer'), node('Verifier')]);
+  await take.hold(5);
+
+  await take.caption('A rejected plan goes back with findings: what failed, by how much, and what to change. Up to 3 repairs.');
+  // two boxes, not their union, which would cut through the Cosmos node between them
+  await take.box(node('Verifier'));
+  await take.box(node('Nemotron planner'));
+  await take.hold(5);
+
+  await take.caption('Only an approved plan runs in PyBullet physics. An independent judge, sharing no code with the checks, scores it.');
+  await take.box([node('Executor'), node('Judge')]);
+  await take.hold(5);
+
+  await take.caption('Optional: NVIDIA Cosmos3-Edge looks at rendered frames after the checks pass. It can only block.');
+  await take.box(node('Cosmos visual gate'));
+  await take.hold(4);
 }
 
 async function resultsTake(take) {
@@ -487,12 +558,12 @@ async function resultsTake(take) {
 }
 
 async function closingTake(take) {
-  await take.card('closing', 6);
+  await take.card('closing', 4.5);
 }
 
 async function liveTake(take) {
   const { page } = take;
-  await take.card('live', 4.5);
+  await take.card('live', 3);
   const t0 = take.now();
   await openPage(take);
   await take.scrollToY(140, false);
@@ -501,9 +572,9 @@ async function liveTake(take) {
   const wall = tab(page).getByLabel('Basic scene with wall');
   await take.caption('A simulated Franka Panda arm, two cubes and a bin. The task is typed in plain English.');
   await take.box(tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Instruction/ }) }));
-  await take.hold(4.5);
+  await take.hold(4);
 
-  await take.caption('Put a wall between the cubes and the bin.');
+  await take.caption('Put a wall between the cubes and the bin. The planner is the rule-based baseline: no LLM, no API key.');
   await take.click(wall, 'Basic scene with wall');
   await take.until('the scene with the wall', async () => {
     await ui.infoCard(page).filter({ hasText: '1 wall' }).waitFor({ state: 'visible', timeout: 60_000 });
@@ -511,11 +582,9 @@ async function liveTake(take) {
   });
   await take.painted();
   await take.box(ui.scene(page));
-  await take.hold(3);
-
-  await take.caption('The planner here is the rule-based baseline: no LLM and no API key.');
+  await take.hold(2.5);
   await take.box(tab(page).locator('.block.padded').filter({ hasText: 'Rule-based baseline (no LLM)' }));
-  await take.hold(3.5);
+  await take.hold(2.5);
 
   await take.caption('One click runs the whole loop: plan, verify, execute, judge.');
   const run = ui.button(page, 'Plan, verify, execute');
@@ -530,7 +599,7 @@ async function liveTake(take) {
   await take.expectText(tab(page).locator('.vp-banner'), /Cosmos visual check off/,
     'the Cosmos-off banner (start the UI without --cosmos-url for this take)');
   await take.box(ui.plan(page));
-  await take.hold(4.5);
+  await take.hold(4);
 
   await take.until('the checks and the execution', async () => {
     await ui.rounds(page).first().filter({ hasText: 'Executed' }).waitFor({ state: 'visible', timeout: 60_000 });
@@ -538,7 +607,7 @@ async function liveTake(take) {
   await take.caption('2 Verify: eight kinematic and collision checks run in a preview simulation. All pass, so the plan is approved.');
   await take.expectText(ui.rounds(page).first(), /Release in bin/, 'the passed checks');
   await take.box(ui.rounds(page).first());
-  await take.hold(5.5);
+  await take.hold(4.5);
   take.clear();
 
   await take.until('the recorded execution', async () => {
@@ -560,7 +629,7 @@ async function liveTake(take) {
 
 async function repairTake(take) {
   const { page } = take;
-  await take.card('repair', 5);
+  await take.card('repair', 3.5);
   const t0 = take.now();
   await openReplay(take);
   take.cutSince(t0, 'page load');
@@ -568,7 +637,7 @@ async function repairTake(take) {
   await take.caption('A recorded attempt by NVIDIA Nemotron 3.5 Lightning on a held-out task. Replay needs no API key, GPU or network.');
   await take.box([tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Run folder or recording/ }) }),
     tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Seed-set folder/ }) })]);
-  await take.hold(4.5);
+  await take.hold(4);
   await take.caption('Pick the attempt and replay it.');
   await replay(take, 'Task 1 (test set) · Executed · success', 'Success');
 
@@ -576,43 +645,29 @@ async function repairTake(take) {
   await take.caption('Task: pick the object next to the red cylinder and place it in the bin. Nemotron needed three plans.');
   await take.expectText(ui.outcome(page), /3 planner calls/, 'three planner calls');
   await take.box(ui.outcome(page));
-  await take.hold(5);
+  await take.hold(4.5);
 
   const rounds = ui.rounds(page);
   await take.scrollTo(rounds.nth(0), 80);
   await take.caption("Round 1: Nemotron's first plan sets the drop-off point 8\u00a0cm too high. The checks reject it before anything moves.");
   await take.expectText(rounds.nth(0), /measured 0\.08 m/, 'the drop-off height finding');
   await take.box(rounds.nth(0));
-  await take.hold(6);
+  await take.hold(5.5);
 
   await take.caption('Round 2: told what failed, it fixes the height. Now the carried cylinder passes 0.95\u00a0cm from the wall; the minimum is 1\u00a0cm.');
   await take.expectText(rounds.nth(1), /clearance 0\.95 cm \(minimum 1\.00 cm\)/, 'the clearance finding');
   await take.box(rounds.nth(1));
-  await take.hold(6.5);
+  await take.hold(6);
 
-  const gallery = tab(page).locator('.block:has(.grid-wrap, .preview)').filter({ hasText: 'What failed: problem parts in magenta' });
-  await take.scrollTo(gallery, 70);
-  const grid = gallery.locator('.grid-wrap');
-  await grid.evaluate((e) => e.scrollTo({ top: e.scrollHeight, behavior: 'smooth' }));
-  await page.waitForFunction((e) => Math.abs(e.scrollTop + e.clientHeight - e.scrollHeight) < 2, await grid.elementHandle(),
-    { timeout: 10_000 });
-  await take.painted();
-  await take.caption('The checks draw the parts involved in magenta: the wall, and the cylinder in the gripper.');
-  const closeUp = grid.locator('button').filter({ hasText: /Round 2 · Collision.*close-up/ });
-  await take.click(closeUp, 'Round 2 close-up');
-  await gallery.locator('caption').filter({ hasText: /Round 2 · Collision: blue cylinder ↔ wall during transport.*\(close-up\)/ })
-    .waitFor({ state: 'visible', timeout: 10_000 });
-  await take.painted();
-  await take.box(gallery);
-  await take.hold(5);
-
+  // the magenta close-up of the failed parts (in the D78 cut) is left out, to keep the video under 3 minutes with
+  // the architecture chapter
   await take.scrollTo(ui.plan(page), 70);
   await take.caption('Round 3: Nemotron adds high waypoints (left) to carry the cylinder over the wall. All eight checks pass.');
   await take.expectText(rounds.nth(2), /Executed/, 'round 3 executed');
   await take.expectText(ui.plan(page), /\[0\.45, 0\.3, 0\.3\]/, 'the repaired waypoints');
   await take.box(ui.plan(page));
   await take.box(rounds.nth(2));
-  await take.hold(6);
+  await take.hold(5.5);
 
   await take.alignGif();
   await take.scrollTo(ui.step(page, 'Execute'), 20);
@@ -628,7 +683,7 @@ async function repairTake(take) {
 
 async function refusalTake(take) {
   const { page } = take;
-  await take.card('refusal', 4);
+  await take.card('refusal', 3);
   const t0 = take.now();
   await openReplay(take);
   take.cutSince(t0, 'page load');
@@ -640,24 +695,24 @@ async function refusalTake(take) {
   await take.caption('The yellow cylinder is out of the arm\'s reach. The planner is not told this.');
   await take.expectText(ui.outcome(page), /impossible: object out of reach/, 'the hidden ground truth');
   await take.box(ui.outcome(page));
-  await take.hold(4.5);
+  await take.hold(4);
 
   await take.caption('Nemotron refuses instead of planning, and says why: the cylinder is about 1.2\u00a0m away, beyond the 0.95\u00a0m reach.');
   await take.expectText(ui.rounds(page).first(), /approximately 1\.20 m/, 'the refusal explanation');
   await take.box(ui.rounds(page).first());
-  await take.hold(6);
+  await take.hold(5.5);
 
   await take.caption('The judge accepts the refusal: refusing is correct only when the task is impossible.', { pos: 'top' });
   await take.expectText(ui.judge(page), /Refusal matches the task/, 'the refusal criterion');
   await take.box(ui.judge(page));
-  await take.hold(4.5);
+  await take.hold(4);
 }
 
 // The Cosmos gate's verdicts vary between runs (D73: false rejections, and replies the strict parser cannot read), so
 // this take reads the round's verdict from the page and takes the caption written for it.
 async function cosmosTake(take) {
   const { page } = take;
-  await take.card('cosmos', 3);
+  await take.card('cosmos', 2.5);
   const t0 = take.now();
   await openPage(take);
   // One round only: the chapter shows one plan and what Cosmos makes of it (the slider stays visible at 0)
@@ -708,12 +763,12 @@ async function cosmosTake(take) {
   await take.caption('It is advisory, not verification: in our shadow study its balanced accuracy was 0.61 on real ' +
     'attempts and 0.52 on injected errors.', { pos: 'top' });
   await take.box(banner);
-  await take.hold(4.5);
+  await take.hold(4);
 
   await take.scrollTo(ui.step(page, 'Verify'), 20);
   await take.caption(verdict);
   await take.box(round);
-  await take.hold(4.5);
+  await take.hold(4);
 
   const gallery = tab(page).locator('.block:has(.grid-wrap)').filter({ hasText: 'What Cosmos saw' });
   await take.caption(visual.status === 'Pass'
@@ -721,7 +776,7 @@ async function cosmosTake(take) {
     : 'These are the frames it saw. The plan passed every check, yet it was stopped: this is why Cosmos stays advisory.',
   { pos: 'top' });
   await take.box(gallery);
-  await take.hold(4.5);
+  await take.hold(4);
 }
 
 // ---- recording ---------------------------------------------------------------------------------------------------

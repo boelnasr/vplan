@@ -28,6 +28,7 @@ captions. This is a separate tool, not part of the Python package or the Docker 
   through `fonts.conf`. Nothing is installed; its font cache goes to `runs/video/fontcache`.
 - The replay chapters use the final evaluation run `runs/dryrun-tf/c3-test` and its seed set `runs/seeds/test`. Both
   are in the main checkout and are not committed.
+- The architecture chapter shows the SVG of `docs/diagrams/system-overview.html`, read when `record.mjs` starts.
 
 ## Record and burn
 
@@ -98,7 +99,7 @@ A take that drifted is recorded again, never patched. Examples: a caption that d
 that was not loaded yet, a highlight in the wrong place.
 
 ```bash
-node record.mjs --list                              # title, live, repair, refusal, cosmos (optional), results, closing
+node record.mjs --list                              # title, architecture, live, repair, refusal, cosmos (optional), results, closing
 node record.mjs --chapter repair                    # only this take; the others stay as they are
 node burn.mjs --ffmpeg "$FFMPEG" --chapter repair   # re-burns repair, re-joins all chapters, re-extracts every frame
 ```
