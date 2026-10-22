@@ -2091,3 +2091,8 @@ The recorded attempts predate D74, so the round 2 finding names the drop-off; th
 - ffmpeg 9.0.2 (gyan.dev build, winget, Windows; the owner chose Windows over WSL).
 
 The output (`runs/video/vplan-demo.mp4`, `captions.srt`, `frames/`) is local and gitignored.
+
+**Addendum (Oct 22): the Cosmos chapter.** After the banner fix, `record.mjs --cosmos` recorded a 20.8 s chapter between the refusal and the results, so the video now runs **2:54** (174.0 s, 2:24 of it showing the modules). `burn.mjs --no-cosmos` rebuilds the 2:33 cut.
+- The chapter is a live rule-based-baseline run on the basic scene with the Cosmos check on, served locally with D73's command. The plan passes all 8 checks, but Cosmos's pre-grasp replies could not be parsed, even after the third view, so nothing moved (`visual_uncertain`).
+- The captions say it is advisory, not verification, and cite the shadow study's 0.61 and 0.52 (the UI banner, boxed on screen, says the same).
+- Cosmos verdicts vary between runs: one probe falsely rejected the grasp. The take therefore reads the verdict from the page and uses the caption written for that outcome. All 9 new frames were checked, and the chapter was re-recorded once to fix a scene caption.
