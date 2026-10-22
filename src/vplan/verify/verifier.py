@@ -49,7 +49,7 @@ def verify(plan: PickPlacePlan, traj: CandidateTrajectory, scene: Scene, client:
         if stop:
             break  # later joint states are undefined
         findings += [f for f in (checks.joint_limits(seg, m, cfg), checks.singularity(seg, m, cfg),
-                                 checks.collision(seg, h, plan, attach, m, cfg)) if f]
+                                 checks.collision(seg, h, plan, scene, attach, m, cfg)) if f]
     seen, ordered = set(), []
     for f in _order_findings(findings, [sg.label for sg in traj.segments]):
         if f.check not in seen:
