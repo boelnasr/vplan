@@ -1,0 +1,11 @@
+{
+  "name": "vplan-demo-video",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scripted recording of the vplan demo video (a separate tool, not part of the Python package or the Docker image)",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
