@@ -1,4 +1,8 @@
+import re
+from typing import get_args
+
 import numpy as np
+import pybullet as p
 import pytest
 
 from tests.conftest import make_basic_scene, with_object_pose
@@ -6,7 +10,8 @@ from vplan.config import load_config
 from vplan.geometry import REASON_APPROACH, REASON_NOT_BETWEEN, REASON_OFF_AXIS, REASON_TOO_WIDE, pose_to_T
 from vplan.motion.poses import approach_rotation, key_poses
 from vplan.motion.trajectory import build_trajectory, densify, time_scale
-from vplan.records import CandidateTrajectory, Finding, Grasp, PickPlacePlan, Place, Scene, Segment
+from vplan.records import (CandidateTrajectory, Finding, Grasp, PickPlacePlan, Place, Scene, Segment,
+                           SegmentLabel)
 from vplan.robot import HOME_Q, PANDA_VEL_LIMITS, load_panda
 from vplan.sim.scene import build_scene
 from vplan.verify import checks as vchecks
@@ -123,16 +128,17 @@ def test_genuine_self_collision_is_caught_and_home_is_not(client) -> None:  # CR
     s = make_basic_scene()
     h = build_scene(s, client)
     m = load_panda()
-    assert vchecks.collision(one_sample_segment(HOME_Q), h, plan(), None, m, CFG) is None
+    assert vchecks.collision(one_sample_segment(HOME_Q), h, plan(), s, None, m, CFG) is None
     rng = np.random.default_rng(0)
     found = None
     for _ in range(300):  # ~20% of random configurations self-collide (measured 65/300)
         q = rng.uniform(m.lower, m.upper)
-        f = vchecks.collision(one_sample_segment(q), h, plan(), None, m, CFG)
+        f = vchecks.collision(one_sample_segment(q), h, plan(), s, None, m, CFG)
         if f is not None and f.bodies[0].startswith("robot:") and f.bodies[1].startswith("robot:"):
             found = f
             break
     assert found is not None
+    assert " too close to the robot itself (" in found.direction and _COLLISION_DIRECTION.fullmatch(found.direction)
 
 
 def test_release_footprint_outside_bin_is_caught() -> None:
@@ -150,8 +156,10 @@ def test_carried_object_hitting_forearm_is_caught(client) -> None:  # CR#9
     seg = Segment.model_validate({**one_sample_segment(HOME_Q).model_dump(), "carrying": True})
     attach = np.eye(4)  # carried cube held 0.25 m back along the TCP z axis: penetrates panda_link6 at HOME
     attach[2, 3] = -0.25  # (0.35 m, the brief's value, clears the whole arm at HOME: calibrated per the brief's note)
-    f = vchecks.collision(seg, h, plan(), attach, m, CFG)
+    f = vchecks.collision(seg, h, plan(), s, attach, m, CFG)
     assert f is not None and f.bodies[0] == "cube_red" and f.bodies[1].startswith("robot:")
+    assert f.direction.startswith("the carried object too close to the robot itself (arm link ")
+    assert _COLLISION_DIRECTION.fullmatch(f.direction), f.direction  # no vertical context against the robot
 
 
 def test_unreachable_target_gives_ik_finding_and_no_spurious_release(client) -> None:
@@ -280,3 +288,112 @@ def test_grasp_finding_reports_the_evidence_for_its_reason() -> None:  # final r
     f = vchecks.grasp_preconditions(pl, Scene.model_validate(d), _tcp_at((0.50, -0.15, 0.02)), CFG)
     assert f.direction == REASON_TOO_WIDE
     assert f.measured == pytest.approx(0.045) and f.threshold == pytest.approx(max_half)
+
+
+# The measured vertical context of a collision direction: the colliding part's bottom against the other body's top.
+_GAP = re.compile(r"its bottom is (\d+\.\d{3}) m (below|above) (.+)'s top \(top at z (-?\d+\.\d{3}) m\)")
+
+
+def _collision_and_trajectory(pl: PickPlacePlan, s: Scene, client) -> tuple[Finding, CandidateTrajectory]:
+    traj = build_trajectory(pl, s, HOME_Q, cfg=CFG)
+    return next(x for x in verify(pl, traj, s, client, CFG) if x.check == "collision"), traj
+
+
+def test_a_transport_collision_measures_the_carried_object_against_the_obstacle_top(client) -> None:
+    """The direction names the parts in plain words and the phase, and states how far the carried object's bottom is
+    below the obstacle's top at the colliding sample: evidence, not a fix (spec §9, D17)."""
+    s, pl = make_basic_scene(with_obstacle=True), plan(via=())
+    f, traj = _collision_and_trajectory(pl, s, client)
+    assert f.bodies == ("cube_red", "wall_1") and f.stage == "transport"
+    assert f.direction.startswith("the carried object too close to an obstacle during transport (clearance ")
+    # measured without AABBs: the cube's bottom from FK at the colliding sample, the wall's top from the Scene
+    m, cube, wall = load_panda(), s.objects[0], s.obstacles[0]
+    attach = np.linalg.inv(key_poses(pl, s, m.fk(HOME_Q))[2].T) @ pose_to_T(cube.pose.position, cube.pose.orientation)
+    seg = next(sg for sg in traj.segments if sg.label == "transport")
+    T = m.fk(np.array(seg.q[f.sample_index])) @ attach
+    bottom = T[2, 3] - np.abs(T[2, :3]) @ np.array(cube.size) / 2
+    top = wall.pose.position[2] + wall.half_extents[2]
+    gap, side, what, top_z = _GAP.search(f.direction).groups()
+    assert (side, what) == ("below", "the obstacle") and top - bottom > 0.01
+    assert float(gap) == pytest.approx(top - bottom, abs=1e-3) and float(top_z) == pytest.approx(top, abs=1e-3)
+
+
+def test_a_tall_obstacle_reports_its_real_top_and_the_gap_to_it(client) -> None:
+    """The top comes from the body's own bounds, not from a probe at a fixed height: a valid obstacle whose top is far
+    above 2 m reports that top and the true gap to it (a probe at z = 2 m reported its top as z = 0)."""
+    d = make_basic_scene().model_dump()
+    d["obstacles"] = [{"id": "pillar", "half_extents": (0.05, 0.05, 2.5), "pose": {"position": (0.632, 0.0, 2.5)}}]
+    s = Scene.model_validate(d)
+    h = build_scene(s, client)
+    seg = Segment.model_validate({**one_sample_segment(HOME_Q).model_dump(), "carrying": True})
+    attach = np.eye(4)
+    attach[0, 3] = 0.25  # the cube held 0.25 m beside the TCP: 5 mm from the pillar, clear of the arm
+    f = vchecks.collision(seg, h, plan(), s, attach, load_panda(), CFG)
+    assert f is not None and f.bodies == ("cube_red", "pillar")
+    gap, side, what, top_z = _GAP.search(f.direction).groups()
+    cube_bottom = p.getAABB(h.bodies["cube_red"], physicsClientId=client)[0][2]  # the cube now sits at the sample
+    pillar_top = p.getAABB(h.bodies["pillar"], physicsClientId=client)[1][2]
+    assert pillar_top == pytest.approx(5.0)  # a box's AABB is exact
+    assert (side, what) == ("below", "the obstacle")
+    assert float(top_z) == pytest.approx(pillar_top, abs=1e-3)
+    assert float(gap) == pytest.approx(pillar_top - cube_bottom, abs=1e-3)
+
+
+def test_a_placement_collision_names_the_hand_and_the_bin_wall(client) -> None:
+    s, pl = make_basic_scene(with_obstacle=True), _drop_plan(0.02, 0.0)  # released at the floor: the hand meets a wall
+    f, _ = _collision_and_trajectory(pl, s, client)
+    assert f.bodies == ("robot:panda_hand", "bin_wall_0") and f.stage == "descend_place"
+    assert f.direction.startswith("the hand too close to a bin wall during placement, descending into the bin "
+                                  "(clearance ")
+    gap, side, what, top_z = _GAP.search(f.direction).groups()
+    assert (side, what) == ("above", "the bin wall")
+    assert float(top_z) == pytest.approx(s.bin.floor_center[2] + s.bin.wall_height, abs=1e-3)
+    # the hand's flat underside spans the wall's top here, so their closest distance is the vertical gap. A mesh link's
+    # AABB sits 3 mm below its collision shape (measured), which this would catch
+    assert float(gap) == pytest.approx(f.measured, abs=1e-3)
+
+
+def test_every_segment_label_has_a_phase_in_words() -> None:
+    """collision() looks the phase up for every segment: a label without words would crash a verification."""
+    assert set(vchecks.PHASES) == set(get_args(SegmentLabel))
+
+
+@pytest.mark.parametrize("name, kind", [
+    ("wall_1", ("an obstacle", "the obstacle")), ("bin_wall_2", ("a bin wall", "the bin wall")),
+    ("bin_floor", ("the bin floor",) * 2), ("table", ("the table",) * 2), ("cube_red", ("the target object",) * 2),
+    ("cube_green", ("another object", "the other object")),
+    ("bin_wall_extra", ("another object", "the other object"))])  # an object id is free text: not a built-in wall
+def test_a_scene_body_is_named_by_its_kind(name, kind) -> None:
+    assert vchecks._kind(name, make_basic_scene(with_obstacle=True), "cube_red") == kind
+
+
+@pytest.mark.parametrize("link, words", [
+    ("panda_hand", "the hand"), ("panda_leftfinger", "the left finger"), ("panda_rightfinger", "the right finger"),
+    ("panda_link0", "the arm base"), ("panda_link5", "arm link 5")])
+def test_a_robot_link_is_named_in_plain_words(link, words) -> None:
+    assert vchecks._part(link) == words
+
+
+_PHASE = r"(the approach|the descent to the grasp|the lift|transport|placement, descending into the bin|placement, " \
+         r"retreating after the release)"
+_PART = r"(the carried object|the hand|the (left|right) finger|the arm base|arm link \d)"
+_KIND = r"(an obstacle|a bin wall|the bin floor|the table|the target object|another object|the robot itself \(.+\))"
+# The whole text: who, with what, when, the measured gap and the measured vertical context. No other values (D17).
+_COLLISION_DIRECTION = re.compile(
+    rf"{_PART} too close to {_KIND} during {_PHASE} \((clearance|penetration) \d+\.\d\d cm\)"
+    r"(; its bottom is \d+\.\d{3} m (below|above) the [a-z ]+'s top \(top at z -?\d+\.\d{3} m\))?")
+
+
+@pytest.mark.parametrize("pl", [
+    plan(via=()),  # the carried cube into the wall during transport
+    _drop_plan(0.02, 0.0),  # the hand onto a bin wall while descending into the bin
+    plan(target="cube_green", via=()),  # an arm link near the wall while descending to the grasp
+    PickPlacePlan(target_id="cube_red", grasp=Grasp(approach="top", yaw_deg=0.0, pregrasp_offset_m=0.10),
+                  transport_via=((0.45, 0.05, 0.25),),  # yawed 45 deg near a wall: a corner reaches it
+                  place=Place(position=(0.50, 0.28, 0.02), yaw_deg=45.0, release_height_m=0.05)),
+], ids=["carried-obstacle", "hand-bin-wall", "arm-link-obstacle", "carried-bin-wall"])
+def test_a_collision_direction_states_measurements_only(client, pl) -> None:
+    """No computed fixes (D17): no target value, no suggested waypoint, no imperative."""
+    f, _ = _collision_and_trajectory(pl, make_basic_scene(with_obstacle=True), client)
+    assert _COLLISION_DIRECTION.fullmatch(f.direction), f.direction
+    assert not re.search(r"\b(raise|lower|move|set|should|must|need|try|increase|decrease)\b", f.direction, re.I)

@@ -304,6 +304,14 @@ def test_obstacles_are_summarised_in_words():
     assert views.obstacle_summary(enclosed.task.scene, enclosure).startswith("a closed box around the object")
 
 
+def test_a_collision_direction_already_in_plain_words_is_left_as_written():
+    """The Verifier now names the parts and bodies itself; the rewrite (kept for older recordings) must not garble it,
+    apostrophes and all."""
+    text = ("the carried object too close to an obstacle during transport (clearance 0.94 cm); its bottom is 0.050 m "
+            "below the obstacle's top (top at z 0.150 m)")
+    assert views.humanize(text, WALL_SCENE) == text
+
+
 def test_verifier_text_is_rewritten_with_plain_names():
     text = views.humanize("robot link panda_link5 too close to 'wall_1' (0.4 cm)", WALL_SCENE)
     assert text == "arm link 5 too close to the wall (0.4 cm)"

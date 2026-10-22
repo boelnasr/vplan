@@ -6,7 +6,7 @@ import pybullet as p
 
 from vplan.geometry import (REASON_APPROACH, REASON_NOT_BETWEEN, REASON_OFF_AXIS, REASON_TOO_WIDE, T_to_pose,
                             capture_check, pose_to_T, rot_angle)
-from vplan.records import Finding, PickPlacePlan, Scene, Segment
+from vplan.records import RESERVED_BODY_IDS, Finding, PickPlacePlan, Scene, Segment
 from vplan.robot import PandaModel
 from vplan.sim.scene import SceneHandles, set_arm
 
@@ -109,8 +109,59 @@ def _carried_allowed(stage: str, other: str, dist: float) -> bool:
     return (other == "table" and stage == "lift") or (other == "bin_floor" and stage == "descend_place" and dist >= 0.0)
 
 
-def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.ndarray | None, m: PandaModel,
-              cfg: dict) -> Finding | None:
+_LINK_WORDS = {"panda_hand": "the hand", "panda_leftfinger": "the left finger", "panda_rightfinger": "the right finger",
+               "panda_link0": "the arm base"}
+
+
+def _part(link: str) -> str:
+    """A robot link in plain words for a collision direction."""
+    return _LINK_WORDS.get(link) or link.replace("panda_link", "arm link ")
+
+
+def _kind(name: str, scene: Scene, target: str) -> tuple[str, str]:
+    """What kind of scene body `name` is, in plain words, indefinite and definite: ('an obstacle', 'the obstacle')."""
+    if name in {o.id for o in scene.obstacles}:
+        return "an obstacle", "the obstacle"
+    if name == target:
+        return "the target object", "the target object"
+    if name in RESERVED_BODY_IDS:  # build_scene's own bodies; an object id is free text, so no prefix match
+        if name.startswith("bin_wall"):
+            return "a bin wall", "the bin wall"
+        return (f"the {name.replace('_', ' ')}",) * 2  # the table, the bin floor
+    return "another object", "the other object"
+
+
+# Segment labels as plain-word phases (spec §8 key poses).
+PHASES = {"approach": "the approach", "descend": "the descent to the grasp", "lift": "the lift",
+          "transport": "transport", "descend_place": "placement, descending into the bin",
+          "retreat": "placement, retreating after the release"}
+
+
+def _extreme_z(client: int, body: int, link: int, highest: bool) -> float:
+    """World z, m, of the highest or lowest point of (body, link) at its current pose: its closest point to a wide slab
+    1 m beyond its AABB, so it comes from the collision shape the clearance is measured on. getAABB pads convex meshes
+    (measured: 3 mm for the Panda links, 1 mm for the cylinder prism), so it only places the slab, and wherever the body
+    is the slab is outside it and covers it in x and y. The slab is a bare shape, never a body in the world. It is not
+    freed here (removeCollisionShape only logs "TODO: dealloc"); verify's resetSimulation drops it."""
+    lo, hi = p.getAABB(body, link, physicsClientId=client)
+    slab = p.createCollisionShape(p.GEOM_BOX, halfExtents=((hi[0] - lo[0]) / 2 + 1.0, (hi[1] - lo[1]) / 2 + 1.0, 0.01),
+                                  physicsClientId=client)
+    centre = ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2] + 1.0 if highest else lo[2] - 1.0)
+    return p.getClosestPoints(body, -1, 3.0, linkIndexA=link, collisionShapeB=slab, collisionShapePositionB=centre,
+                              physicsClientId=client)[0][5][2]
+
+
+def _vertical(client: int, low: tuple[int, int], top: int, top_name: str) -> str:
+    """The measured vertical context of a collision, e.g. "; its bottom is 0.030 m below the obstacle's top (top at z
+    0.136 m)": the lowest point of `low` (body, link) against the highest point of body `top` at their current poses.
+    A measurement only, never a target height (D17)."""
+    bottom_z, top_z = _extreme_z(client, *low, highest=False), _extreme_z(client, top, -1, highest=True)
+    side = "below" if bottom_z < top_z else "above"
+    return f"; its bottom is {abs(top_z - bottom_z):.3f} m {side} {top_name}'s top (top at z {top_z:.3f} m)"
+
+
+def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, scene: Scene, attach: np.ndarray | None,
+              m: PandaModel, cfg: dict) -> Finding | None:
     """Robot vs scene, carried object vs scene AND vs non-finger robot links (CR#9), and self-collision outside
     the topology exclusions (CR#1), at every densified sample."""
     margin, self_margin = cfg["collision_margin_m"], cfg["self_collision_margin_m"]
@@ -123,9 +174,13 @@ def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.nda
     # collision there names the waypoints (spec V-6, D74). Other checks keep the pose's field.
     field = "transport_via" if (seg.label, seg.source_field) == ("transport", "place") else seg.source_field
 
-    def hit(k: int, dist: float, a: str, b: str, what: str) -> Finding:
-        return Finding(stage=seg.label, check="collision", plan_field=field, measured=float(dist),
-                       threshold=margin, sample_index=k, bodies=(a, b), direction=f"{what} ({dist * 100:.1f} cm)")
+    def hit(k: int, dist: float, a: str, b: str, who: str, what: str, vertical: str = "") -> Finding:
+        """The direction says who came too close to what kind of body, in which phase and by how much, then (against
+        a scene body) the vertical context at this sample."""
+        closest = f"penetration {-dist * 100:.2f} cm" if dist < 0 else f"clearance {dist * 100:.2f} cm"
+        return Finding(stage=seg.label, check="collision", plan_field=field, measured=float(dist), threshold=margin,
+                       sample_index=k, bodies=(a, b),
+                       direction=f"{who} too close to {what} during {PHASES[seg.label]} ({closest}){vertical}")
 
     for k, q in enumerate(seg.q):
         set_arm(h, np.array(q))
@@ -136,20 +191,26 @@ def collision(seg: Segment, h: SceneHandles, plan: PickPlacePlan, attach: np.nda
             for c in p.getClosestPoints(h.robot, bid, margin, physicsClientId=h.client):
                 link = h.link_names[c[3]]
                 if not _robot_allowed(seg.label, link, name, target):
-                    return hit(k, c[8], f"robot:{link}", name, f"robot link {link} too close to '{name}'")
+                    what, the = _kind(name, scene, target)
+                    return hit(k, c[8], f"robot:{link}", name, _part(link), what,
+                               _vertical(h.client, (h.robot, c[3]), bid, the))
         if carrying:
             for c in p.getClosestPoints(tb, h.robot, margin, physicsClientId=h.client):
                 link = h.link_names[c[4]]
                 if link not in FINGERS:
-                    return hit(k, c[8], target, f"robot:{link}", f"carried '{target}' too close to robot link {link}")
+                    return hit(k, c[8], target, f"robot:{link}", "the carried object",
+                               f"the robot itself ({_part(link)})")
             for name, bid in scene_bodies.items():
                 for c in p.getClosestPoints(tb, bid, margin, physicsClientId=h.client):
                     if not _carried_allowed(seg.label, name, c[8]):
-                        return hit(k, c[8], target, name, f"carried '{target}' too close to '{name}'")
+                        what, the = _kind(name, scene, target)
+                        return hit(k, c[8], target, name, "the carried object", what,
+                                   _vertical(h.client, (tb, -1), bid, the))
         for c in p.getClosestPoints(h.robot, h.robot, self_margin, physicsClientId=h.client):
             a, b = sorted((c[3], c[4]))
             if a != b and (a, b) not in h.self_excluded:
-                return hit(k, c[8], f"robot:{h.link_names[a]}", f"robot:{h.link_names[b]}", "self-collision")
+                la, lb = h.link_names[a], h.link_names[b]
+                return hit(k, c[8], f"robot:{la}", f"robot:{lb}", _part(la), f"the robot itself ({_part(lb)})")
     return None
 
 
