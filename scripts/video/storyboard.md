@@ -3,8 +3,8 @@
 The demo video for the Nebius x NVIDIA Global AI Hackathon. It must stay under 3 minutes, with at least 1 minute of
 the modules in action. It follows the storyboard in `docs/spec.md` §3. Live Nemotron calls cost money, so the Nemotron
 chapters replay attempts recorded in the held-out evaluation (run `c3-test`, Nemotron 3.5 Lightning on Nebius Token
-Factory). The live chapter uses the rule-based baseline. There is no Cosmos chapter: the UI's Cosmos banner still cites
-the pilot's balanced accuracy of 0.70, not the shadow study's 0.6, until that is decided.
+Factory). The live chapters use the rule-based baseline. The optional Cosmos chapter runs NVIDIA Cosmos3-Edge locally
+and presents it as an advisory, learned check, never as verification.
 
 `record.mjs` holds the takes and is the source of truth for the captions. This file lists them. The times below are
 from the final take (Oct 22). They move by a few tenths of a second with every recording.
@@ -15,9 +15,10 @@ from the final take (Oct 22). They move by a few tenths of a second with every r
 | 2 | live | 0:06.5 | 41.6 s | Chapter card, then the Live tab: basic scene with the wall, rule-based baseline, plan, checks, execution, judge |
 | 3 | repair | 0:48.1 | 59.6 s | Chapter card, then the Replay tab: attempt `3:test:1`, two rejections, the repair, execution, judge |
 | 4 | refusal | 1:47.7 | 22.5 s | Chapter card, then the Replay tab: attempt `3:test:3`, a correct refusal |
-| 5 | results | 2:10.2 | 17.0 s | Results card |
-| 6 | closing | 2:27.2 | 6.0 s | Closing card |
-| | **Total** | | **2:33.2** | Modules in action (chapters 2 to 4): 123.7 s |
+| 5 | cosmos (optional) | 2:10.2 | 20.8 s | Chapter card, then the Live tab with the Cosmos gate on: basic scene, rule-based baseline, one round, Cosmos's verdicts and key frames |
+| 6 | results | 2:31.0 | 17.0 s | Results card |
+| 7 | closing | 2:48.0 | 6.0 s | Closing card |
+| | **Total** | | **2:54.0** | Modules in action (chapters 2 to 5): 144.5 s. Without the cosmos chapter: 2:33.2 |
 
 Waits are cut. The page load before each UI chapter, the scene load, the planner run and the replay load keep their
 first 0.6 s and last 0.4 s.
@@ -74,7 +75,31 @@ evaluation."
 | 1:59.8 | Nemotron refuses instead of planning, and says why: the cylinder is about 1.2 m away, beyond the 0.95 m reach. | box: Round 1 card |
 | 2:05.8 | The judge accepts the refusal: refusing is correct only when the task is impossible. (top of the screen) | box: Judge |
 
-## 5 results (17 s)
+## 5 cosmos (20.8 s, optional)
+
+Recorded alone (`node record.mjs --cosmos`), with the UI started with `--cosmos-url` and a local Cosmos3-Edge server.
+The Repair rounds slider is set to 0 in the cut page load, so the chapter shows one plan. Cosmos's verdicts vary from
+run to run (D73: false rejections and replies the strict parser cannot read). The take reads the verdict from the page
+and uses the caption written for it, so the third and fourth captions depend on the run. The final take got **Unsure**:
+both pre-grasp replies were unparseable, the second with the side view added.
+
+Card (3 s): "Optional. A learned visual check. NVIDIA Cosmos3-Edge, served locally, looks at rendered key frames after
+the checks pass. It is advisory, never verification."
+
+| Time in video | Caption | Box or click |
+|---|---|---|
+| 2:13.3 | Now with the Cosmos visual check on: the same rule-based baseline, on the basic scene without the wall. (top) | click: "Plan, verify, execute" |
+| 2:16.6 | It is advisory, not verification: in our shadow study its balanced accuracy was 0.61 on real attempts and 0.52 on injected errors. (top) | box: Cosmos banner |
+| 2:22.1 | The eight checks pass, but Cosmos gives no usable answer, even with a third view, so nothing moves. | box: Round 1 card with the verdict table |
+| 2:26.6 | These are the frames it saw. The plan passed every check, yet it was stopped: this is why Cosmos stays advisory. (top) | box: Cosmos key frames |
+
+The third caption on other outcomes:
+- **Fail:** "The eight checks pass, but Cosmos rejects the plan at the {pre-grasp / grasp / pre-release} frame, so
+  nothing moves." The fourth caption is the same as for Unsure.
+- **Pass:** "The eight checks pass, and Cosmos agrees at every key frame, so the plan runs." The fourth caption is then
+  "These are the frames it saw. Even when it agrees, it only advises: the checks decide."
+
+## 6 results (17 s)
 
 The card builds up in steps. Its numbers come from `docs/results/metrics.json`.
 - **Results on 300 held-out tasks.** NVIDIA Nemotron 3.5 Lightning on Nebius Token Factory. Share of solvable tasks
@@ -87,7 +112,7 @@ The card builds up in steps. Its numbers come from `docs/results/metrics.json`.
 - Footer: "Held-out set: 300 solvable and 100 impossible generated tasks. The planner prompt was frozen before it was
   generated."
 
-## 6 closing (6 s)
+## 7 closing (6 s)
 
 Card: **vplan LLMs plan, physics verifies**. "Planner: NVIDIA Nemotron, served by Nebius Token Factory. Checks:
 ManipulaPy kinematics and PyBullet collision checks, before anything moves. Judge: independent scoring in PyBullet

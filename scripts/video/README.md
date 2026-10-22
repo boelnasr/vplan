@@ -46,11 +46,41 @@ PYTHONPATH='src;.' $PY -m vplan ui --host 172.18.80.1 --port 7861 \
 Then, in `scripts/video/`:
 
 ```bash
-node record.mjs                     # every chapter, about 4 minutes -> runs/video/<chapter>.webm and .events.json
+node record.mjs                     # every chapter but cosmos, about 4 minutes -> runs/video/<chapter>.webm and .events.json
 node burn.mjs --ffmpeg "$FFMPEG"    # about 40 s -> runs/video/vplan-demo.mp4
 ```
 
 Stop the UI afterwards. `burn.mjs` does not need it.
+
+### The optional Cosmos chapter (`--cosmos`)
+
+This chapter shows NVIDIA Cosmos3-Edge as a learned, advisory visual check on one live baseline run. It needs a local
+Cosmos server and the UI started with `--cosmos-url`. Every other UI chapter needs the UI started without it, so record
+this chapter on its own.
+
+1. Check that the GPU is free (`nvidia-smi`), then serve Cosmos3-Edge with vLLM 0.31.0 from its own venv. This is the
+   command the shadow study used; it takes about 15 of 16 GB:
+   ```bash
+   VLLM_USE_FLASHINFER_SAMPLER=0 ~/venvs/cosmos/bin/vllm serve nvidia/Cosmos3-Edge \
+     --revision 344d602b128d1bbdacb43b08d0a3626f46343e29 --host 127.0.0.1 --port 8000 \
+     --max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 \
+     --limit-mm-per-prompt '{"image":3,"video":0}' \
+     --mm-processor-kwargs '{"do_resize":true,"min_pixels":4096,"max_pixels":409600}'
+   curl http://127.0.0.1:8000/v1/models   # wait until this answers (about a minute)
+   ```
+2. Start the UI as above, but with `--cosmos-url http://127.0.0.1:8000/v1` instead of `--replay` and `--seed-dir`. The
+   Windows interpreter reaches the WSL server through localhost forwarding.
+3. Record and burn:
+   ```bash
+   node record.mjs --cosmos            # only the cosmos chapter, about 30 s
+   node burn.mjs --ffmpeg "$FFMPEG"    # joins it after the refusal chapter
+   ```
+4. Stop the UI and the vLLM server.
+
+Cosmos's verdicts vary from run to run, even at temperature 0. The take reads the verdict from the page (Pass, Fail at a
+named frame, or Unsure) and uses the caption written for that outcome. It stops with an error if the banner does not
+say the gate is on, or if the gate reports no verdict. The live take stops if the banner says Cosmos is on.
+`node burn.mjs --no-cosmos` builds the video without this chapter, and so does a burn with no recorded cosmos take.
 
 Outputs, all in `runs/video/` (gitignored):
 
@@ -68,7 +98,7 @@ A take that drifted is recorded again, never patched. Examples: a caption that d
 that was not loaded yet, a highlight in the wrong place.
 
 ```bash
-node record.mjs --list                              # title, live, repair, refusal, results, closing
+node record.mjs --list                              # title, live, repair, refusal, cosmos (optional), results, closing
 node record.mjs --chapter repair                    # only this take; the others stay as they are
 node burn.mjs --ffmpeg "$FFMPEG" --chapter repair   # re-burns repair, re-joins all chapters, re-extracts every frame
 ```
@@ -79,6 +109,7 @@ then shorter than its log). A take that cannot find what a caption names stops w
 Options:
 - `record.mjs --url` uses another UI address (default `http://172.18.80.1:7861/?__theme=light`).
 - `record.mjs --headed` shows the browser.
+- `record.mjs --cosmos` records the optional cosmos chapter alone (see above); `burn.mjs --no-cosmos` leaves it out.
 - `--out DIR` (both scripts) uses another output folder.
 
 ## How it works
