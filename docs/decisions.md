@@ -1969,6 +1969,9 @@ All model and provider text is HTML-escaped.
 
 **Ruling (owner's plan, Oct 19):** Cosmos stays a shadow annotator and the opt-in, advisory demo gate of D47. These are `test` frames, so the question wording, cameras and parser are not tuned against them. The source change (`records.py`, `frames.py`, `gate.py`, `cli.py`, new `evaluate/shadow.py`) changes the hashed digest after the freeze (D68); week 4 `dev` runs need `--allow-source-drift` or a re-prepared seed set.
 
+**Addendum (Oct 22, owner):** the UI's Cosmos-on banner now cites this study ("balanced accuracy 0.61 on real attempts and 0.52 on injected errors in our shadow study") instead of the D34 pilot's 0.70; `ui/views.py` and a test. The demo CLI's `demo-once` line still names the pilot figure.
+
+
 ## D74. A transport collision names the waypoints, not place (2026-10-20)
 
 **Problem (D70 finding):** the leg into the drop-off approach ends at a pose built from `place`, so its V-6 collision Finding named `plan_field` `place`. With no waypoints, the whole straight transport is that leg. Repair then often moved the drop-off point, which does not clear an obstacle between the object and the bin. Spec V-6 already names `transport_via[i]`; the code never produced the bare list name that the repair, planner and runner test fixtures already used.
@@ -2017,4 +2020,49 @@ These are facts, not fixes (D17), and tests tie each number to `motion/poses.py`
 - **"Leftmost":** `dev` has only 5 feasible leftmost tasks (4 → 5 correct), too few to measure.
 - **Impossible tasks:** correct refusals went 9 → 7 (config 1) and 15 → 13 (config 3) of 25.
 
-**Ruling (owner, Oct 21–22, after a Codex second opinion):** not merged; the frozen prompt stays, and `w4/prompt` stays as the record. D74's own effect is measured next with the frozen prompt (W4.0b, D76, spend cap $0.20). Further prompt work (W4.0c, `w4/prompt2`) is deferred until after the video: its config 1 run is complete and its config 3 run was stopped at 30 of 100 tasks.
+**Ruling (owner, Oct 21–22, after a Codex second opinion):** not merged; the frozen prompt stays, and `w4/prompt` stays as the record. D74's own effect is measured next with the frozen prompt (W4.0b, D76, spend cap $0.20). Further prompt work (W4.0c, `w4/prompt2`) is deferred until after the video: its config 1 run is complete and its config 3 run was stopped at 47 of 100 tasks.
+
+## D76. D74's measured effect on `dev` (W4.0b, 2026-10-22)
+
+**What ran (owner's OK Oct 21):** config 3 with the frozen prompt on all 100 `dev` tasks at `main` 2531621 (D74), Token Factory Lightning, `--max-rpm 15`, the 60 s deadline, `--allow-source-drift`. The digest was `7afc613f…`; of the drifted files, only `verify/checks.py` is on the attempt path.
+- Run: `runs/w4-d74/d74-c3` (local), on Oct 21. The first session stopped at 41 on three consecutive deadline failures; the resume finished 100 of 100.
+- Baseline: paired against D75's `base-c3` (frozen prompt, before D74, Oct 19), with the same tasks, provider, model and prompt.
+- Cost: 234 calls, $0.14.
+
+**A slower provider day:** answered calls took 29.2 s median against 8.7 s for `base-c3`, with about the same completion tokens (1,973 against 2,066). 17 attempts ended at the 60 s deadline against 4, on 14 of 75 feasible tasks against 4. The all-task figures count them as failures, which biases against `d74-c3`.
+
+**Result (feasible success, 75 paired tasks; paired bootstrap, exact McNemar):**
+
+| | Before D74 | D74 | Difference (95% CI) | p |
+|---|---|---|---|---|
+| All tasks (primary) | 50 (66.7%) | 48 (64.0%) | −2.7 (−17.3 to +12.0) | 0.86 |
+| No service failure on either side (59 tasks) | 42 (71.2%) | 47 (79.7%) | +8.5 (−6.8 to +23.7) | 0.41 |
+| Round 1 (config 2) | 14 (18.7%) | 15 (20.0%) | +1.3 (−9.3 to +12.0) | 1.00 |
+
+- Round 1 gets no Findings, so D74 cannot change it. Its 17 discordant tasks of 75 are sampling noise at temperature 0.7.
+- By obstacle count 0–3: 13 → 14, 13 → 9, 11 → 12, 13 → 13.
+
+**Findings:**
+- **D74 is active:** none of the 84 transport collision Findings name `place` (before: 83 of 103). 75 name `transport_via` and 9 name `transport_via[i]`.
+- **Fewer exhausted repairs:** 13 feasible attempts ran out of budget against 18 (11 against 13 with obstacles), and 16 used all four rounds against 23.
+  - Of the 15 tasks that turned into successes, 13 had exhausted their budget before.
+  - Of the 17 that turned into failures, 8 ended at the deadline.
+- **Waypoint height unchanged:** the lowest waypoint is at 0.200 m median in both runs; the held object's bottom sits +0.033 m against +0.034 m above the tallest obstacle.
+
+**Ruling (owner, Oct 22):** D74 stays on `main`. It names the field spec V-6 requires, is confirmed active, and shows no harm and fewer exhausted repairs. There is no established success gain at n = 75 on a slow-provider day. The D70 headline is unaffected.
+
+## D77. A revised prompt on top of D74: partial, kept open (2026-10-22)
+
+**What changed:** `w4/prompt2` e1d4d92, from `main` 2531621. It is the frozen prompt plus:
+- left is world +y;
+- transport moves in straight lines between key poses (lift above the grasp, each `transport_via` point, preplace above the release point) and avoids nothing;
+- `transport_via` points are held-object centers, so the object extends half its height below each.
+
+It gives no lift, preplace or clearance numbers, since in D75 they anchored low waypoints. Facts, not fixes (D17).
+
+**Results:**
+- Config 1, complete (`p2-c1`, Oct 21): 29 of 75 against the frozen prompt's 34, −6.7 points (−17.3 to +2.7). Without the 10 tasks that hit the deadline it is 29 against 29 of 65. No first plan in an obstacle scene used waypoints (0 of 48; frozen 2 of 56).
+- Config 3 was stopped at 47 of 100 tasks (`p2-c3`). Descriptively: 16 of 36 feasible tasks, against D76's `d74-c3` 20 on the same tasks.
+- Cost: $0.13 (all W4.0 runs together: $0.79).
+
+**Ruling (owner, Oct 22):** not merged, but kept open. Revisit after the video with a complete paired config 3 run (about $0.20, needs the owner's OK), ideally on a normal-latency day.
