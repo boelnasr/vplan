@@ -2115,3 +2115,72 @@ Both new files use only numbers recorded in this log and in `docs/results/`.
 - the YouTube link;
 - `demo-once` still prints the pilot's 0.70 (D73 addendum);
 - `.env.example` lists `COSMOS_BASE_URL`, which no code reads.
+
+## D80. Richer collision evidence (A1): promising, kept on its branch (2026-10-22)
+
+**What changed (`w4/evidence` e2cc655, ea40098, from `main` 0e4d54b):** a collision Finding's direction now names who came too close (the carried object, the hand or a finger, an arm link), to what kind of body (an obstacle, a bin wall, the bin floor, the table, another object, the robot), in which phase, and, against a scene body, how far the part's bottom is below or above that body's top. Example: "the carried object too close to an obstacle during transport (clearance 0.93 cm); its bottom is 0.044 m below the obstacle's top (top at z 0.148 m)". The vertical gap is measured from the collision shapes with a slab placed beyond each body's own AABB, so a tall obstacle reports its real top. Measurements only (D17); `measured`, `threshold`, `bodies`, `plan_field`, `stage` and `sample_index` are unchanged.
+
+**Measured (owner's OK, Oct 22):** config 3 on all 100 `dev` tasks, Token Factory Lightning, the frozen prompt, `--max-rpm 10`, `--allow-source-drift`, twice, each run paired with a `main` run at the same time.
+
+| Feasible success (75 tasks) | `main` | A1 | Difference (95% CI) | p |
+|---|---|---|---|---|
+| Pair 1 | 53 | 55 | +2.7 (−9.3 to +16.0) | 0.84 |
+| Pair 2 | 49 | 58 | +12.0 (−1.3 to +25.3) | 0.14 |
+| Both pairs (150) | 102 | 113 | +7.3 (−2.0 to +17.3) | 0.17 |
+
+- The pooled interval is a task-level bootstrap over the per-task mean of the two pairs; the p value is an exact McNemar test that treats the two pairs as independent.
+- Without a provider failure on either side: +6.6 (−4.9 to +18.0) on 61 tasks, and +12.9 (+0.0 to +25.7) on 70.
+- Exhausted repairs: 13 against 13 in pair 1, 13 against 21 in pair 2. Consecutive rounds with the same failure signature: 16 against 20, and 21 against 32.
+- Cost: $0.65 for the four runs.
+
+**Ruling (owner, Oct 22):** promising, not established. It is not merged before the submission: the Ultra `test` runs (D82) used `main` without it, and the submitted code should be the code that produced the published numbers.
+
+## D81. Round history as facts (A2): dropped (2026-10-22)
+
+**What changed (`w4/history` de6bd4e, 835e9c6):** the repair request summarized an earlier round as "round 1: blocked". Each line instead gave that round's outcome, whether it repeated the previous plan, and each Finding it carried (check, phase, plan field, the two bodies' kinds, measured against threshold). Body kinds come from the exact built-in names and scene membership, never a name prefix.
+
+**Measured with D80's pair 1:** 51 of 75 against 53, −2.7 (−16.0 to +12.0), p = 0.85. Consecutive rounds with the same failure signature rose from 20 to 29. $0.16.
+
+**Ruling (owner, Oct 22):** dropped. The branch stays as a record.
+
+## D82. Nemotron 3 Ultra on `dev` and `test`, reported beside D70 (2026-10-22)
+
+**Ultra on `dev` (owner's choice "A, then B on dev", Oct 22):** config 3 at `main` 0e4d54b, Token Factory Ultra, paired with D80's pair 1 `main` run (Lightning).
+- Feasible success: 66 of 75 (88.0%, 78.7–93.6%) against 53, +17.3 points (+5.3 to +29.3), exact McNemar p = 0.01; +18.0 (+8.2 to +29.5) without a provider failure on either side.
+- Exhausted repairs: 1 against 13. Planner calls: 130 against 217. Consecutive rounds with the same failure signature: 3 against 20. Impossible tasks refused: 22 of 25 against 14.
+- Cost: $1.40 at Ultra's catalog price ($1 and $3 per million input and output tokens), against $0.14.
+
+**Ultra on `test` (owner's OK Oct 22: configs 1, 3 and 7, about $16):** three runs at `main` 0e4d54b, started 19:28 UTC, each in one session, with `--max-rpm 10`, `--allow-paid`, `--allow-source-drift` and the 60 s deadline. Config 2 is round 1 of config 3, as in D70. `vplan report build` wrote `runs/ultra-test/report` (local); it is copied to `docs/results/ultra/`.
+
+| Config | Feasible success (n = 300) | 95% CI | Impossible tasks refused (n = 100) | Executions with a safety violation | Calls |
+|---|---|---|---|---|---|
+| 7, equal-budget resampling | 284 (94.7%) | 91.5–96.7% | 93 | 0 of 300 | 516 |
+| 3, verify + repair (k = 3) | 278 (92.7%) | 89.1–95.1% | 88 | 0 of 298 | 501 |
+| 1, unverified | 251 (83.7%) | 79.1–87.4% | 90 | 42 of 304 | 400 |
+| 2, verify only (round 1 of config 3) | 227 (75.7%) | 70.5–80.2% | 85 | 0 of 245 | 400 |
+
+- Repair gain (3 − 2): +17.0 points (13.0–21.3). Feedback gain (3 − 7, equal budget): −2.0 points (−5.7 to +1.7). With Ultra, feedback does not beat retrying at equal budget; with Lightning it did by +29.3 (D70).
+- Repair against unverified on the same tasks: 278 against 251, exact McNemar p < 0.001.
+- Safety: unverified Ultra had a collision (V1) in 42 of 304 executions, mostly with obstacles and the bin. No verified execution broke a safety predicate.
+- Why: Ultra gives transport waypoints. 184 of its 222 unverified first plans for feasible tasks with obstacles have them; Lightning's had 6 of 218 (D70). By obstacle count 0–3, repair succeeds on 73, 73, 69 and 63 of 75, resampling on 73, 68, 69 and 74.
+- Refusals: Ultra refuses an enclosed target (type 3) in 17–24 of 25 tasks per configuration; Lightning refused none. No configuration refused a feasible task.
+- Service failures: 8 of 1,417 calls (4, 3 and 1), so the report title says "DEGRADED".
+- Cost: 1,417 calls, $14.70 at catalog prices (configs 1, 3 and 7: $3.92, $5.59 and $5.19). Token Factory spend so far is about $20 of the $25 credit by these estimates.
+
+**Not a headline result.** The report labels every configuration "not a headline result: incompatible source provenance" (D59, D71). The runs used `main` 0e4d54b (digest `025b4b0c…`), not the frozen source. Of the drifted files, only `verify/checks.py` (D74) is on the attempt path, and it only changes the plan field that a transport collision's Finding names, which matters only to repair (config 3). The model was also chosen after the D70 results and Ultra's `dev` result were known. An earlier assessment that these runs met every headline condition was wrong; building the report caught it.
+
+**Ruling (owner, Oct 22):** D70 (Lightning, frozen source) stays the headline. The Ultra `test` runs are a second, clearly labelled result on the same 400 tasks, reported beside it, never instead of it. The README, the Devpost description, the spec and the video's results card show both.
+
+## D83. The demo video is retaken with an architecture chapter and both results (2026-10-23)
+
+**Request (owner, Oct 22):** prepare the submission, retake the video and add frames that explain the whole architecture.
+
+**What changed in `scripts/video/record.mjs`:**
+- **A new `architecture` chapter** (27.5 s) after the title. It shows the SVG of `docs/diagrams/system-overview.html` without its legend strip and walks through it in six boxed captions: the evaluation harness, Nemotron on Token Factory, the motion layer and the checks, repair from findings, execution and the independent Judge, and the optional Cosmos check.
+- **The results card shows both models:** Lightning as the headline (D70) and Ultra beside it, labelled as run later on code changed after the freeze (D82).
+- **To stay under 3 minutes:** shorter holds and chapter cards, the wall and planner captions merged into one, and the magenta close-up after round 2 of the repair left out.
+- **The closing card** names both Nemotron models.
+
+**Result:** every chapter re-recorded on Oct 22–23. `runs/video/vplan-demo.mp4` runs **2:56.9** (176.9 s), 1080p30, with 29 captions; 2:03 of it shows the modules in action (live, repair, refusal and Cosmos). All 74 event frames were checked. One take was re-recorded: a single box around the Verifier and the planner cut through the Cosmos node, so the findings caption now draws two boxes. The previous cut is kept locally as `vplan-demo.d78.mp4`.
+- The Cosmos take got Fail at the grasp frame this time: Cosmos said the cube was already held, a false rejection of a plan that passed all 8 checks. The take uses the caption written for that outcome (D78 addendum).
+- No live Nemotron calls and no cost.
