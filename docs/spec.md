@@ -26,6 +26,8 @@
 
 The 95% intervals are 20.1–29.8% and 59.4–70.2%. Unverified first attempts succeed on 43.3%, because the verifier also blocks some plans the Judge would pass, but 169 of their 346 executions broke a safety predicate; no verified execution did.
 
+**Second result, not a headline (measured Oct 22) [D82]:** Nemotron 3 Ultra on the same 400 `test` tasks, run after the freeze and after the Lightning results were known. Verified first attempts 75.7%, repair 92.7% (89.1–95.1%), equal-budget resampling 94.7%: the feedback gain is −2.0 points (−5.7 to +1.7), so feedback is what rescues the weaker model. Unverified Ultra collided in 42 of 304 executions; no verified execution did. It is reported beside the headline, never instead of it.
+
 **Supporting results:**
 - the margin over equal-budget resampling;
 - refusal accuracy on impossible tasks and false refusals on feasible ones;

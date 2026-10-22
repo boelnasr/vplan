@@ -5,20 +5,23 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 > **Bounded repair with verifier feedback raised Nemotron 3.5 Lightning's task success from 24.7% (verified first attempts) to 65.0% across 300 held-out, reference-solvable generated tasks. At equal budget, feedback beat resampling by 29.3 points (95% CI 23–36).**
 >
 > Nemotron 3.5 Lightning on Nebius Token Factory, held-out `test` set, Oct 18 (D70). Intervals and every configuration are under [Results](#results).
+>
+> Nemotron 3 Ultra, run later on the same tasks, reaches 92.7% with repair, but retrying at equal budget does as well (94.7%; difference −2.0 points, CI −5.7 to +1.7): feedback is what rescues the weaker model. No verified execution of either model broke a safety predicate. This second result is reported beside the headline, not instead of it (D82).
 
 ## Demo video
 
-[Watch on YouTube](<YOUTUBE_LINK>): 2:54, silent with burned-in captions, more than two minutes of it showing the modules in action.
+[Watch on YouTube](<YOUTUBE_LINK>): 2:57, silent with burned-in captions, more than two minutes of it showing the modules in action.
 
+- **Architecture:** the system diagram, one part at a time: the evaluation harness, Nemotron, the motion layer and the checks, repair from findings, execution and the independent Judge, and the optional Cosmos check.
 - **Live run:** the Gradio UI plans, verifies, executes and judges one task on the basic scene with a wall. The planner in this part is the rule-based baseline, so no key is needed.
 - **Repair (replay):** a recorded Nemotron 3.5 Lightning attempt from the held-out evaluation, replayed without keys. The checks reject a drop-off 8 cm too high, then a 0.95 cm transport clearance against the 1 cm minimum; the third plan adds high waypoints, executes and is judged a success.
 - **Refusal (replay):** Nemotron refuses an out-of-reach target and says why.
-- **Cosmos check (live):** a rule-based run with the Cosmos gate on. The plan passes all 8 checks, but Cosmos's replies cannot be read even with a third view, so nothing moves. It is captioned as advisory, with the shadow study's balanced accuracy of 0.61 and 0.52.
-- **Results:** the D70 numbers.
+- **Cosmos check (live):** a rule-based run with the Cosmos gate on. The plan passes all 8 checks, but Cosmos rejects it at the grasp frame (it says the cube is already held), so nothing moves. It is captioned as advisory, with the shadow study's balanced accuracy of 0.61 and 0.52.
+- **Results:** Lightning's held-out numbers (D70), with Ultra's beside them (D82).
 
-The video makes no live Nemotron calls (D78). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md).
+The video makes no live Nemotron calls (D78, D83). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md).
 
-> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 22, D78). Planner-prompt work on the `dev` set stays open (D77); it never changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
+> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt and feedback work on the `dev` set stays open (D77, D80); it never changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
 
 ## How it works
 
@@ -48,7 +51,7 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 | Model | Role | Served by |
 |---|---|---|
 | Nemotron 3.5 Lightning, `nvidia/Nemotron-3_5-Lightning` | Planner in every evaluation configuration (D62) | Nebius Token Factory: 2,510 calls in the final runs, about $1.61 at catalog prices (D70) |
-| Nemotron 3 Ultra, `nvidia/Nemotron-3-Ultra-550b-a55b` | Planner for live demos in the UI (D62) | Nebius Token Factory |
+| Nemotron 3 Ultra, `nvidia/Nemotron-3-Ultra-550b-a55b` | Planner for live demos in the UI (D62), and a second evaluation on `test` (D82) | Nebius Token Factory: 1,417 calls on `test`, about $14.70 at catalog prices (D82) |
 | Cosmos3-Edge, `nvidia/Cosmos3-Edge` | Advisory learned visual check: the opt-in demo gate and the shadow study (D47, D73) | vLLM on a local 16 GB GPU |
 
 - **Forced tool calls.** Both Nemotron models get one tool, `submit_plan`, whose parameters are the plan schema, and a forced `tool_choice`. Token Factory tags no Nemotron for JSON mode, so the tool call is the structured-output path (D13). In the Token Factory smoke test, Lightning returned 19 valid forced tool calls of 20 (the other hit a client-side connect timeout) and Ultra 20 of 20, with every reply carrying its `kind`; median 8.2 s and 8.6 s, slowest 28.5 s (D13).
@@ -75,13 +78,30 @@ The held-out `test` seed set holds 300 feasible and 100 provably impossible gene
 - **Cost and reliability.** 2,510 Token Factory calls cost about $1.61 at catalog prices (median 7.5–8.7 s per call). 35 calls (1.4%) failed at the provider and count as failures, which is why the report title says "DEGRADED".
 - These findings were made on `test`, so the frozen prompt stays as it is for these numbers. Prompt work moved to week 4 on `dev` (D70).
 
-**Development measurements on `dev` (week 4).** These ran after the freeze on the 100-task `dev` set (75 feasible), with Token Factory Lightning, each paired with a frozen-prompt run on the same tasks. They never change the D70 headline above.
+**Nemotron 3 Ultra on the same tasks ([D82](docs/decisions.md)).** On Oct 22, configs 1, 3 and 7 ran again with **Nemotron 3 Ultra on Nebius Token Factory**, on the same 400 `test` tasks with the same 60 s deadline. They ran on `main` after the freeze (D74 changed which plan field a transport collision names), and the model was chosen after the Lightning results were known, so the report labels them "not a headline result". They are reported beside the headline, not instead of it. Report: [`docs/results/ultra/report.html`](docs/results/ultra/report.html), numbers in [`metrics.json`](docs/results/ultra/metrics.json).
+
+| Config | Planner and gate | Feasible success (n = 300) | 95% CI | Impossible tasks refused (n = 100) | Executions with a safety violation |
+|---|---|---|---|---|---|
+| 3 | Ultra, verifier, repair from its findings (≤ 4 calls) | **278 (92.7%)** | 89.1–95.1% | 88 | 0 of 298 |
+| 7 | Ultra, verifier, independent resamples (≤ 4 calls) | 284 (94.7%) | 91.5–96.7% | 93 | 0 of 300 |
+| 2 | Ultra, verifier, first attempt only | 227 (75.7%) | 70.5–80.2% | 85 | 0 of 245 |
+| 1 | Ultra, no verifier | 251 (83.7%) | 79.1–87.4% | 90 | 42 of 304 |
+
+- **Feedback helps the weaker model.** With Ultra, repair and equal-budget resampling are level: −2.0 points (−5.7 to +1.7). Repair still adds +17.0 points (13.0–21.3) over the verified first attempt.
+- **Verification still matters.** Unverified Ultra collided in 42 of 304 executions. No verified execution of either model broke a safety predicate.
+- **Why Ultra does better.** It plans transport waypoints: 184 of its 222 unverified first plans for feasible tasks with obstacles have them, against 6 of 218 for Lightning. It also refuses enclosed targets, 17–24 of 25 per configuration, where Lightning refused none.
+- **Cost.** 1,417 calls cost about $14.70 at catalog prices; 8 failed at the provider, so the report title says "DEGRADED".
+
+**Development measurements on `dev` (week 4).** These ran after the freeze on the 100-task `dev` set (75 feasible), with Token Factory Lightning unless noted, each paired with a `main` run on the same tasks. They never change the D70 headline above.
 
 - **First prompt revision: not merged (D75).** Stating the lift and clearance numbers anchored repair waypoints too low. Config 3 (repair) fell from 50 to 42 of 75, −10.7 points (95% CI −26.7 to +4.0): an observed regression, not an established one, since the interval crosses zero. Verified first attempts (config 2) rose from 14 to 25.
 - **Transport collisions name the waypoints: kept (D74, D76).** A collision on the transport leg now names `transport_via` instead of `place`. With the frozen prompt, config 3 showed no harm and fewer exhausted repairs (13 against 18), but no established success gain: −2.7 points (−17.3 to +12.0), or +8.5 (−6.8 to +23.7) on the 59 tasks without a provider failure on either side. It ran on a slow provider day.
 - **A revised prompt on top of D74: open (D77).** Config 1 is complete, 29 of 75 against 34 (−6.7 points, −17.3 to +2.7); config 3 stopped at 47 of 100 tasks. It is to be revisited with a complete paired config 3 run.
+- **Richer collision evidence: promising, not merged (D80).** A collision Finding also says which part hit what kind of body, and how far the part's bottom sits below the body's top. Two paired config 3 runs: 53 → 55 and 49 → 58 of 75; together +7.3 points (−2.0 to +17.3). It stays on its branch, because the Ultra `test` runs used `main` without it.
+- **Earlier rounds as facts: dropped (D81).** 53 → 51 of 75, with more repeated failures.
+- **Nemotron 3 Ultra (D82).** Config 3: 66 of 75 against Lightning's 53 on the same tasks, +17.3 points (+5.3 to +29.3), with 1 exhausted repair against 13.
 
-The three measurements cost $0.79 at catalog prices (D77).
+The W4.0 measurements cost $0.79 at catalog prices (D77), and the D80–D82 `dev` runs $2.21.
 
 **Cosmos shadow study (config 4, [D73](docs/decisions.md)).** NVIDIA **Cosmos3-Edge**, served locally, answered the live gate's three stage questions about the key frames of all 215 executed config 3 attempts, plus 692 injected wrong-object and misaligned-grasp renders: 1,337 questions, scored against simulator state predicates. It never influenced the evaluation, so this measures only what a visual gate would have caught, not added success. It is not a usable gate: it falsely rejected 27% of correct pre-release frames (it reads the object as inside the bin, not over it), caught 1 of 159 wrong-object pre-grasps and 25 of 196 misaligned grasps, and reached balanced accuracy 0.61 against natural negatives and 0.52 against injected ones, at 1.3 s per request. The demo's Cosmos gate stays an advisory, learned check. Summary: [`docs/results/shadow/summary.md`](docs/results/shadow/summary.md).
 
@@ -260,7 +280,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 - **Safety:** V1–V4 counts per execution, with the bodies involved grouped by kind. "Zero observed violations in M executions" appears only when every counted execution was measured.
 - **Blocked plans:** counted by verifier check and by outcome. Physical-constraint failures (collision, grounding, joint limits, singularity, grasp, release) are kept apart from solver non-convergence (IK accuracy, continuity) and from malformed or failed model output.
 - **Breakdowns:** by stratum (distractors × obstacles, feasible tasks), by diagnostic attribution (spec §10), and by tokens and latency per configuration. Latency excludes the key-frame rendering.
-- **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Everything else is labelled a dry run or a development result. The final runs meet these conditions (D70).
+- **Headline:** a report is a headline result only when configs 2, 3 and 7 all ran complete on Nebius Token Factory over the held-out `test` seeds. Each configuration must also have run on the frozen source (D71). Everything else is labelled a dry run, a development result or not a headline result. The final runs meet these conditions (D70); the Ultra runs do not, because they ran after the freeze (D82).
 
 ## Limitations
 
