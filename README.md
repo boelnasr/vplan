@@ -19,7 +19,7 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 - **Cosmos check (live):** a rule-based run with the Cosmos gate on. The plan passes all 8 checks, but Cosmos rejects it at the grasp frame (it says the cube is already held), so nothing moves. It is captioned as advisory, with the shadow study's balanced accuracy of 0.61 and 0.52.
 - **Results:** Lightning's held-out numbers (D70), with Ultra's beside them (D82).
 
-The video makes no live Nemotron calls (D78, D83). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md).
+The video makes no live Nemotron calls (D78, D83). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md). The MP4 and its captions are also attached to the [`submission-data` release](https://github.com/boelnasr/vplan/releases/tag/submission-data).
 
 > **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt work on the `dev` set stays open (D77), and richer collision evidence was merged after the evaluation (D84); neither changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
 
@@ -59,7 +59,7 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 
 ## Results
 
-The held-out `test` seed set holds 300 feasible and 100 provably impossible generated tasks (seed-set hash `834d1931…`). Every Nemotron configuration used **Nemotron 3.5 Lightning on Nebius Token Factory**, with a 60 s deadline per call ([D70](docs/decisions.md)). The full report is [`docs/results/report.html`](docs/results/report.html), a self-contained file to download and open in a browser; its numbers are in [`metrics.json`](docs/results/metrics.json).
+The held-out `test` seed set holds 300 feasible and 100 provably impossible generated tasks (seed-set hash `834d1931…`). Every Nemotron configuration used **Nemotron 3.5 Lightning on Nebius Token Factory**, with a 60 s deadline per call ([D70](docs/decisions.md)). The full report is [`docs/results/report.html`](docs/results/report.html), a self-contained file to download and open in a browser; its numbers are in [`metrics.json`](docs/results/metrics.json). Every attempt record and the seed set are in the [`submission-data` release](https://github.com/boelnasr/vplan/releases/tag/submission-data); unzip them at the repo root to replay any attempt in the UI ([checklist](docs/submission/checklist.md#replaying-the-evaluation-optional)).
 
 | Config | Planner and gate | Feasible success (n = 300) | 95% CI | Impossible tasks refused (n = 100) | Executions with a safety violation |
 |---|---|---|---|---|---|
