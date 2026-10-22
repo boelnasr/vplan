@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Burns the overlays into the clean takes from record.mjs and joins them into the demo video (W4.3).
 //
-// From each <chapter>.events.json it maps the take's clock onto the cut video (the chapter start, cuts and speed-ups),
-// then writes:
+// From each <chapter>.events.json it maps the take's clock onto the cut video (the chapter start and the cuts), then
+// writes:
 //   ass/<chapter>.ass        captions, highlight boxes and click rings for that chapter (burned in with libass)
 //   chapters/<chapter>.mp4   the chapter: H.264, yuv420p, 1920x1080, 30 fps
 //   vplan-demo.mp4           all chapters joined, in order.json's order
@@ -30,9 +30,9 @@ const FADE_S = 0.3; // fade in and out of every chapter, through the UI's backgr
 const BG = '0xf8fafc'; // slate 50, the UI's page background
 
 // Overlay style: captions white on slate 900; boxes orange 600 (it stands out from the UI's blue, green and red
-// badges, and from the magenta of the highlighted parts); click rings blue 600, the UI's accent.
+// badges, and from the magenta of the highlighted parts), and click rings in the same orange with a white halo, so
+// they also show on the UI's blue buttons.
 const ASS_ORANGE = '&H0C58EA&'; // #EA580C as &HBBGGRR&
-const ASS_BLUE = '&HEB6325&'; // #2563EB
 const ASS_WHITE = '&HFFFFFF&';
 const BOX_PAD = 8;
 const BOX_RADIUS = 12;
@@ -74,33 +74,25 @@ const r3 = (x) => Math.round(x * 1000) / 1000;
 
 // ---- the timeline of one chapter ---------------------------------------------------------------------------------
 
-// Kept spans of the take [s, e) with their speed factor, in take time: [start, end] minus the cuts, with the
-// speed-ups applied. map(t) gives the time in the burned chapter.
+// Kept spans of the take [s, e), in take time: [start, end] minus the cuts. map(t) gives the time in the burned
+// chapter.
 function timeline(doc) {
   const cuts = doc.events.filter((e) => e.type === 'cut').map((e) => [e.t, e.t + e.dur]).sort((a, b) => a[0] - b[0]);
-  const speeds = doc.events.filter((e) => e.type === 'speed').map((e) => [e.t, e.t + e.dur, e.factor]);
   let spans = [[doc.start, doc.end]];
   for (const [c0, c1] of cuts) {
     spans = spans.flatMap(([s, e]) => (c1 <= s || c0 >= e ? [[s, e]] : [[s, c0], [c1, e]].filter(([a, b]) => b - a > 1e-3)));
   }
-  let segs = spans.map(([s, e]) => ({ s, e, f: 1 }));
-  for (const [p0, p1, f] of speeds) {
-    segs = segs.flatMap((g) => {
-      if (p1 <= g.s || p0 >= g.e || g.f !== 1) return [g];
-      return [{ s: g.s, e: Math.max(g.s, p0), f: 1 }, { s: Math.max(g.s, p0), e: Math.min(g.e, p1), f },
-        { s: Math.min(g.e, p1), e: g.e, f: 1 }].filter((x) => x.e - x.s > 1e-3);
-    });
-  }
+  const segs = spans.map(([s, e]) => ({ s, e }));
   let acc = 0;
   for (const g of segs) {
     g.out = acc;
-    acc += (g.e - g.s) / g.f;
+    acc += g.e - g.s;
   }
   const duration = acc;
   const map = (t) => {
     if (t <= segs[0].s) return 0;
     for (const g of segs) {
-      if (t < g.e) return t < g.s ? g.out : g.out + (t - g.s) / g.f; // inside a cut: where the next span starts
+      if (t < g.e) return t < g.s ? g.out : g.out + (t - g.s); // inside a cut: where the next span starts
     }
     return duration;
   };
@@ -154,7 +146,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 }
 
-const assText = (s) => s.replace(/\\/g, '/').replace(/[{}]/g, (c) => (c === '{' ? '(' : ')')).replace(/\n/g, '\\N');
+// A no-break space (between a number and its unit) becomes ASS's hard space \h, so a line never breaks inside "8 cm"
+const assText = (s) => s.replace(/\\/g, '/').replace(/[{}]/g, (c) => (c === '{' ? '(' : ')')).replace(/\n/g, '\\N')
+  .replace(/\u00a0/g, '\\h');
 
 function roundedRect(w, h, r) {
   const f = (n) => Math.round(n * 10) / 10;
@@ -190,11 +184,13 @@ function assLines(items, offset = 0) {
     } else if (o.type === 'click' && o.rect) {
       const cx = Math.round(o.rect.x + o.rect.width / 2);
       const cy = Math.round(o.rect.y + o.rect.height / 2);
+      const ring = `\\an5\\pos(${cx},${cy})\\p1\\shad0\\1a&HFF&\\fscx60\\fscy60`;
       dlg(3, o.t, o.t + 0.6, 'Shape',
-        `{\\an5\\pos(${cx},${cy})\\p1\\shad0\\1a&HFF&\\bord4\\3c${ASS_BLUE}\\fscx60\\fscy60` +
-        `\\t(0,550,\\fscx260\\fscy260\\3a&HFF&)}${circle(18)}`);
+        `{${ring}\\bord8\\3c${ASS_WHITE}\\3a&H40&\\t(0,550,\\fscx260\\fscy260\\3a&HFF&)}${circle(18)}`);
+      dlg(4, o.t, o.t + 0.6, 'Shape',
+        `{${ring}\\bord4\\3c${ASS_ORANGE}\\t(0,550,\\fscx260\\fscy260\\3a&HFF&)}${circle(18)}`);
       dlg(4, o.t, o.t + 0.35, 'Shape',
-        `{\\an5\\pos(${cx},${cy})\\p1\\shad0\\bord0\\1c${ASS_BLUE}\\1a&H30&\\fad(0,200)}${circle(9)}`);
+        `{\\an5\\pos(${cx},${cy})\\p1\\shad0\\bord2\\3c${ASS_WHITE}\\1c${ASS_ORANGE}\\1a&H20&\\fad(0,200)}${circle(9)}`);
     }
   }
   return lines;
@@ -229,7 +225,7 @@ async function burnChapter(opts, name, doc, tl) {
   const items = overlays(doc, tl);
   await fs.writeFile(path.join(cwd, 'ass', `${name}.ass`), assHeader() + assLines(items).join('\n') + '\n');
   const parts = tl.segs.map((g, i) =>
-    `[0:v]trim=start=${r3(g.s)}:end=${r3(g.e)},setpts=(PTS-STARTPTS)${g.f !== 1 ? `/${g.f}` : ''}[s${i}]`);
+    `[0:v]trim=start=${r3(g.s)}:end=${r3(g.e)},setpts=PTS-STARTPTS[s${i}]`);
   const joined = tl.segs.length > 1
     ? `${tl.segs.map((_, i) => `[s${i}]`).join('')}concat=n=${tl.segs.length}:v=1:a=0[cat]`
     : null;
@@ -270,6 +266,12 @@ async function main() {
       doc.end = r3(doc.end + shift);
       for (const e of doc.events) e.t = r3(e.t + shift);
     }
+    // record.mjs re-records such takes; this catches an older one (see webmDurationSeconds there)
+    const recorded = probeDuration(opts, cwd, doc.video);
+    if (recorded < doc.end - 0.6) {
+      throw new Error(`${doc.video} is ${recorded.toFixed(2)} s but its take ran ${doc.end.toFixed(2)} s: frames are ` +
+        `missing at its start, so its events would be early. Re-record it: node record.mjs --chapter ${name}`);
+    }
     const tl = timeline(doc);
     const redo = !opts.chapters || opts.chapters.includes(name) || !existsSync(path.join(cwd, 'chapters', `${name}.mp4`));
     let items;
@@ -296,7 +298,9 @@ async function main() {
     ass.push(...assLines(c.items, offset));
     for (const o of c.items) {
       global.push({ ...o, chapter: c.name, gt: r3(o.t + offset), gend: r3(o.end + offset) });
-      if (o.type === 'caption') srt.push(`${srt.length + 1}\n${srtTime(o.t + offset)} --> ${srtTime(o.end + offset)}\n${o.text}\n`);
+      if (o.type === 'caption') {
+        srt.push(`${srt.length + 1}\n${srtTime(o.t + offset)} --> ${srtTime(o.end + offset)}\n${o.text.replace(/\u00a0/g, ' ')}\n`);
+      }
     }
     offset += c.duration;
   }

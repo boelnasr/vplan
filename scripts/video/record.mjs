@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Scripted, repeatable takes of the vplan demo video (W4.3). One browser context, so one .webm, per chapter.
 //
-// Every take starts from a reset state (a fresh page load) and logs its events (chapter, caption, box, click, cut,
-// speed) with t in seconds from the start of that take's video. The takes are recorded clean: nothing is drawn into
+// Every take starts from a reset state (a fresh page load) and logs its events (chapter, caption, box, click, cut)
+// with t in seconds from the start of that take's video. The takes are recorded clean: nothing is drawn into
 // the page. burn.mjs adds captions, highlight boxes and click rings afterwards from the logs.
 //
 // Takes wait on UI state (an element visible, a text present), never on fixed sleeps alone; the fixed holds are
@@ -69,9 +69,14 @@ box-shadow:0 1px 2px rgba(15,23,42,.06)}
 .hero .tile{flex:1}
 .arrow{font-size:72px;color:var(--muted)}
 .reveal{opacity:0;animation:in .6s ease forwards}
+body::after{content:"";position:fixed;right:0;bottom:0;width:4px;height:4px;background:#f8fafc;animation:hb .25s steps(2) infinite}
+@keyframes hb{50%{background:#f7f9fb}}
 @keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 `;
 
+// The corner heartbeat (body::after, one shade of grey, invisible in the video) keeps the browser sending frames
+// while a card is still: Playwright's recorder starts the video at its first frame, so a card that is never
+// repainted would be missing from the start of the take, and every later event would be early by its length.
 function cardPage(body) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>vplan</title><style>${CARD_CSS}</style>` +
     `</head><body><div class="wrap">${body}</div></body></html>`;
@@ -115,13 +120,13 @@ const CARDS = {
       <div class="tile reveal" style="animation-delay:5.4s"><div class="big green">0 unsafe</div>
         <div class="lbl">verified executions. Without the checks: 169 of 346 broke a safety rule.</div></div>
       <div class="tile reveal" style="animation-delay:7.4s"><div class="big">100%</div>
-        <div class="lbl">rule-based baseline with the same checks: every solvable task is built so it can solve it</div></div>
+        <div class="lbl">rule-based baseline with the same checks. By design, every solvable task is one it can solve.</div></div>
     </div>
     <div class="foot reveal" style="margin-top:34px;animation-delay:8.4s">Held-out set: 300 solvable and 100 impossible
     generated tasks. The planner prompt was frozen before it was generated.</div>`),
   closing: cardPage(`
     <h1 style="font-size:84px"><span class="brand">vplan</span> LLMs plan, physics verifies</h1>
-    <p class="lead">Planner: NVIDIA Nemotron, served by Nebius Token Factory.<br>Checks: ManipulaPy kinematics and
+    <p class="lead" style="font-size:35px;max-width:1440px">Planner: NVIDIA Nemotron, served by Nebius Token Factory.<br>Checks: ManipulaPy kinematics and
     PyBullet collision checks, before anything moves.<br>Judge: independent scoring in PyBullet physics.</p>
     <div class="foot">Open source under AGPL-3.0 · Every recorded attempt replays without keys</div>`),
 };
@@ -230,9 +235,15 @@ class Take {
     this.caption_ = null;
   }
 
-  // A highlight box around an element, measured now (the page must not scroll while it is open).
+  // A highlight box around an element (or around several: their union), measured now; the page must not scroll
+  // while it is open.
   async box(locator, label = '') {
-    const rect = await rectOf(locator);
+    const rects = await Promise.all([].concat(locator).map(rectOf));
+    const x0 = Math.min(...rects.map((r) => r.x));
+    const y0 = Math.min(...rects.map((r) => r.y));
+    const x1 = Math.max(...rects.map((r) => r.x + r.width));
+    const y1 = Math.max(...rects.map((r) => r.y + r.height));
+    const rect = { x: round(x0), y: round(y0), width: round(x1 - x0), height: round(y1 - y0) };
     this.boxes.push(this.log('box', { text: label || this.caption_?.text || '', rect }));
   }
 
@@ -246,10 +257,14 @@ class Take {
     this.unbox();
   }
 
+  // Hover, log, then click 0.3 s later: the ring starts while the clicked element is still on screen (a dropdown
+  // option or a thumbnail disappears on the click itself).
   async click(locator, label = '') {
     await locator.scrollIntoViewIfNeeded();
+    await locator.hover();
     const rect = await rectOf(locator);
     this.log('click', { text: label, rect });
+    await this.page.waitForTimeout(300);
     await locator.click();
     // the recording shows no pointer; parked in the empty margin it leaves no hover style behind
     await this.page.mouse.move(VIEWPORT.width - 24, VIEWPORT.height / 2);
@@ -262,7 +277,7 @@ class Take {
 
   // Wait for a UI state. A wait longer than lead + tail is cut in burn.mjs, keeping its first `lead` and last `tail`
   // seconds, so the video shows that the page worked without showing the whole wait.
-  async until(what, fn, { timeout = 120_000, lead = 0.6, tail = 0.4, cut = true } = {}) {
+  async until(what, fn, { lead = 0.6, tail = 0.4 } = {}) {
     const t1 = this.now();
     try {
       await fn();
@@ -270,17 +285,13 @@ class Take {
       throw new TakeError(`${this.name}: timed out waiting for ${what}: ${err.message.split('\n')[0]}`);
     }
     const t2 = this.now();
-    if (cut && t2 - t1 > lead + tail + 0.3) this.log('cut', { t: round(t1 + lead), dur: round(t2 - t1 - lead - tail), text: what });
+    if (t2 - t1 > lead + tail + 0.3) this.log('cut', { t: round(t1 + lead), dur: round(t2 - t1 - lead - tail), text: what });
   }
 
   // Cut everything from t1 to now (a pre-roll between a chapter card and the loaded page).
   cutSince(t1, what, tail = 0.1) {
     const t2 = this.now() - tail;
     if (t2 > t1) this.log('cut', { t: round(t1), dur: round(t2 - t1), text: what });
-  }
-
-  speed(t1, factor, what) {
-    this.log('speed', { t: round(t1), dur: round(this.now() - t1), factor, text: what });
   }
 
   // Scroll the page (as a reader would, smoothly) so the element's top sits `top` px below the viewport's top.
@@ -352,6 +363,27 @@ class Take {
     this.end = round(this.now());
   }
 }
+
+// Duration of a WebM file in seconds, from its Segment Info: Duration (0x4489, a float in TimecodeScale units) and
+// TimecodeScale (0x2AD7B1, nanoseconds per unit, 1,000,000 by default). null when the header does not say.
+function webmDurationSeconds(buf) {
+  const head = buf.subarray(0, Math.min(buf.length, 1 << 16));
+  let scale = 1e6;
+  const ts = head.indexOf(Buffer.from([0x2a, 0xd7, 0xb1]));
+  if (ts >= 0) {
+    const n = head[ts + 3] & 0x0f; // size byte 0x8n: n bytes follow
+    let v = 0;
+    for (let k = 0; k < n; k++) v = v * 256 + head[ts + 4 + k];
+    if (v > 0) scale = v;
+  }
+  for (let i = head.indexOf(Buffer.from([0x44, 0x89])); i >= 0; i = head.indexOf(Buffer.from([0x44, 0x89]), i + 1)) {
+    if (head[i + 2] === 0x88) return (head.readDoubleBE(i + 3) * scale) / 1e9;
+    if (head[i + 2] === 0x84) return (head.readFloatBE(i + 3) * scale) / 1e9;
+  }
+  return null;
+}
+
+class LostFramesError extends Error {}
 
 function round(x) {
   return Math.round(x * 1000) / 1000;
@@ -523,7 +555,8 @@ async function repairTake(take) {
   take.cutSince(t0, 'page load');
 
   await take.caption('A recorded attempt by NVIDIA Nemotron 3.5 Lightning on a held-out task. Replay needs no API key, GPU or network.');
-  await take.box(tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Run folder or recording/ }) }));
+  await take.box([tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Run folder or recording/ }) }),
+    tab(page).locator('.block.padded').filter({ has: page.getByRole('textbox', { name: /^Seed-set folder/ }) })]);
   await take.hold(4.5);
   await take.caption('Pick the attempt and replay it.');
   await replay(take, 'Task 1 (test set) · Executed · success', 'Success');
@@ -536,14 +569,14 @@ async function repairTake(take) {
 
   const rounds = ui.rounds(page);
   await take.scrollTo(rounds.nth(0), 80);
-  await take.caption("Round 1: Nemotron's first plan sets the drop-off point 8 cm too high. The checks reject it before anything moves.");
+  await take.caption("Round 1: Nemotron's first plan sets the drop-off point 8\u00a0cm too high. The checks reject it before anything moves.");
   await take.expectText(rounds.nth(0), /measured 0\.08 m/, 'the drop-off height finding');
-  await take.box(rounds.nth(0).locator('tr.vp-row-fail'));
+  await take.box(rounds.nth(0));
   await take.hold(6);
 
-  await take.caption('Round 2: told what failed, it fixes the height. Now the carried cylinder passes 0.95 cm from the wall; the minimum is 1 cm.');
+  await take.caption('Round 2: told what failed, it fixes the height. Now the carried cylinder passes 0.95\u00a0cm from the wall; the minimum is 1\u00a0cm.');
   await take.expectText(rounds.nth(1), /clearance 0\.95 cm \(minimum 1\.00 cm\)/, 'the clearance finding');
-  await take.box(rounds.nth(1).locator('tr.vp-row-fail'));
+  await take.box(rounds.nth(1));
   await take.hold(6.5);
 
   const gallery = tab(page).locator('.block:has(.grid-wrap, .preview)').filter({ hasText: 'What failed: problem parts in magenta' });
@@ -598,7 +631,7 @@ async function refusalTake(take) {
   await take.box(ui.outcome(page));
   await take.hold(4.5);
 
-  await take.caption('Nemotron refuses instead of planning, and says why: the cylinder is about 1.2 m away, beyond the 0.95 m reach.');
+  await take.caption('Nemotron refuses instead of planning, and says why: the cylinder is about 1.2\u00a0m away, beyond the 0.95\u00a0m reach.');
   await take.expectText(ui.rounds(page).first(), /approximately 1\.20 m/, 'the refusal explanation');
   await take.box(ui.rounds(page).first());
   await take.hold(6);
@@ -648,6 +681,13 @@ async function recordChapter(browser, chapter, opts) {
   }
   await video.saveAs(webm);
   await fs.rm(tmp, { recursive: true, force: true });
+  // The video starts at the first frame the browser sent; if that came late, the video is shorter than the log and
+  // every event would be early by the difference. Such a take has drifted: record it again.
+  const duration = webmDurationSeconds(await fs.readFile(webm));
+  if (duration !== null && duration < take.end - 0.6) {
+    throw new LostFramesError(`${chapter.name}: the video is ${duration.toFixed(2)} s but the take ran ` +
+      `${take.end.toFixed(2)} s (frames missing at its start)`);
+  }
   const doc = {
     chapter: chapter.name, video: path.basename(webm), viewport: VIEWPORT, url: opts.url,
     recorded_at: new Date(take.ref).toISOString(), ref_epoch_ms: take.ref, start: take.start, end: take.end,
@@ -701,13 +741,23 @@ async function main() {
   if (existsSync(WINDOWS_FONTS) && !process.env.FONTCONFIG_FILE) env.FONTCONFIG_FILE = path.join(HERE, 'fonts.conf');
   const browser = await chromium.launch({ headless: !opts.headed, env });
   try {
-    for (const chapter of chosen) await recordChapter(browser, chapter, opts);
+    for (const chapter of chosen) {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await recordChapter(browser, chapter, opts);
+          break;
+        } catch (err) {
+          if (!(err instanceof LostFramesError) || attempt >= 3) throw err;
+          log(`${err.message}; recording it again (attempt ${attempt + 1} of 3)`);
+        }
+      }
+    }
   } finally {
     await browser.close();
   }
 }
 
 main().catch((err) => {
-  process.stderr.write(`record.mjs: ${err instanceof TakeError ? err.message : err.stack}\n`);
+  process.stderr.write(`record.mjs: ${err instanceof TakeError || err instanceof LostFramesError ? err.message : err.stack}\n`);
   process.exit(1);
 });
