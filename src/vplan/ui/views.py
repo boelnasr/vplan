@@ -77,8 +77,8 @@ OUTCOME_WORDS = {"executed": "Executed", "blocked": "Rejected", "refused": "Refu
 # Cosmos banners (spec §11, D22, D47, D58). The outage text is the CLI's (cli._cosmos_gate), so demo and UI agree.
 COSMOS_OFF = f"Cosmos visual check off: approved plans execute on the {CHECKS_NAME} only."
 COSMOS_DOWN = "COSMOS UNAVAILABLE - proceeding on the geometric checks only"  # the CLI's words; keep them identical
-COSMOS_ON = (f"Cosmos visual check on: a learned check after the {CHECKS_NAME} pass, not verification (balanced "
-             "accuracy 0.70 in our pilot).")
+COSMOS_ON = (f"Cosmos visual check on: a learned, advisory check after the {CHECKS_NAME} pass, not verification "
+             "(balanced accuracy 0.61 on real attempts and 0.52 on injected errors in our shadow study).")
 COSMOS_SKIPPED = ("Cosmos visual check skipped (the instruction names no single object to ask about): approved plans "
                   f"execute on the {CHECKS_NAME} only.")
 COSMOS_NONE = (f"This attempt ran without the Cosmos visual check, on the {CHECKS_NAME} only (evaluation runs never "

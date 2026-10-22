@@ -341,6 +341,12 @@ def test_headlines_and_banners_carry_no_internal_terms(outcome):
         assert not JARGON.search(text), text
 
 
+def test_the_cosmos_on_banner_cites_the_shadow_study_not_the_pilot():
+    # The shadow study (D73) over the final run replaced the 30-frame pilot's 0.70 as the measured figure.
+    assert "0.61" in views.COSMOS_ON and "0.52" in views.COSMOS_ON and "0.70" not in views.COSMOS_ON
+    assert "not verification" in views.COSMOS_ON
+
+
 def test_judge_contacts_and_failed_criteria_are_named():
     j = records.JudgeResult(success=False, predicates={"S1": True, "S2": True, "V1": False, "V2": True, "V3": True,
                                                       "V4": True},
