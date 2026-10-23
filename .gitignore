@@ -8,3 +8,11 @@ __pycache__/
 .env.*
 !.env.example
 scripts/video/node_modules/
+
+# Agent instructions and planning notes (Claude Code, Codex): kept locally, not published
+CLAUDE.md
+AGENTS.md
+docs/plan.md
+docs/plans/
+docs/handover/
+docs/reviews/

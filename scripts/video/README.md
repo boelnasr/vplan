@@ -32,7 +32,7 @@ captions. This is a separate tool, not part of the Python package or the Docker 
 
 ## Record and burn
 
-From the repository root (Windows Python from WSL, as in `CLAUDE.md`), start the UI. It listens on the WSL gateway
+From the repository root (Windows Python from WSL, as on the development machine), start the UI. It listens on the WSL gateway
 address, the default route in `ip route`, so that Chromium in WSL can reach it:
 
 ```bash

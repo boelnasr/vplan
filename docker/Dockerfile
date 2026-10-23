@@ -1,4 +1,4 @@
-# vplan Jobs image (spec §4 "Jobs container", docs/plan.md W3.4 R8): CPU only, exactly the uv.lock dependencies,
+# vplan Jobs image (spec §4 "Jobs container", R8): CPU only, exactly the uv.lock dependencies,
 # headless PyBullet. Build from the repo root:  docker build --file docker/Dockerfile --tag vplan:local .
 # linux/amd64 only: pybullet 3.2.7 has a CPython 3.10 Linux wheel for x86_64 only, so no source build is needed.
 #

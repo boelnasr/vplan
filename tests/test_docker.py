@@ -1,4 +1,4 @@
-"""R8 container files, checked without Docker (docs/plan.md W3.4): the build context never carries secrets or run
+"""R8 container files, checked without Docker (spec §4 "Jobs container"): the build context never carries secrets or run
 output, and the image installs exactly the locked dependencies (spec §4: pinned, CPU-only Jobs container)."""
 from __future__ import annotations
 

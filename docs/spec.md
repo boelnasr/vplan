@@ -538,7 +538,7 @@ Until the release, the hackathon code works around all four (§8) and pins 1.4.1
 - a project description;
 - the feedback write-up on the Nebius and NVIDIA tools (required).
 
-## 19. Verification items (each with a scheduled test in `docs/plan.md`)
+## 19. Verification items (each with a test in `tests/`)
 
 These are facts the design depends on that haven't been confirmed yet:
 1. A forced named `tool_choice` works on Token Factory's `Nemotron-3-Ultra-550b-a55b` (no "function calling" catalog tag; D13 fallback otherwise) [D13, D30].

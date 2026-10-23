@@ -35,7 +35,7 @@ are needed for these steps.
      OpenAI Python SDK, Nebius Token Factory, NVIDIA Nemotron, Nemotron 3.5 Lightning, Nemotron 3 Ultra, NVIDIA Cosmos,
      Cosmos3-Edge, vLLM, CUDA, Docker, Playwright, Node.js, FFmpeg, URDF, HTML, GitHub.
    - Image gallery: the eight images in [`media/`](media/README.md), in order, with the captions listed there.
-4. **Check before submitting** (the rules in `CLAUDE.md`, "Hackathon constraints"):
+4. **Check before submitting** (the [hackathon rules](https://nebiusglobalaihackathon.devpost.com/rules)):
    - the repo is public and has `LICENSE` and a README with setup instructions;
    - the video is under 3 minutes (2:57) and over 1 minute shows the modules in action (2:03);
    - Nemotron runs on Nebius Token Factory (D70, D82, D85), and at least one NVIDIA open model is used;

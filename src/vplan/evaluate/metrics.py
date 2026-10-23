@@ -55,7 +55,7 @@ NEMOTRON_CONFIGS = frozenset({1, 2, 3, 7})  # the configurations spec §14 runs 
 HEADLINE_CONFIGS = (2, 3, 7)  # a headline report needs all three, each from a complete run on Token Factory
 HEADLINE_SPLIT = "test"  # spec §14: the held-out seeds; a report on any other seed set is never a headline
 # Provider names that count as Token Factory. pilot.run_live names a non-OpenRouter provider by its host, and
-# docs/plan.md gives the Token Factory base URL https://api.tokenfactory.nebius.com/v1/.
+# the Token Factory base URL is https://api.tokenfactory.nebius.com/v1/ (D13).
 TOKEN_FACTORY_PROVIDERS = frozenset({"api.tokenfactory.nebius.com"})
 DRY_RUN_LABEL = "dry run, not a headline result"
 TOKEN_FACTORY_LABEL = "Nebius Token Factory run (headline source)"

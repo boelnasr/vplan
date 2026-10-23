@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# R8 local check (docs/plan.md W3.4): build the vplan image, then inside it
+# R8 local check (spec §4 "Jobs container"): build the vplan image, then inside it
 #   (a) run the full test suite, and
 #   (b) prepare 10 witness-validated tasks through the real pipeline (heuristic plan, verify, execute, judge).
 # Nothing here needs credentials: no env file is mounted or passed, and both containers run without a network.

@@ -325,7 +325,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `docker/` | The locked Linux image and the R8 local check |
 | `scripts/video/` | The scripted demo-video recorder ([README](scripts/video/README.md), [storyboard](scripts/video/storyboard.md)) |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
-| `docs/` | [Spec](docs/spec.md), [plan](docs/plan.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [diagrams](docs/diagrams/), [submission texts](docs/submission/), [related work](docs/related-work.md), reviews |
+| `docs/` | [Spec](docs/spec.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [diagrams](docs/diagrams/), [submission texts](docs/submission/), [related work](docs/related-work.md), reviews |
 
 ## Conventions
 

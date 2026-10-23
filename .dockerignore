@@ -1,4 +1,4 @@
-# Build context for docker/Dockerfile (R8, docs/plan.md W3.4).
+# Build context for docker/Dockerfile (R8, spec §4 "Jobs container").
 # Allowlist: '*' drops everything (also .git, .claude/ with its worktrees, .superpowers/, runs/, .venv and docs/
 # except docs/spec.md), then only what the image copies comes back. A new top-level file reaches the image only
 # by being listed here.
