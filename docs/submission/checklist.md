@@ -11,6 +11,8 @@ are needed for these steps.
   - `captions.srt`: the same captions as a subtitle file, for the upload.
   - `vplan-runs-lightning-test-d70.zip`: the final evaluation's attempt records (D70) and the `test` seed set.
   - `vplan-runs-ultra-test-d82.zip`: the Nemotron 3 Ultra runs on `test` (D82) and the same seed set.
+  - `vplan-runs-a1-test-d85.zip`: config 3 rerun on `test` with the merged findings, Lightning and Ultra (D85), and the
+    same seed set.
 
 ## Steps
 
@@ -21,18 +23,21 @@ are needed for these steps.
    YouTube URL. Commit to `main`.
 3. **Fill in Devpost.**
    - Project name: **vplan: LLMs plan, physics verifies**.
+   - Elevator pitch (179 of 200 characters): "NVIDIA Nemotron plans robot pick-and-place; physics checks every plan
+     before anything moves and sends failures back for repair. 65% success vs 43% unverified, 0 unsafe executions."
    - Track: **Physical AI**.
    - Story sections (Inspiration, What it does, How we built it, Challenges, Accomplishments, What we learned, What's
      next): paste from [`description.md`](description.md). Its "How we use NVIDIA models" section answers the NVIDIA
      model question.
    - Feedback on the Nebius and NVIDIA tools: paste from [`feedback.md`](feedback.md).
    - Repo URL and video URL as above.
+   - Thumbnail: [`thumbnail.png`](thumbnail.png) (3000×2000, 3:2).
    - Built with: Python, PyBullet, ManipulaPy, Gradio, Pydantic, Nebius Token Factory, NVIDIA Nemotron 3.5 Lightning,
      NVIDIA Nemotron 3 Ultra, NVIDIA Cosmos3-Edge, vLLM.
 4. **Check before submitting** (the rules in `CLAUDE.md`, "Hackathon constraints"):
    - the repo is public and has `LICENSE` and a README with setup instructions;
    - the video is under 3 minutes (2:57) and over 1 minute shows the modules in action (2:03);
-   - Nemotron runs on Nebius Token Factory (D70, D82), and at least one NVIDIA open model is used;
+   - Nemotron runs on Nebius Token Factory (D70, D82, D85), and at least one NVIDIA open model is used;
    - the description says how the NVIDIA models are used, and the feedback is filled in.
 
 ## Replaying the evaluation (optional)
