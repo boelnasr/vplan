@@ -72,7 +72,8 @@ class UISettings:
 
     def __post_init__(self) -> None:
         if self.byok and (self.record_dir is not None or self.cosmos_url is not None):
-            raise ValueError("byok mode records nothing and has no Cosmos check: pass record_dir=None and no cosmos_url")
+            raise ValueError("byok mode records nothing and has no Cosmos check: "
+                             "pass record_dir=None and no cosmos_url")
 
     def replay_roots(self) -> tuple[str, ...]:
         """Where the Replay tab may read (sources.check_path): the working directory and the paths the operator

@@ -473,7 +473,7 @@ def space(tmp_path):
 
 def _components(settings):
     config = app.build_app(settings).get_config_file()
-    return config, [c for c in config["components"]]
+    return config, config["components"]
 
 
 def _labelled(components, label, kind=None):

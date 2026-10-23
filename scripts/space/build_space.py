@@ -6,8 +6,8 @@ a curated part of two evaluation runs (the full runs are 280 MB and 368 MB, most
 seed set they were made on, so that ui.sources can check its hash.
 
 Curation is deterministic. Per run, an attempt is kept if it is in ALWAYS (the video's repair and refusal) or is the
-first match of a category in CATEGORIES that no kept attempt covers yet. Among matches, scenes with obstacles come first,
-then the lowest task index; the file keeps the attempts in their original order and as the original bytes."""
+first match of a category in CATEGORIES that no kept attempt covers yet. Among matches, scenes with obstacles come
+first, then the lowest task index; the file keeps the attempts in their original order and as the original bytes."""
 from __future__ import annotations
 
 import argparse
@@ -45,11 +45,15 @@ def _refusal(kind: int) -> tuple[str, Callable[[Attempt], bool]]:
             lambda a: a.outcome == "refused" and bool(a.success) and a.impossible_type == kind)
 
 
-# A repair is a feasible task solved after earlier rounds were blocked; "executed" with the Judge's success
+def _solved(a: Attempt) -> bool:
+    """A solvable task executed and judged a success. In more than one round, earlier rounds were blocked: a repair."""
+    return a.feasible and a.outcome == "executed" and bool(a.success)
+
+
 CATEGORIES: tuple[tuple[str, Callable[[Attempt], bool]], ...] = (
-    ("repair in 2 rounds", lambda a: a.feasible and a.outcome == "executed" and bool(a.success) and a.rounds == 2),
-    ("repair in 3 rounds", lambda a: a.feasible and a.outcome == "executed" and bool(a.success) and a.rounds == 3),
-    ("first-round success", lambda a: a.feasible and a.outcome == "executed" and bool(a.success) and a.rounds == 1),
+    ("repair in 2 rounds", lambda a: _solved(a) and a.rounds == 2),
+    ("repair in 3 rounds", lambda a: _solved(a) and a.rounds == 3),
+    ("first-round success", lambda a: _solved(a) and a.rounds == 1),
     *(_refusal(kind) for kind in (1, 2, 3, 4)),
     ("budget exhausted on a solvable task", lambda a: a.feasible and a.outcome == "budget_exhausted"),
     ("executed, but the Judge failed it", lambda a: a.feasible and a.outcome == "executed" and a.success is False),
@@ -86,7 +90,7 @@ def curate(attempts: list[Attempt]) -> dict[str, str]:
     missing = [i for i in ALWAYS if i not in by_id]
     if missing:
         raise SystemExit(f"error: no replayable attempt {', '.join(missing)} in this run")
-    kept = {i: why for i, why in ALWAYS.items()}
+    kept = dict(ALWAYS)
     for name, matches in CATEGORIES:
         if any(matches(by_id[i]) for i in kept):
             continue  # an attempt already kept shows this
@@ -117,7 +121,8 @@ def build(out: Path, runs: Path) -> dict[str, dict[str, str]]:
     for name in ("app.py", "requirements.txt", "README.md"):
         shutil.copyfile(SPACE / name, out / name)
     shutil.copyfile(REPO / "LICENSE", out / "LICENSE")
-    shutil.copytree(REPO / "src" / "vplan", out / "src" / "vplan", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    shutil.copytree(REPO / "src" / "vplan", out / "src" / "vplan",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (out / "config").mkdir()
     for path in sorted((REPO / "config").glob("*.json")):
         shutil.copyfile(path, out / "config" / path.name)

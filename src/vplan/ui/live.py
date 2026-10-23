@@ -193,8 +193,9 @@ def key_option(base_url: str, api_key: str, model: str, *, temperature: float = 
     public (the Space): the server makes the request on a stranger's behalf, so every address the host resolves to must
     be globally routable. That refuses loopback, private ranges, link-local and the cloud metadata address
     169.254.169.254, which would otherwise be reachable from here (server-side request forgery). The SDK resolves the
-    name again when it connects, so an answer that changes in between (DNS rebinding) is not caught; closing that needs a
-    transport pinned to the checked address, which this does not add. A run on your own machine passes public=False.
+    name again when it connects, so an answer that changes in between (DNS rebinding) is not caught; closing that
+    needs a transport pinned to the checked address, which this does not add. A run on your own machine passes
+    public=False.
 
     Redirects are never followed, as a 3xx to an internal address would skip that check. Raises LiveError."""
     from openai import DefaultHttpxClient, OpenAI
@@ -216,8 +217,8 @@ def key_option(base_url: str, api_key: str, model: str, *, temperature: float = 
         if not addresses or not all(ipaddress.ip_address(a).is_global for a in addresses):
             raise LiveError("The endpoint resolves to a private or local address, which this public demo does not "
                             "call.")
-    # allow_paid=True only for its naming (the host, and "openrouter" for openrouter.ai), so labels match llm_option's
-    host, provider = provider_guard(base_url, model, allow_paid=True)
+    # allow_paid=True only for its naming ("openrouter" for openrouter.ai, else the host), as in llm_option
+    _, provider = provider_guard(base_url, model, allow_paid=True)
     client = OpenAI(api_key=api_key, max_retries=0, timeout=CALL_DEADLINE_S, base_url=base_url,
                     http_client=DefaultHttpxClient(follow_redirects=False, timeout=CALL_DEADLINE_S))
     planner = NemotronPlanner(model=model, provider=provider, api_key=api_key, client=client, temperature=temperature)
