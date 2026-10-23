@@ -16,11 +16,10 @@ are needed for these steps.
 
 ## Steps
 
-1. **Upload the video.** Download `vplan-demo.mp4` and `captions.srt` from the release. Upload the MP4 to YouTube
-   (check Devpost's rules for public or unlisted) and add `captions.srt` as English subtitles. Title suggestion:
-   "vplan: LLMs plan, physics verifies (Nebius x NVIDIA Hackathon, Physical AI)".
-2. **Put the link in the README.** On GitHub, edit `README.md` and replace `<YOUTUBE_LINK>` (in "Demo video") with the
-   YouTube URL. Commit to `main`.
+1. **Upload the video. Done (Oct 23):** https://youtu.be/y_Ig1zOWKPY, public. The rules require the video to be
+   "publicly visible on YouTube", so not unlisted. Add `captions.srt` from the release as English subtitles, and
+   `youtube-thumbnail.png` (1920×1080) as the custom thumbnail.
+2. **Put the link in the README. Done (Oct 23):** "Demo video" links to the YouTube URL.
 3. **Fill in Devpost.**
    - Project name: **vplan: LLMs plan, physics verifies**.
    - Elevator pitch (179 of 200 characters): "NVIDIA Nemotron plans robot pick-and-place; physics checks every plan
@@ -32,8 +31,10 @@ are needed for these steps.
    - Feedback on the Nebius and NVIDIA tools: paste from [`feedback.md`](feedback.md).
    - Repo URL and video URL as above.
    - Thumbnail: [`thumbnail.png`](thumbnail.png) (3000×2000, 3:2).
-   - Built with: Python, PyBullet, ManipulaPy, Gradio, Pydantic, Nebius Token Factory, NVIDIA Nemotron 3.5 Lightning,
-     NVIDIA Nemotron 3 Ultra, NVIDIA Cosmos3-Edge, vLLM.
+   - Built with (25 tags): Python, PyBullet, ManipulaPy, NumPy, Pydantic, Gradio, Matplotlib, Pillow, pytest,
+     OpenAI Python SDK, Nebius Token Factory, NVIDIA Nemotron, Nemotron 3.5 Lightning, Nemotron 3 Ultra, NVIDIA Cosmos,
+     Cosmos3-Edge, vLLM, CUDA, Docker, Playwright, Node.js, FFmpeg, URDF, HTML, GitHub.
+   - Image gallery: the eight images in [`media/`](media/README.md), in order, with the captions listed there.
 4. **Check before submitting** (the rules in `CLAUDE.md`, "Hackathon constraints"):
    - the repo is public and has `LICENSE` and a README with setup instructions;
    - the video is under 3 minutes (2:57) and over 1 minute shows the modules in action (2:03);
