@@ -1,0 +1,7 @@
+# The pins of pyproject.toml. gradio, spaces and huggingface_hub come from the platform (sdk_version in README.md).
+ManipulaPy[simulation]==1.4.2
+pybullet==3.2.7
+numpy==2.2.6
+pydantic==2.13.5
+openai==3.24.0
+matplotlib==3.10.9
