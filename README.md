@@ -12,7 +12,7 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 
 ## Demo video
 
-[Watch on YouTube](<YOUTUBE_LINK>): 2:57, silent with burned-in captions, more than two minutes of it showing the modules in action.
+[Watch on YouTube](https://youtu.be/y_Ig1zOWKPY): 2:57, silent with burned-in captions, more than two minutes of it showing the modules in action.
 
 - **Architecture:** the system diagram, one part at a time: the evaluation harness, Nemotron, the motion layer and the checks, repair from findings, execution and the independent Judge, and the optional Cosmos check.
 - **Live run:** the Gradio UI plans, verifies, executes and judges one task on the basic scene with a wall. The planner in this part is the rule-based baseline, so no key is needed.
