@@ -10,10 +10,15 @@ for feasible tasks); otherwise it is refused before any planner call.
 Credentials (D33): an LLM planner is built once, from an explicitly named env file, behind the free-model guard; the
 key stays inside the planner. Recordings (UI bundles, read back by ui.sources for keyless replay) are refused if their
 text contains the key.
+
+The Hugging Face Space has no operator key: each visitor types their own (key_option), so nothing but that visitor's
+run ever holds it, and the endpoint they name is checked before any request leaves the server.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -44,6 +49,16 @@ KIND_LABELS = {"feasible": "Solvable", "impossible 1: target out of reach": "Imp
                "impossible 4: absent referent": "Impossible: object not in scene"}
 BUNDLE_KIND = "vplan_ui_attempt"
 BUNDLE_SCHEMA = 1
+# The Space's provider dropdown: label -> (base URL, suggested model IDs). Only endpoints the project has run against
+# (.env.example, D7, D13); a custom provider leaves the URL to the visitor.
+PROVIDER_PRESETS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "Nebius Token Factory": ("https://api.tokenfactory.nebius.com/v1/",
+                             ("nvidia/Nemotron-3_5-Lightning", "nvidia/Nemotron-3-Ultra-550b-a55b")),
+    "OpenRouter": ("https://openrouter.ai/api/v1", ("nvidia/nemotron-3.5-lightning:free",
+                                                    "nvidia/nemotron-3.5-lightning")),
+    "Custom (OpenAI-compatible)": ("", ()),
+}
+BAD_ENDPOINT = "The endpoint must be an https URL with a host name."
 
 
 class LiveError(RuntimeError):
@@ -152,6 +167,61 @@ def llm_option(env_file: str | Path, *, model: str | None = None, allow_paid: bo
     planner = NemotronPlanner(model=model, provider=provider, base_url=base_url, api_key=api_key,
                               temperature=temperature)
     return PlannerOption(f"Nemotron: {model} via {host}", planner, llm=True, secret=api_key)
+
+
+def _endpoint(base_url: str) -> tuple[str, int]:
+    """(host, port) of an https endpoint URL that carries no credentials. The messages never echo the URL: a visitor
+    may have pasted the key into it."""
+    try:
+        parsed = urlparse(base_url)
+        host, port = parsed.hostname, parsed.port or 443
+    except ValueError:  # unbalanced brackets, port out of range
+        raise LiveError(BAD_ENDPOINT) from None
+    if parsed.scheme != "https" or not host:
+        raise LiveError(BAD_ENDPOINT)
+    if "@" in parsed.netloc:
+        raise LiveError("The endpoint URL must not contain a user name or password; the key goes in the API key box.")
+    return host, port
+
+
+def key_option(base_url: str, api_key: str, model: str, *, temperature: float = DEFAULT_TEMPERATURE,
+               public: bool = True, resolve: Callable[..., Any] = socket.getaddrinfo) -> PlannerOption:
+    """A planner on the endpoint and key a visitor typed in (the Space's "bring your own key"). There is no allow_paid
+    guard as in llm_option (D33): the calls are billed to the visitor's account, and typing their own key is their
+    consent. The key lives only in the returned option and the SDK client; it is in no message, label or repr.
+
+    public (the Space): the server makes the request on a stranger's behalf, so every address the host resolves to must
+    be globally routable. That refuses loopback, private ranges, link-local and the cloud metadata address
+    169.254.169.254, which would otherwise be reachable from here (server-side request forgery). The SDK resolves the
+    name again when it connects, so an answer that changes in between (DNS rebinding) is not caught; closing that needs a
+    transport pinned to the checked address, which this does not add. A run on your own machine passes public=False.
+
+    Redirects are never followed, as a 3xx to an internal address would skip that check. Raises LiveError."""
+    from openai import DefaultHttpxClient, OpenAI
+
+    from vplan.evaluate.pilot import provider_guard
+    from vplan.planners.nemotron import CALL_DEADLINE_S, NemotronPlanner
+
+    base_url, api_key, model = base_url.strip(), api_key.strip(), model.strip()
+    if not api_key:
+        raise LiveError("Enter your API key.")
+    if not model:
+        raise LiveError("Enter a model ID.")
+    host, port = _endpoint(base_url)
+    if public:
+        try:
+            addresses = {info[4][0] for info in resolve(host, port, type=socket.SOCK_STREAM)}
+        except (OSError, UnicodeError):  # gaierror; an over-long label fails in the IDNA codec
+            raise LiveError("The endpoint's host name could not be resolved.") from None
+        if not addresses or not all(ipaddress.ip_address(a).is_global for a in addresses):
+            raise LiveError("The endpoint resolves to a private or local address, which this public demo does not "
+                            "call.")
+    # allow_paid=True only for its naming (the host, and "openrouter" for openrouter.ai), so labels match llm_option's
+    host, provider = provider_guard(base_url, model, allow_paid=True)
+    client = OpenAI(api_key=api_key, max_retries=0, timeout=CALL_DEADLINE_S, base_url=base_url,
+                    http_client=DefaultHttpxClient(follow_redirects=False, timeout=CALL_DEADLINE_S))
+    planner = NemotronPlanner(model=model, provider=provider, api_key=api_key, client=client, temperature=temperature)
+    return PlannerOption(f"Your key: {model} via {host}", planner, llm=True, secret=api_key)
 
 
 @dataclass(frozen=True)
@@ -306,5 +376,6 @@ def save_bundle(record_dir: str | Path, task: LiveTask, record: AttemptRecord, *
 
 
 __all__ = ["BASIC_INSTRUCTION", "BUNDLE_KIND", "CosmosFrame", "KIND_LABELS", "LiveError", "LiveEvent",
-           "LiveResult", "LiveTask", "PlannerOption", "TASK_KINDS", "basic_task", "bundle_text", "enclosure_ids",
-           "generated_task", "heuristic_option", "llm_option", "run_live", "save_bundle", "truth_text"]
+           "LiveResult", "LiveTask", "PROVIDER_PRESETS", "PlannerOption", "TASK_KINDS", "basic_task", "bundle_text",
+           "enclosure_ids", "generated_task", "heuristic_option", "key_option", "llm_option", "run_live", "save_bundle",
+           "truth_text"]

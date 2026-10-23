@@ -2,6 +2,7 @@
 Cosmos endpoint. Covers task loading, streamed events, highlighted findings, the Cosmos banner before motion, the
 execution GIF and the recording for keyless replay."""
 import json
+import socket
 
 import pytest
 
@@ -328,3 +329,134 @@ def test_no_repair_rounds_read_as_at_most_one_call():
     assert "Repair rounds none (at most 1 planner call)" in text and "up to 0" not in text
     record = result.record.model_copy(update={"k": 0})
     assert display._attempt_line(record) == "1 planner call; checked, no repair rounds"
+
+
+# ---- bring your own key (the Hugging Face Space) -------------------------------------------------------------------
+
+def _resolver(*addresses):
+    """A getaddrinfo that answers with these addresses, so no test touches the network."""
+    def resolve(host, port, *args, **kwargs):
+        return [(socket.AF_INET6 if ":" in a else socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                 (a, port, 0, 0) if ":" in a else (a, port)) for a in addresses]
+    return resolve
+
+
+PUBLIC = "93.184.216.34"
+ENDPOINT = "https://api.example.com/v1"
+
+
+def _key_option(url=ENDPOINT, key=SECRET, model="some/model", resolve=_resolver(PUBLIC), **kwargs):
+    return live.key_option(url, key, model, resolve=resolve, **kwargs)
+
+
+def test_the_provider_presets_are_the_documented_ones_in_order():
+    assert list(live.PROVIDER_PRESETS) == ["Nebius Token Factory", "OpenRouter", "Custom (OpenAI-compatible)"]
+    assert live.PROVIDER_PRESETS["Nebius Token Factory"] == (
+        "https://api.tokenfactory.nebius.com/v1/", ("nvidia/Nemotron-3_5-Lightning",
+                                                    "nvidia/Nemotron-3-Ultra-550b-a55b"))
+    assert live.PROVIDER_PRESETS["OpenRouter"] == (
+        "https://openrouter.ai/api/v1", ("nvidia/nemotron-3.5-lightning:free", "nvidia/nemotron-3.5-lightning"))
+    assert live.PROVIDER_PRESETS["Custom (OpenAI-compatible)"] == ("", ())
+
+
+def test_key_option_builds_a_planner_that_keeps_the_key_out_of_sight():
+    option = _key_option(" https://api.example.com/v1 ", f"  {SECRET}\n", " some/model ", temperature=0.2)
+    assert option.llm and option.secret == SECRET and option.label == "Your key: some/model via api.example.com"
+    planner = option.planner
+    assert (planner.model, planner.provider, planner.temperature) == ("some/model", "api.example.com", 0.2)
+    assert planner.call_deadline_s == 60.0 and planner._secret == SECRET  # so its diagnostics are scrubbed
+    assert SECRET not in repr(option) and SECRET not in option.label and SECRET not in repr(planner)
+
+
+def test_key_option_names_the_provider_as_the_free_model_guard_does():
+    from vplan.evaluate.pilot import provider_guard
+    for url in ("https://openrouter.ai/api/v1", "https://api.tokenfactory.nebius.com/v1/", ENDPOINT):
+        option = _key_option(url, model="nvidia/x:free")
+        host, provider = provider_guard(url, "nvidia/x:free", allow_paid=True)
+        assert option.planner.provider == provider and option.label == f"Your key: nvidia/x:free via {host}"
+    assert _key_option("https://openrouter.ai/api/v1").planner.provider == "openrouter"
+
+
+@pytest.mark.parametrize("url, key, model", [
+    (ENDPOINT, "", "m"), (ENDPOINT, "   ", "m"), (ENDPOINT, SECRET, ""), (ENDPOINT, SECRET, "  "),
+    ("http://api.example.com/v1", SECRET, "m"), ("api.example.com/v1", SECRET, "m"), ("https://", SECRET, "m"),
+    ("", SECRET, "m"), ("ftp://api.example.com/v1", SECRET, "m"), ("https://api.example.com:99999/v1", SECRET, "m"),
+    (f"https://user:{SECRET}@api.example.com/v1", SECRET, "m"), (f"https://{SECRET}@api.example.com/v1", SECRET, "m"),
+])
+def test_key_option_refuses_bad_input_without_echoing_any_of_it(url, key, model):
+    with pytest.raises(live.LiveError) as refused:
+        _key_option(url, key, model)
+    message = str(refused.value)
+    assert SECRET not in message and not JARGON.search(message), message
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.0.5", "169.254.169.254",
+                                     "100.64.0.1", "0.0.0.0", "::1", "fe80::1", "fd00::1"])
+def test_key_option_refuses_hosts_that_resolve_to_local_or_private_addresses(address):
+    with pytest.raises(live.LiveError, match="private or local") as refused:
+        _key_option(resolve=_resolver(address))
+    assert SECRET not in str(refused.value) and address not in str(refused.value)
+
+
+def test_key_option_refuses_a_host_with_any_non_public_address():
+    with pytest.raises(live.LiveError, match="private or local"):
+        _key_option(resolve=_resolver(PUBLIC, "10.0.0.1"))
+    with pytest.raises(live.LiveError, match="private or local"):
+        _key_option(resolve=_resolver())  # no answer is no proof
+
+
+def test_key_option_refuses_a_host_that_does_not_resolve():
+    def unresolvable(host, port, *args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, f"Name or service not known: {host}")
+
+    with pytest.raises(live.LiveError, match="resolve") as refused:
+        _key_option(resolve=unresolvable)
+    assert SECRET not in str(refused.value) and "api.example.com" not in str(refused.value)
+
+
+def test_key_option_resolves_the_endpoint_host_and_port():
+    seen = []
+
+    def resolve(host, port, *args, **kwargs):
+        seen.append((host, port))
+        return _resolver("2606:4700:4700::1111")(host, port)
+
+    _key_option(resolve=resolve)
+    _key_option("https://llm.example.com:8443/v1", resolve=resolve)
+    assert seen == [("api.example.com", 443), ("llm.example.com", 8443)]
+
+
+def test_key_option_off_the_public_space_does_not_resolve_anything():
+    def no_lookup(*args, **kwargs):
+        raise AssertionError("a local run does not check the address")
+
+    assert _key_option(public=False, resolve=no_lookup).llm
+    with pytest.raises(live.LiveError, match="https"):
+        _key_option("http://127.0.0.1:8000/v1", public=False, resolve=no_lookup)  # https stays required
+
+
+def test_the_key_planner_never_follows_a_redirect_and_sends_the_key_only_to_the_endpoint():
+    """A 302 from the endpoint to http://169.254.169.254/ would be a request the address check never saw."""
+    import httpx2
+
+    from tests.test_planner import fixture
+    task, plan = fixture()
+    seen, redirect = [], [True]
+
+    def handler(request):
+        seen.append(request)
+        if redirect[0]:
+            return httpx2.Response(302, headers={"location": "http://169.254.169.254/latest/meta-data/"})
+        return httpx2.Response(200, json=response(plan))
+
+    planner = _key_option().planner
+    http = planner._client._client
+    assert http.follow_redirects is False
+    http._transport = httpx2.MockTransport(handler)
+    call = planner.plan(task)
+    assert [r.url.host for r in seen] == ["api.example.com"] and call.outcome == "service_failure"
+    assert seen[0].headers["authorization"] == f"Bearer {SECRET}"
+    assert SECRET not in call.model_dump_json()
+    seen.clear()
+    redirect[0] = False
+    assert planner.plan(task).outcome == "proposed" and len(seen) == 1  # the SDK client works with the planner
