@@ -117,8 +117,9 @@ The third caption on other outcomes:
 
 ## 7 results (17 s)
 
-The card builds up in steps: the heading, the Lightning row at 0.8 s, the Ultra row at 6.4 s and the footer at 11.4 s.
-Its numbers come from `docs/results/metrics.json` (Lightning, D70) and `docs/results/ultra/metrics.json` (Ultra, D82).
+The card builds up in steps: the heading, the Lightning row at 0.8 s, the Ultra row at 5.4 s, the merged-findings row at
+10 s and the footer at 13.6 s. Its numbers come from `docs/results/metrics.json` (Lightning, D70),
+`docs/results/ultra/metrics.json` (Ultra, D82) and `docs/results/a1/` with the paired comparisons in D85.
 - **Results on 300 held-out tasks.** "Share of solvable tasks done correctly. NVIDIA Nemotron on Nebius Token Factory."
 - **Nemotron 3.5 Lightning**, "the headline: prompt and code frozen before the held-out set": **24.7% → 65.0%** first
   plan verified → up to 3 repairs from the findings (95% CI 20.1–29.8% → 59.4–70.2%); **+29.3 pts** over retrying as
@@ -126,8 +127,11 @@ Its numbers come from `docs/results/metrics.json` (Lightning, D70) and `docs/res
 - **Nemotron 3 Ultra**, "run later, on code changed after the freeze": **75.7% → 92.7%** (95% CI 70.5–80.2% →
   89.1–95.1%); **−2.0 pts** over retrying, "the stronger model gains nothing from feedback" (95% CI −5.7 to +1.7);
   **0 of 298** verified runs unsafe, without the checks 42 of 304.
-- Footer: "Held-out set: 300 solvable and 100 impossible generated tasks. Ultra is reported beside the headline, not
-  instead of it."
+- **Richer findings**, "merged after the evaluation: each collision says what hit what, and how far": **76.0%**
+  Lightning with repair, up from 65.0% on the same tasks (paired +11.0 pts, 95% CI +4.7 to +17.3); **96.7%** Ultra with
+  repair, was 92.7% ("+4.0 pts, mostly from first plans, not repairs"); **0 of 559** verified runs unsafe, both models.
+- Footer: "Held-out set: 300 solvable and 100 impossible generated tasks. Later runs are reported beside the headline,
+  not instead of it."
 
 ## 8 closing (4.5 s)
 

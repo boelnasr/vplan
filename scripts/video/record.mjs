@@ -136,7 +136,8 @@ const CARDS = {
     <div class="kicker">Optional</div><h2>A learned visual check</h2>
     <p class="lead">NVIDIA Cosmos3-Edge, served locally, looks at rendered key frames after the checks pass. It is
     advisory, never verification.</p>`),
-  // Lightning (D70) is the headline; Ultra (D82) ran on code changed after the freeze, so it is shown beside it
+  // Lightning (D70) is the headline; Ultra (D82) ran on code changed after the freeze, and the richer findings (D85)
+  // were merged after the evaluation, so both are shown beside it
   results: cardPage(`
     <h2 class="reveal" style="font-size:60px">Results on 300 held-out tasks</h2>
     <div class="lead reveal" style="font-size:30px;margin-top:14px;animation-delay:.2s">Share of solvable tasks done
@@ -153,7 +154,7 @@ const CARDS = {
         <div class="tile"><div class="big green">0 of 215</div><div class="lbl">verified runs unsafe. Without the
           checks: 169 of 346.</div></div>
       </div>
-      <div class="row reveal" style="grid-template-columns:300px 1.45fr 1fr 1fr;animation-delay:6.4s">
+      <div class="row reveal" style="grid-template-columns:300px 1.45fr 1fr 1fr;animation-delay:5.4s">
         <div class="who"><div class="m">Nemotron 3 Ultra</div><div class="s">run later, on code changed after the
           freeze</div></div>
         <div class="tile"><div class="big">75.7% → <span class="blue">92.7%</span></div>
@@ -164,9 +165,20 @@ const CARDS = {
         <div class="tile"><div class="big green">0 of 298</div><div class="lbl">verified runs unsafe. Without the
           checks: 42 of 304.</div></div>
       </div>
+      <div class="row reveal" style="grid-template-columns:300px 1.45fr 1fr 1fr;animation-delay:10s">
+        <div class="who"><div class="m">Richer findings</div><div class="s">merged after the evaluation: each
+          collision says what hit what, and how far</div></div>
+        <div class="tile"><div class="big blue">76.0%</div>
+          <div class="lbl">Lightning with repair, up from 65.0% on the same tasks</div>
+          <div class="ci">paired +11.0 pts, 95% CI +4.7 to +17.3</div></div>
+        <div class="tile"><div class="big blue">96.7%</div><div class="lbl">Ultra with repair, was 92.7%</div>
+          <div class="ci">+4.0 pts, mostly from first plans, not repairs</div></div>
+        <div class="tile"><div class="big green">0 of 559</div><div class="lbl">verified runs unsafe, both
+          models</div></div>
+      </div>
     </div>
-    <div class="foot reveal" style="margin-top:34px;animation-delay:11.4s">Held-out set: 300 solvable and 100
-    impossible generated tasks. Ultra is reported beside the headline, not instead of it.</div>`),
+    <div class="foot reveal" style="margin-top:30px;animation-delay:13.6s">Held-out set: 300 solvable and 100
+    impossible generated tasks. Later runs are reported beside the headline, not instead of it.</div>`),
   closing: cardPage(`
     <h1 style="font-size:84px"><span class="brand">vplan</span> LLMs plan, physics verifies</h1>
     <p class="lead" style="font-size:35px;max-width:1440px">Planner: NVIDIA Nemotron 3.5 Lightning and 3 Ultra, served by Nebius Token Factory.<br>Checks: ManipulaPy kinematics and
