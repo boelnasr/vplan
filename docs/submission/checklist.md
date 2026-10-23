@@ -25,8 +25,8 @@ are needed for these steps.
    - Elevator pitch (179 of 200 characters): "NVIDIA Nemotron plans robot pick-and-place; physics checks every plan
      before anything moves and sends failures back for repair. 65% success vs 43% unverified, 0 unsafe executions."
    - Track: **Physical AI**.
-   - Story sections (Inspiration, What it does, How we built it, Challenges, Accomplishments, What we learned, What's
-     next): paste from [`description.md`](description.md). Its "How we use NVIDIA models" section answers the NVIDIA
+   - Story sections (Inspiration, What it does, How I built it, Challenges, Accomplishments, What I learned, What's
+     next): paste from [`description.md`](description.md). Its "How I use NVIDIA models" section answers the NVIDIA
      model question.
    - Feedback on the Nebius and NVIDIA tools: paste from [`feedback.md`](feedback.md).
    - Repo URL and video URL as above.

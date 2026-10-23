@@ -167,7 +167,7 @@ Serve `nvidia/Cosmos3-Edge` with an OpenAI-compatible endpoint, then pass its UR
 python -m vplan demo-once --cosmos-url http://127.0.0.1:8000/v1
 ```
 
-- **What we ran (D34, D47, D73):** vLLM 0.31.0 in its own environment on an RTX 5070 Ti (16 GB), model revision `344d602b…`, listening on `127.0.0.1:8000`, with `--max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 --limit-mm-per-prompt '{"image":3,"video":0}' --mm-processor-kwargs '{"do_resize":true,"min_pixels":4096,"max_pixels":409600}'` and `VLLM_USE_FLASHINFER_SAMPLER=0` (the FlashInfer sampler compiles at startup and needs `nvcc`). It used 15.2 of 16.3 GB.
+- **What I ran (D34, D47, D73):** vLLM 0.31.0 in its own environment on an RTX 5070 Ti (16 GB), model revision `344d602b…`, listening on `127.0.0.1:8000`, with `--max-model-len 8192 --max-num-seqs 1 --gpu-memory-utilization 0.85 --limit-mm-per-prompt '{"image":3,"video":0}' --mm-processor-kwargs '{"do_resize":true,"min_pixels":4096,"max_pixels":409600}'` and `VLLM_USE_FLASHINFER_SAMPLER=0` (the FlashInfer sampler compiles at startup and needs `nvcc`). It used 15.2 of 16.3 GB.
 - **Behaviour:** the gate prints one line per checked stage. A Cosmos `fail` blocks the plan with one visual finding; `uncertain` is re-asked once with a side view and otherwise stops the attempt. If the endpoint is down or errors, the run says so and executes on the physics checks alone.
 - **Treat its verdicts as advisory.** In the shadow study it falsely rejected 27% of correct pre-release frames, at 1.3 s median per request ([Results](#results), D73).
 
