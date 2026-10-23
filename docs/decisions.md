@@ -2223,3 +2223,15 @@ Both new files use only numbers recorded in this log and in `docs/results/`.
 **Ruling:** not a headline result (D59, D71). The runs used `main` after the freeze, and the change was chosen after the D70 results were known. D70 stays the headline; D82 and D85 are reported beside it, never instead of it. The finding: the merged findings improve Lightning's repair on `test`; for Ultra the improvement is not shown.
 
 **Media updated:** the README, `docs/spec.md` §1, `docs/submission/` (description, feedback, checklist), `docs/plans/week4.md`, `CLAUDE.md` and the storyboard. The video's results card gets a third row, "Richer findings", in the same 17 s, so the video stays 2:57. The `submission-data` release gets `vplan-runs-a1-test-d85.zip` (both runs and the seed set), and its video and captions are replaced.
+
+## D86. The published history is rewritten without the agent files (2026-10-23)
+
+**Ruling (owner, Oct 23):** remove the files that only served the Claude Code and Codex workflow from the whole published history, not only from `main`'s tip: `CLAUDE.md`, `AGENTS.md`, `docs/plan.md`, `docs/plans/`, `docs/handover/` and `docs/reviews/`. The owner explicitly permitted the history rewrite and force-push that this needs.
+
+**How:** a bundle of every local ref went to `runs/backup-pre-history-rewrite-2026-10-23.bundle` first. A fresh mirror clone of GitHub ran `git filter-branch --index-filter 'git rm -r --cached --ignore-unmatch …' --prune-empty --tag-name-filter cat`. Checks before pushing: no commit has any of the six paths, the newest tree is identical, 252 commits map one to one and 8 that only touched the removed files are dropped. Only `main` and the `submission-data` tag were force-pushed; the release kept its five assets. The files stay on the development machine, gitignored.
+
+**Consequences:**
+- Every commit ID changed. `docs/history-rewrite.md` maps every ID quoted in the docs and reports, including the frozen source `32cbd6d` (now `5ad96ea`), and lists all 252.
+- Run records, reports and release zips keep their original IDs; they are evaluation records and are not edited. Their `source_digest` still identifies the source.
+- Old commits may stay reachable on GitHub by their full ID until GitHub garbage-collects them; the files were never secret.
+- Local branches (`w4/*`, `codex/*`) and the Codex worktrees still carry the old history; they are not published.
