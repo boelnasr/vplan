@@ -14,8 +14,8 @@ Python 3.10, PyBullet and ManipulaPy 1.4.2, our open-source robotics library, up
 
 ## How we use NVIDIA models
 
-- **Nemotron 3.5 Lightning** (`nvidia/Nemotron-3_5-Lightning`) on Nebius Token Factory plans in every evaluation configuration. Every Nemotron call forces one tool, `submit_plan`, whose parameters are the plan schema. The final evaluation made 2,510 calls for about $1.61 at catalog prices.
-- **Nemotron 3 Ultra** (`nvidia/Nemotron-3-Ultra-550b-a55b`) on Token Factory is the planner for live demos in the UI. In our smoke test it returned 20 valid tool calls of 20 (median 8.6 s, slowest 28.5 s). We also ran it on the same held-out tasks as a second evaluation: 1,417 calls for about $14.70. The video makes no live Nemotron calls; its Nemotron chapters replay recorded Lightning attempts from the evaluation.
+- **Nemotron 3.5 Lightning** (`nvidia/Nemotron-3_5-Lightning`) on Nebius Token Factory plans in every evaluation configuration. Every Nemotron call forces one tool, `submit_plan`, whose parameters are the plan schema. The final evaluation made 2,510 calls for about $1.61 at catalog prices, and a later rerun of the repair configuration 976 more for $0.71.
+- **Nemotron 3 Ultra** (`nvidia/Nemotron-3-Ultra-550b-a55b`) on Token Factory is the planner for live demos in the UI. In our smoke test it returned 20 valid tool calls of 20 (median 8.6 s, slowest 28.5 s). We also ran it on the same held-out tasks as a second evaluation: 1,417 calls for about $14.70, and 493 more for a rerun of the repair configuration ($5.65). The video makes no live Nemotron calls; its Nemotron chapters replay recorded Lightning attempts from the evaluation.
 - **Cosmos3-Edge**, served locally with vLLM on a 16 GB RTX 5070 Ti, is an opt-in, advisory learned visual check. After the Verifier passes a plan, it looks at rendered pre-grasp, grasp and pre-release frames and can only add rejections. A shadow study over all 215 executed repair attempts (1,337 questions) showed it is not a usable gate: balanced accuracy 0.61 on real attempts and 0.52 on injected errors, 27% false rejections of correct pre-release frames, and 1 of 159 wrong-object pre-grasps caught. It never gates the evaluation. The video's Cosmos chapter shows it stopping a fully verified plan with a false rejection at the grasp frame.
 
 ## Challenges we ran into
@@ -30,6 +30,8 @@ On 300 held-out, reference-solvable tasks, verifier-feedback repair raised Light
 
 We then ran Nemotron 3 Ultra on the same 300 tasks. It reached 92.7% with repair (89.1–95.1%), up from 75.7% for verified first attempts, and again no verified execution was unsafe, while 42 of 304 unverified ones collided. These runs came after the freeze and after we had seen the Lightning results, so we report them beside the headline, not instead of it.
 
+After the evaluation we made collision findings richer: each one now names which part came too close to what, in which phase, and by how much. Rerun on the same 300 tasks, Lightning's repair rose from 65.0% to 76.0% (paired +11.0 points, CI +4.7 to +17.3), from better repairs: its first plans did slightly worse than before. Ultra's rose from 92.7% to 96.7%, but mostly from better first plans, which the change cannot cause. No verified execution was unsafe (0 of 256 and 0 of 303). These runs also came after the freeze, so they sit beside the headline as well.
+
 ## What we learned
 
 - The repair gain over first attempts (+40.3 points, 34.7–46.0) mixes feedback with extra attempts; only the equal-budget control separates the two.
@@ -38,6 +40,6 @@ We then ran Nemotron 3 Ultra on the same 300 tasks. It reached 92.7% with repair
 
 ## What's next
 
-- Finish testing a revised prompt that states the motion facts without numbers, and measure the richer collision evidence we merged after the evaluation on the held-out set: it added +7.3 points over two paired development runs (CI −2.0 to +17.3).
+- Finish testing a revised prompt that states the motion facts without numbers, on top of the richer findings.
 - Refusals: Lightning never refused an enclosed target (0 of 25 in every configuration); Ultra refused 17–24 of 25.
 - Cosmos: 49 of its 53 false pre-release rejections said the object was inside the bin, not over it. A reworded question needs fresh frames, not the held-out ones.

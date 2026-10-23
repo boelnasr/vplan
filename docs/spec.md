@@ -28,6 +28,8 @@ The 95% intervals are 20.1–29.8% and 59.4–70.2%. Unverified first attempts s
 
 **Second result, not a headline (measured Oct 22) [D82]:** Nemotron 3 Ultra on the same 400 `test` tasks, run after the freeze and after the Lightning results were known. Verified first attempts 75.7%, repair 92.7% (89.1–95.1%), equal-budget resampling 94.7%: the feedback gain is −2.0 points (−5.7 to +1.7), so feedback is what rescues the weaker model. Unverified Ultra collided in 42 of 304 executions; no verified execution did. It is reported beside the headline, never instead of it.
 
+**Third result, not a headline (measured Oct 22–23) [D85]:** config 3 again on the same `test` tasks after richer collision evidence was merged into the repair findings (D84), with each model. Lightning's repair rose from 65.0% to 76.0% (paired +11.0 points, +4.7 to +17.3), from better repairs: its first rounds did slightly worse than in D70. Ultra's rose from 92.7% to 96.7% (+4.0, +0.7 to +7.3), mostly from better first plans, which the change cannot cause, so for Ultra the effect is not shown. No verified execution was unsafe (0 of 256 and 0 of 303). It is reported beside the headline, never instead of it.
+
 **Supporting results:**
 - the margin over equal-budget resampling;
 - refusal accuracy on impossible tasks and false refusals on feasible ones;

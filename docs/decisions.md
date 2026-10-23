@@ -2197,3 +2197,29 @@ Both new files use only numbers recorded in this log and in `docs/results/`.
 - A `test` measurement needs config 3 again: about $0.65 with Lightning, paired with D70's config 3 on another day, or about $5.60 with Ultra, which is likely more than the credit left. Not run; it needs the owner's OK.
 - Live repair rounds in the UI now get the richer directions. The video replays recorded attempts and is unchanged.
 - The full suite passes on the merge: 1266 tests.
+
+## D85. The merged findings measured on `test` with Lightning and Ultra, reported beside D70 (2026-10-23)
+
+**Runs (owner's OK, Oct 23):** config 3 on all 400 `test` tasks at `main` 020bafb (D84, source digest `75546951…`), Token Factory, `--allow-paid`, `--allow-source-drift` and the 60 s deadline.
+- **Lightning** (`runs/a1-test/c3-test`, `--max-rpm 15`): started 23:39 UTC on Oct 22. A Windows Update restart at 02:40 UTC killed it after 322 tasks, with every recorded attempt intact; `--resume` finished the other 78 from 09:10 UTC (session 1). 976 calls, $0.71 at catalog prices.
+- **Ultra** (`runs/a1-test/ultra-c3-test`, `--max-rpm 10`): one session, 11:13–13:13 UTC on Oct 23. 493 calls, $5.65.
+
+**What differs from the published runs:** only the Finding text sent back for repair. Against D70 (frozen `32cbd6d`) that is D74's `transport_via` plan field and D80's richer collision direction; against D82 (`0e4d54b`) it is D80's direction only. The planner, the prompt and every check's verdict are unchanged, so round 1 of config 3 (config 2) is the same procedure in each pair, and only repair can differ.
+
+| Config 3, feasible success (n = 300) | Published | Merged findings | Paired difference (95% CI) | Exact McNemar p | Unsafe verified executions |
+|---|---|---|---|---|---|
+| Lightning | 195 (65.0%, D70) | 228 (76.0%, 70.9–80.5%) | +11.0 (+4.7 to +17.3) | 0.001 | 0 of 215 → 0 of 256 |
+| Ultra | 278 (92.7%, D82) | 290 (96.7%, 94.0–98.2%) | +4.0 (+0.7 to +7.3) | 0.03 | 0 of 298 → 0 of 303 |
+
+**Where the difference comes from:**
+- **Lightning: repair.** Round-1 successes fell from 74 to 60, which is run-to-run variation, since round 1 is the same procedure. Repair rescued 168 of the 240 round-1 failures against 121 of 226 (70.0% against 53.5%, Fisher p < 0.001). Consecutive rounds with the same failure signature fell from 151 to 70. The gain is the findings change.
+- **Ultra: mostly first plans.** Round-1 successes rose from 227 to 244 (p = 0.11), which the change cannot cause. Repair rescued 46 of 56 against 51 of 73 (82.1% against 69.9%, p = 0.15). The +4.0 is consistent with a small repair effect, but it does not show one.
+- Without a provider failure on either side: Lightning +9.7 (+3.1 to +16.3), p = 0.004 (D70's config 3 had 13 attempts with one); Ultra +3.4 (+0.3 to +6.7), p = 0.06 (D82's had 3). Neither new run had a service failure.
+- By obstacle count 0–3: Lightning 51→60, 48→52, 51→61 and 45→55 of 75; Ultra 73→74, 73→71, 69→73 and 63→72.
+- Impossible tasks refused: Lightning 56 against 57 of 100, Ultra 90 against 88. Refusals get no Findings, so no change is expected.
+
+**Reports:** `docs/results/a1/lightning/` and `docs/results/a1/ultra/`, built with `vplan report build` from each run alone and labelled "not a headline result: config 7 not run; config 3 has incompatible source provenance". Their config 2 rows (Lightning 20.0%, Ultra 81.3%) are the new runs' first rounds; the difference from D70's 24.7% and D82's 75.7% is run-to-run variation.
+
+**Ruling:** not a headline result (D59, D71). The runs used `main` after the freeze, and the change was chosen after the D70 results were known. D70 stays the headline; D82 and D85 are reported beside it, never instead of it. The finding: the merged findings improve Lightning's repair on `test`; for Ultra the improvement is not shown.
+
+**Media updated:** the README, `docs/spec.md` §1, `docs/submission/` (description, feedback, checklist), `docs/plans/week4.md`, `CLAUDE.md` and the storyboard. The video's results card gets a third row, "Richer findings", in the same 17 s, so the video stays 2:57. The `submission-data` release gets `vplan-runs-a1-test-d85.zip` (both runs and the seed set), and its video and captions are replaced.

@@ -7,6 +7,8 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 > Nemotron 3.5 Lightning on Nebius Token Factory, held-out `test` set, Oct 18 (D70). Intervals and every configuration are under [Results](#results).
 >
 > Nemotron 3 Ultra, run later on the same tasks, reaches 92.7% with repair, but retrying at equal budget does as well (94.7%; difference −2.0 points, CI −5.7 to +1.7): feedback is what rescues the weaker model. No verified execution of either model broke a safety predicate. This second result is reported beside the headline, not instead of it (D82).
+>
+> After the evaluation, richer repair findings were merged (D84). On the same tasks, Lightning's repair rose to 76.0% (paired +11.0 points, CI +4.7 to +17.3), and Ultra's to 96.7% (+4.0, CI +0.7 to +7.3), though Ultra's gain came mostly from better first plans, which the change does not touch. Again no verified execution was unsafe. These runs are also reported beside the headline (D85).
 
 ## Demo video
 
@@ -17,11 +19,11 @@ NVIDIA **Nemotron** proposes a pick-and-place plan for a simulated Franka Panda 
 - **Repair (replay):** a recorded Nemotron 3.5 Lightning attempt from the held-out evaluation, replayed without keys. The checks reject a drop-off 8 cm too high, then a 0.95 cm transport clearance against the 1 cm minimum; the third plan adds high waypoints, executes and is judged a success.
 - **Refusal (replay):** Nemotron refuses an out-of-reach target and says why.
 - **Cosmos check (live):** a rule-based run with the Cosmos gate on. The plan passes all 8 checks, but Cosmos rejects it at the grasp frame (it says the cube is already held), so nothing moves. It is captioned as advisory, with the shadow study's balanced accuracy of 0.61 and 0.52.
-- **Results:** Lightning's held-out numbers (D70), with Ultra's beside them (D82).
+- **Results:** Lightning's held-out numbers (D70), with Ultra's (D82) and the merged findings' (D85) beside them.
 
 The video makes no live Nemotron calls (D78, D83). It is rebuilt from the UI with the scripts in [`scripts/video/`](scripts/video/README.md). The MP4 and its captions are also attached to the [`submission-data` release](https://github.com/boelnasr/vplan/releases/tag/submission-data).
 
-> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt work on the `dev` set stays open (D77), and richer collision evidence was merged after the evaluation (D84); neither changes the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
+> **Status: week 4 of 4.** The held-out evaluation is done (Oct 18, D70), Nemotron 3 Ultra ran on the same tasks (Oct 22, D82), the Cosmos shadow study is done (Oct 19, D73) and the demo video is recorded (Oct 23, D83). Prompt work on the `dev` set stays open (D77). Richer collision evidence was merged after the evaluation (D84) and measured on `test` (Oct 23, D85); it does not change the D70 numbers. Built for the [Nebius x NVIDIA Global AI Hackathon](https://nebiusglobalaihackathon.devpost.com/), Physical AI track, in simulation only.
 
 ## How it works
 
@@ -50,8 +52,8 @@ plan ──▶ motion layer ──▶ verifier ──(findings → blocked / rep
 
 | Model | Role | Served by |
 |---|---|---|
-| Nemotron 3.5 Lightning, `nvidia/Nemotron-3_5-Lightning` | Planner in every evaluation configuration (D62) | Nebius Token Factory: 2,510 calls in the final runs, about $1.61 at catalog prices (D70) |
-| Nemotron 3 Ultra, `nvidia/Nemotron-3-Ultra-550b-a55b` | Planner for live demos in the UI (D62), and a second evaluation on `test` (D82) | Nebius Token Factory: 1,417 calls on `test`, about $14.70 at catalog prices (D82) |
+| Nemotron 3.5 Lightning, `nvidia/Nemotron-3_5-Lightning` | Planner in every evaluation configuration (D62) | Nebius Token Factory: 2,510 calls in the final runs, about $1.61 at catalog prices (D70), and 976 more on `test` for D85, $0.71 |
+| Nemotron 3 Ultra, `nvidia/Nemotron-3-Ultra-550b-a55b` | Planner for live demos in the UI (D62), and a second evaluation on `test` (D82) | Nebius Token Factory: 1,417 calls on `test`, about $14.70 at catalog prices (D82), and 493 more for D85, $5.65 |
 | Cosmos3-Edge, `nvidia/Cosmos3-Edge` | Advisory learned visual check: the opt-in demo gate and the shadow study (D47, D73) | vLLM on a local 16 GB GPU |
 
 - **Forced tool calls.** Both Nemotron models get one tool, `submit_plan`, whose parameters are the plan schema, and a forced `tool_choice`. Token Factory tags no Nemotron for JSON mode, so the tool call is the structured-output path (D13). In the Token Factory smoke test, Lightning returned 19 valid forced tool calls of 20 (the other hit a client-side connect timeout) and Ultra 20 of 20, with every reply carrying its `kind`; median 8.2 s and 8.6 s, slowest 28.5 s (D13).
@@ -92,12 +94,23 @@ The held-out `test` seed set holds 300 feasible and 100 provably impossible gene
 - **Why Ultra does better.** It plans transport waypoints: 184 of its 222 unverified first plans for feasible tasks with obstacles have them, against 6 of 218 for Lightning. It also refuses enclosed targets, 17–24 of 25 per configuration, where Lightning refused none.
 - **Cost.** 1,417 calls cost about $14.70 at catalog prices; 8 failed at the provider, so the report title says "DEGRADED".
 
+**The merged findings on the same tasks ([D85](docs/decisions.md)).** On Oct 22–23, config 3 ran again on the 400 `test` tasks at `main` after the richer collision evidence was merged (D84), once with each model. Only the Finding text sent back for repair differs from the runs above, so the first round is the same procedure and only repair can change. Like D82, these runs are labelled "not a headline result" and reported beside the headline. Reports: [Lightning](docs/results/a1/lightning/report.html) and [Ultra](docs/results/a1/ultra/report.html).
+
+| Config 3, feasible success (n = 300) | Before | Merged findings | Paired difference (95% CI) | Executions with a safety violation |
+|---|---|---|---|---|
+| Lightning | 195 (65.0%, D70) | **228 (76.0%)**, 70.9–80.5% | +11.0 (+4.7 to +17.3), p = 0.001 | 0 of 256 |
+| Ultra | 278 (92.7%, D82) | **290 (96.7%)**, 94.0–98.2% | +4.0 (+0.7 to +7.3), p = 0.03 | 0 of 303 |
+
+- **Lightning: better repairs.** Its first round did worse than in D70 (60 successes against 74, run-to-run variation), yet repair rescued 70% of first-round failures against 54% (Fisher p < 0.001). Rounds that repeated the previous round's failure fell from 151 to 70.
+- **Ultra: not shown.** Most of its +4.0 comes from first plans (244 successes against 227), which the change cannot cause; repair rescued 82% against 70% (p = 0.15).
+- **Cost.** 976 Lightning calls ($0.71) and 493 Ultra calls ($5.65), with no provider failures. The Lightning run was interrupted by a Windows Update restart after 322 tasks and resumed.
+
 **Development measurements on `dev` (week 4).** These ran after the freeze on the 100-task `dev` set (75 feasible), with Token Factory Lightning unless noted, each paired with a `main` run on the same tasks. They never change the D70 headline above.
 
 - **First prompt revision: not merged (D75).** Stating the lift and clearance numbers anchored repair waypoints too low. Config 3 (repair) fell from 50 to 42 of 75, −10.7 points (95% CI −26.7 to +4.0): an observed regression, not an established one, since the interval crosses zero. Verified first attempts (config 2) rose from 14 to 25.
 - **Transport collisions name the waypoints: kept (D74, D76).** A collision on the transport leg now names `transport_via` instead of `place`. With the frozen prompt, config 3 showed no harm and fewer exhausted repairs (13 against 18), but no established success gain: −2.7 points (−17.3 to +12.0), or +8.5 (−6.8 to +23.7) on the 59 tasks without a provider failure on either side. It ran on a slow provider day.
 - **A revised prompt on top of D74: open (D77).** Config 1 is complete, 29 of 75 against 34 (−6.7 points, −17.3 to +2.7); config 3 stopped at 47 of 100 tasks. It is to be revisited with a complete paired config 3 run.
-- **Richer collision evidence: merged after the evaluation (D80, D84).** A collision Finding also says which part hit what kind of body, and how far the part's bottom sits below the body's top. Two paired config 3 runs: 53 → 55 and 49 → 58 of 75; together +7.3 points (−2.0 to +17.3), not established. It was merged after the `test` runs, so the numbers above come from the code before it, and its effect on `test` is not measured.
+- **Richer collision evidence: merged after the evaluation (D80, D84).** A collision Finding also says which part hit what kind of body, and how far the part's bottom sits below the body's top. Two paired config 3 runs: 53 → 55 and 49 → 58 of 75; together +7.3 points (−2.0 to +17.3), not established. It was merged after the `test` runs, so the D70 and D82 numbers come from the code before it; its `test` effect is measured in D85, above.
 - **Earlier rounds as facts: dropped (D81).** 53 → 51 of 75, with more repeated failures.
 - **Nemotron 3 Ultra (D82).** Config 3: 66 of 75 against Lightning's 53 on the same tasks, +17.3 points (+5.3 to +29.3), with 1 exhausted repair against 13.
 
