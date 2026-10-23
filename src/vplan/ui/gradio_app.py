@@ -9,7 +9,11 @@ instead of running beside it (motion/trajectory.py reseeds numpy's global RNG; t
 offline, with no keys and no GPU.
 
 On-screen text uses plain words (W4.1); the theme (theme()) and markup.CSS give one restrained style, and the panels run
-in the story's order: task, plan, checks, execution, judge."""
+in the story's order: task, plan, checks, execution, judge.
+
+byok mode (UISettings.byok) is the Hugging Face Space: the Live tab offers the visitor's own OpenAI-compatible endpoint
+and API key beside the baseline, and the Replay tab lists only the runs bundled with the Space. The key arrives as an
+event input, becomes a planner for that one run (live.key_option) and is kept in no State, output, recording or log."""
 from __future__ import annotations
 
 import os
@@ -41,6 +45,9 @@ SOURCES = ("Basic scene", "Basic scene with wall", "Generated task")
 DEFAULT_SEED = 1  # seed 0 has no solvable generated task, so the default would open on an error
 BASIC_INFO = "Name one object in the scene, e.g. “Pick the green cube and place it in the bin.”"
 GENERATED_INFO = "A generated task comes with its own instruction. To type your own, choose a basic scene."
+BYOK_LABEL = "Your model (your API key)"  # the Space's second planner choice
+KEY_INFO = ("Used for this run only, never stored or logged. Calls are billed to your account. The model must support "
+            "forced tool calls (a tool_choice that names a function).")
 # System fonts only: the page loads nothing from the internet (Segoe UI on Windows, the platform UI font elsewhere)
 FONTS = ["Segoe UI", "system-ui", "-apple-system", "ui-sans-serif", "Roboto", "Helvetica Neue", "Arial", "sans-serif"]
 MONO = ["Cascadia Mono", "Consolas", "ui-monospace", "Menlo", "monospace"]
@@ -49,7 +56,10 @@ MONO = ["Cascadia Mono", "Consolas", "ui-monospace", "Menlo", "monospace"]
 @dataclass(frozen=True)
 class UISettings:
     """planners: the heuristic first, then an LLM planner when --env-file was given. replay: a path to open in the
-    Replay tab at start. record_dir: where live attempts are saved for keyless replay (None: not saved)."""
+    Replay tab at start. record_dir: where live attempts are saved for keyless replay (None: not saved).
+    byok: the Space (see the module docstring). Nothing is recorded and Cosmos is off there: a stranger's attempts are
+    not kept, and their key must reach no endpoint but the one they named. replay_runs: the runs it may replay, as
+    (label, run folder, seed-set folder)."""
     planners: tuple[live.PlannerOption, ...] = field(default_factory=lambda: (live.heuristic_option(),))
     cosmos_url: str | None = None
     replay: str | None = None
@@ -57,10 +67,18 @@ class UISettings:
     record_dir: str | None = "runs/ui"
     host: str = "127.0.0.1"
     port: int = 7860
+    byok: bool = False
+    replay_runs: tuple[tuple[str, str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.byok and (self.record_dir is not None or self.cosmos_url is not None):
+            raise ValueError("byok mode records nothing and has no Cosmos check: pass record_dir=None and no cosmos_url")
 
     def replay_roots(self) -> tuple[str, ...]:
         """Where the Replay tab may read (sources.check_path): the working directory and the paths the operator
-        named on the command line."""
+        named on the command line; in byok mode only the bundled runs and their seed sets."""
+        if self.byok:
+            return tuple(d for _, run_dir, seed_dir in self.replay_runs for d in (run_dir, seed_dir))
         return tuple(str(r) for r in (os.getcwd(), self.record_dir, self.replay, self.seed_dir) if r)
 
 
@@ -175,10 +193,29 @@ def unlock_controls() -> tuple:
     return tuple(gr.update(interactive=True) for _ in CONTROLS)
 
 
+def provider_change(provider: str) -> tuple:
+    """(endpoint URL update, model dropdown update) for a provider preset; only a custom provider takes a typed URL."""
+    url, models = live.PROVIDER_PRESETS[provider]
+    return (gr.update(value=url, interactive=not url),
+            gr.update(choices=list(models), value=models[0] if models else None))
+
+
+def show_key_form(planner_label: str) -> dict:
+    return gr.update(visible=planner_label == BYOK_LABEL)
+
+
 def run_attempt(settings: UISettings, state, source: str, seed, kind: str, instruction: str, planner_label: str,
-                k) -> Iterator[tuple]:
-    """Stream the panels while run_live works in a background thread; the last yield is the finished attempt."""
-    option = next((o for o in settings.planners if o.label == planner_label), None)
+                k, url: str = "", model: str = "", api_key: str = "") -> Iterator[tuple]:
+    """Stream the panels while run_live works in a background thread; the last yield is the finished attempt.
+    url, model and api_key are the Space's key form: with BYOK_LABEL chosen they build this run's planner."""
+    if settings.byok and planner_label == BYOK_LABEL:
+        try:
+            option = live.key_option(url, api_key, model, public=True)
+        except live.LiveError as exc:  # its message never holds the key
+            yield error_values(str(exc))
+            return
+    else:
+        option = next((o for o in settings.planners if o.label == planner_label), None)
     if option is None:
         yield error_values(f"unknown planner {planner_label!r}")
         return
@@ -260,6 +297,14 @@ def _shown_path(path: str) -> str:
         return str(Path(path).resolve().relative_to(Path.cwd().resolve())) or "."
     except (ValueError, OSError):
         return path
+
+
+def replay_target(settings: UISettings, value: str, seed_dir: str | None = None) -> tuple[str, str | None]:
+    """(run folder, seed-set folder) for what the Replay tab holds: the typed paths, or in byok mode the label of a
+    bundled run. A visitor never types a server path, and a label that names no bundled run names nothing."""
+    if settings.byok:
+        return next(((run_dir, seeds) for label, run_dir, seeds in settings.replay_runs if label == value), ("", None))
+    return value, seed_dir
 
 
 def replay_show(settings: UISettings, path: str, case_id: str | None, seed_dir: str | None = None) -> tuple:
@@ -348,7 +393,22 @@ def build_app(settings: UISettings) -> gr.Blocks:
                             kind = gr.Dropdown([(live.KIND_LABELS[key], key) for key in live.TASK_KINDS],
                                                value="feasible", label="Task type")
                         instruction = gr.Textbox(value=live.BASIC_INSTRUCTION, label="Instruction", info=BASIC_INFO)
-                        planner = gr.Radio(labels, value=labels[-1], label="Planner")
+                        planner = gr.Radio([*labels, BYOK_LABEL] if settings.byok else labels, value=labels[-1],
+                                           label="Planner")
+                        if settings.byok:
+                            first = next(iter(live.PROVIDER_PRESETS))
+                            first_url, first_models = live.PROVIDER_PRESETS[first]
+                            with gr.Group(visible=False) as key_form:
+                                provider = gr.Dropdown(list(live.PROVIDER_PRESETS), value=first, label="Provider")
+                                endpoint = gr.Textbox(value=first_url, label="Endpoint URL", max_lines=1,
+                                                      interactive=False)
+                                model = gr.Dropdown(list(first_models), value=first_models[0], allow_custom_value=True,
+                                                    label="Model")
+                                api_key = gr.Textbox(type="password", label="API key", max_lines=1, info=KEY_INFO)
+                            planner.change(show_key_form, [planner], [key_form], queue=False, show_progress="hidden",
+                                           api_visibility="private")
+                            provider.input(provider_change, [provider], [endpoint, model], queue=False,
+                                           show_progress="hidden", api_visibility="private")
                         k = gr.Slider(0, 3, value=3, step=1, label="Repair rounds (up to 3)",
                                       info="After a rejected plan, the planner sees which checks failed and tries "
                                            "again.")
@@ -394,17 +454,26 @@ def build_app(settings: UISettings) -> gr.Blocks:
                         yield shown(values)
 
                 # The status card says "Running" and the panels fill in as rounds finish, so no overlay on them
-                guard(run.click, run_live, [state, source, seed, kind, instruction, planner, k], panels,
-                      show_progress="minimal")
+                run_inputs = [state, source, seed, kind, instruction, planner, k]
+                if settings.byok:
+                    run_inputs += [endpoint, model, api_key]  # event inputs, never State: nothing keeps the key
+                guard(run.click, run_live, run_inputs, panels, show_progress="minimal")
             with gr.Tab("Replay", id="replay"):
                 gr.HTML(markup.step_html(None, "Recorded attempt",
                                          "replay a saved run with no API key, no GPU and no network"))
                 with gr.Row(equal_height=False, elem_classes=["vp-align-end"]):
-                    path = gr.Textbox(value=settings.replay or settings.record_dir or "",
-                                      label="Run folder or recording", scale=3, max_lines=1,
-                                      info="An evaluation run, a pilot run, or saved live attempts (runs/ui).")
-                    seed_dir = gr.Textbox(value=settings.seed_dir or "", label="Seed-set folder (optional)", scale=2,
-                                          max_lines=1, info="Only for an evaluation run whose seed set has moved.")
+                    if settings.byok:
+                        run_labels = [label for label, _, _ in settings.replay_runs]
+                        path = gr.Dropdown(run_labels, value=run_labels[0] if run_labels else None,
+                                           label="Recorded run", scale=5,
+                                           info="A selection of attempts from the evaluation runs.")
+                    else:
+                        path = gr.Textbox(value=settings.replay or settings.record_dir or "",
+                                          label="Run folder or recording", scale=3, max_lines=1,
+                                          info="An evaluation run, a pilot run, or saved live attempts (runs/ui).")
+                        seed_dir = gr.Textbox(value=settings.seed_dir or "", label="Seed-set folder (optional)",
+                                              scale=2, max_lines=1,
+                                              info="Only for an evaluation run whose seed set has moved.")
                     open_ = gr.Button("Open", scale=1, min_width=140)
                 with gr.Row(equal_height=False, elem_classes=["vp-align-end"]):
                     case = gr.Dropdown(choices=[], label="Attempt", allow_custom_value=False, scale=5)
@@ -413,15 +482,17 @@ def build_app(settings: UISettings) -> gr.Blocks:
                 replay_panels = _panels("replay")
 
                 def open_replay(value):
-                    return replay_open(settings, value)
+                    return replay_open(settings, replay_target(settings, value)[0])
 
-                def show_replay(*args):
-                    return shown(replay_show(settings, *args))
+                def show_replay(value, case_id, seeds=None):
+                    run_dir, seed_path = replay_target(settings, value, seeds)
+                    return shown(replay_show(settings, run_dir, case_id, seed_path))
 
                 open_.click(open_replay, [path], [case, replay_info])
-                show.click(show_replay, [path, case, seed_dir], replay_panels.outputs(), concurrency_id=SIM,
-                           concurrency_limit=1, show_progress_on=[replay_panels.timeline])
-                if settings.replay:
+                show.click(show_replay, [path, case] if settings.byok else [path, case, seed_dir],
+                           replay_panels.outputs(), concurrency_id=SIM, concurrency_limit=1,
+                           show_progress_on=[replay_panels.timeline])
+                if settings.replay or settings.byok:
                     demo.load(open_replay, [path], [case, replay_info])
     return demo
 

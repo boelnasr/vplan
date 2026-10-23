@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.ui_fixtures import JARGON, SECRET, basic_result, visible
+from tests.ui_fixtures import JARGON, SECRET, basic_result, basic_task, visible, write_eval_run
 from vplan import cli
 from vplan.evaluate import pilot
 from vplan.ui import gradio_app as app, live
@@ -456,3 +456,181 @@ def test_the_replay_path_is_shown_relative_to_the_working_directory(tmp_path, mo
 
 def test_the_footer_has_no_leading_divider():
     assert "footer > .divider:first-child{display:none}" in app.markup.CSS
+
+
+# ---- the Hugging Face Space: bring your own key (byok) ---------------------------------------------------------------
+
+ENDPOINT = "https://api.example.com/v1"
+
+
+@pytest.fixture
+def space(tmp_path):
+    """Space settings with one bundled evaluation run (a real one-attempt run and its seed set)."""
+    result, _ = basic_result()
+    run, seeds = write_eval_run(tmp_path, basic_task(), result.record)
+    return app.UISettings(byok=True, record_dir=None, replay_runs=(("Bundled run", str(run), str(seeds)),))
+
+
+def _components(settings):
+    config = app.build_app(settings).get_config_file()
+    return config, [c for c in config["components"]]
+
+
+def _labelled(components, label, kind=None):
+    return next(c for c in components if c.get("props", {}).get("label") == label
+                and (kind is None or c["type"] == kind))
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"record_dir": "runs/ui"},
+                                    {"record_dir": None, "cosmos_url": "http://127.0.0.1:8000/v1"}])
+def test_the_space_settings_refuse_recording_and_cosmos(kwargs):
+    """Strangers' attempts are not kept, and the visitor's key must not reach a Cosmos endpoint: both stay off."""
+    with pytest.raises(ValueError, match="byok"):
+        app.UISettings(byok=True, **kwargs)  # no kwargs: record_dir keeps its default, "runs/ui"
+    assert app.UISettings(byok=True, record_dir=None).byok is True
+    assert app.UISettings().byok is False and app.UISettings().replay_runs == ()
+
+
+def test_the_space_replay_roots_are_only_the_bundled_runs_and_seed_sets(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    settings = app.UISettings(byok=True, record_dir=None, replay="elsewhere", seed_dir="elsewhere",
+                              replay_runs=(("A", "data/runs/a", "data/seeds/x"), ("B", "data/runs/b", "data/seeds/x")))
+    assert settings.replay_roots() == ("data/runs/a", "data/seeds/x", "data/runs/b", "data/seeds/x")
+    assert str(tmp_path) not in settings.replay_roots()  # the working directory is not a root there
+
+
+def test_the_space_page_has_a_key_box_a_provider_form_and_no_server_paths(space):
+    config, components = _components(space)
+    key = _labelled(components, "API key", "textbox")
+    assert key["props"]["type"] == "password" and key["props"].get("value") in (None, "")
+    assert "never stored or logged" in key["props"]["info"] and "billed to your account" in key["props"]["info"]
+    assert "tool_choice" in key["props"]["info"] and key["props"]["max_lines"] == 1
+    assert [c["props"]["label"] for c in components if c["type"] == "textbox"
+            and c["props"].get("type") == "password"] == ["API key"]
+    provider = _labelled(components, "Provider", "dropdown")
+    assert [c[0] for c in provider["props"]["choices"]] == list(live.PROVIDER_PRESETS)
+    assert provider["props"]["value"] == "Nebius Token Factory"
+    endpoint = _labelled(components, "Endpoint URL", "textbox")
+    assert endpoint["props"]["value"] == live.PROVIDER_PRESETS["Nebius Token Factory"][0]
+    assert endpoint["props"]["interactive"] is False  # only a custom provider takes a typed URL
+    model = _labelled(components, "Model", "dropdown")
+    assert model["props"]["allow_custom_value"] is True and model["props"]["value"] == "nvidia/Nemotron-3_5-Lightning"
+    planner = _labelled(components, "Planner", "radio")
+    assert [c[0] for c in planner["props"]["choices"]] == [live.heuristic_option().label, app.BYOK_LABEL]
+    assert planner["props"]["value"] == live.heuristic_option().label  # runs at once, no key needed
+    labels = {c.get("props", {}).get("label") for c in components}
+    assert not labels & {"Run folder or recording", "Seed-set folder (optional)"}
+    runs = _labelled(components, "Recorded run", "dropdown")
+    assert [c[0] for c in runs["props"]["choices"]] == ["Bundled run"] and runs["props"]["value"] == "Bundled run"
+    assert SECRET not in str(config)
+
+
+def test_the_normal_page_has_no_key_form():
+    components = _components(app.UISettings())[1]
+    labels = {c.get("props", {}).get("label") for c in components}
+    assert not labels & {"API key", "Provider", "Endpoint URL", "Model", "Recorded run"}
+    assert not [c for c in components if c.get("props", {}).get("type") == "password"]
+    assert {"Run folder or recording", "Seed-set folder (optional)"} <= labels
+
+
+def test_the_space_page_carries_no_internal_terms(space):
+    texts = []
+    for c in _components(space)[1]:
+        props = c.get("props", {})
+        texts += [str(props[key]) for key in ("label", "info", "placeholder") if props.get(key)]
+        texts += [str(choice[0]) for choice in props.get("choices") or []]
+    found = [t for t in texts if JARGON.search(t)]
+    assert not found, found
+
+
+def test_the_key_reaches_only_the_run_handler_and_is_never_an_output(space):
+    config, components = _components(space)
+    key = _labelled(components, "API key")["id"]
+    deps = config["dependencies"]
+    (run,) = [d for d in deps if d["api_name"] == "run_live"]
+    ids = [_labelled(components, label)["id"] for label in ("Endpoint URL", "Model", "API key")]
+    assert run["inputs"][-3:] == ids and run["inputs"].count(key) == 1
+    assert [d["api_name"] for d in deps if key in d["inputs"]] == ["run_live"]
+    assert not [d["api_name"] for d in deps if key in d["outputs"]]
+    states = {c["id"] for c in components if c["type"] == "state"}
+    assert key not in states and not set(run["inputs"][-3:]) & states
+
+
+def test_choosing_a_provider_fills_the_endpoint_and_the_model_choices():
+    url, model = app.provider_change("OpenRouter")
+    assert (url["value"], url["interactive"]) == ("https://openrouter.ai/api/v1", False)
+    assert model["choices"] == list(live.PROVIDER_PRESETS["OpenRouter"][1])
+    assert model["value"] == "nvidia/nemotron-3.5-lightning:free"
+    url, model = app.provider_change("Custom (OpenAI-compatible)")
+    assert (url["value"], url["interactive"]) == ("", True) and model["choices"] == [] and model["value"] is None
+
+
+def test_the_key_form_shows_only_for_the_visitors_own_model():
+    assert app.show_key_form(app.BYOK_LABEL)["visible"] is True
+    assert app.show_key_form(live.heuristic_option().label)["visible"] is False
+
+
+def _byok_steps(settings, monkeypatch, option, **given):
+    seen = []
+
+    def key_option(*args, **kwargs):
+        seen.append((args, kwargs))
+        return option
+
+    monkeypatch.setattr(live, "key_option", key_option)
+    state = app.load_task(app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION)[3]
+    args = {"url": ENDPOINT, "model": "some/model", "api_key": SECRET, **given}
+    steps = list(app.run_attempt(settings, state, app.SOURCES[1], 0, "feasible", live.BASIC_INSTRUCTION,
+                                 app.BYOK_LABEL, 3, **args))
+    return steps, seen
+
+
+def test_a_space_run_builds_the_planner_from_the_visitors_input_and_shows_no_key(space, monkeypatch):
+    planner = live.heuristic_option().planner  # stands in for the model; the key is only the option's secret
+    option = live.PlannerOption("Your key: some/model via api.example.com", planner, llm=True, secret=SECRET)
+    steps, seen = _byok_steps(space, monkeypatch, option)
+    assert seen == [((ENDPOINT, SECRET, "some/model"), {"public": True})]  # built for this run, public checks on
+    final = dict(zip(app.display.Display.FIELDS, steps[-1]))
+    assert "Success" in final["judge_html"] and "Your key: some/model via api.example.com" in final["status_html"]
+    assert SECRET not in repr(steps) and SECRET not in repr(space)
+
+
+def test_a_failure_inside_a_space_run_is_shown_without_the_key(space, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError(f"transport failed with Authorization: Bearer {SECRET}")
+
+    monkeypatch.setattr(live, "run_live", boom)
+    option = live.PlannerOption("Your key: some/model via api.example.com", object(), llm=True, secret=SECRET)
+    steps, _ = _byok_steps(space, monkeypatch, option)
+    assert "the attempt stopped: RuntimeError" in steps[-1][0] and SECRET not in repr(steps)
+
+
+@pytest.mark.parametrize("given, message", [({"api_key": ""}, "Enter your API key"), ({"model": " "}, "model ID"),
+                                            ({"url": "http://api.example.com/v1"}, "https URL")])
+def test_a_refused_space_endpoint_is_reported_in_the_banner(space, given, message):
+    args = {"url": ENDPOINT, "model": "some/model", "api_key": SECRET, **given}
+    (values,) = app.run_attempt(space, None, app.SOURCES[0], 0, "feasible", live.BASIC_INSTRUCTION, app.BYOK_LABEL,
+                                1, **args)
+    assert message in values[0] and SECRET not in repr(values)
+
+
+def test_the_own_model_choice_exists_only_on_the_space():
+    settings = app.UISettings(record_dir=None)
+    (values,) = app.run_attempt(settings, None, app.SOURCES[0], 0, "feasible", live.BASIC_INSTRUCTION, app.BYOK_LABEL,
+                                1, ENDPOINT, "some/model", SECRET)
+    assert "unknown planner" in values[0] and SECRET not in repr(values)
+
+
+def test_space_replay_names_bundled_runs_by_label_and_nothing_else(space, tmp_path):
+    (label, run_dir, seeds), = space.replay_runs
+    assert app.replay_target(space, label) == (run_dir, seeds)
+    assert app.replay_target(space, "/etc") == ("", None) and app.replay_target(space, run_dir) == ("", None)
+    assert app.replay_target(app.UISettings(), "runs/x", "seeds") == ("runs/x", "seeds")  # typed paths: as before
+    case, info = app.replay_open(space, run_dir)
+    assert case["value"] == "5:dev:0" and "1 recorded attempt" in visible(info)
+    values = app.replay_show(space, run_dir, case["value"], seeds)
+    assert "Success" in dict(zip(app.display.Display.FIELDS, values))["judge_html"]
+    outside = write_eval_run(tmp_path / "outside", basic_task(), basic_result()[0].record)
+    assert "outside" in app.replay_open(space, str(outside[0]))[1]  # not a bundled run: refused by the roots
+    assert "outside" in app.replay_show(space, str(outside[0]), None, str(outside[1]))[0]
+    assert "outside" in app.replay_show(space, "", None, None)[0]  # what an unknown label becomes
