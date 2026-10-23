@@ -453,6 +453,7 @@ def test_the_key_planner_never_follows_a_redirect_and_sends_the_key_only_to_the_
     http = planner._client._client
     assert http.follow_redirects is False
     http._transport = httpx2.MockTransport(handler)
+    http._mounts = {}  # a proxy from the environment (HTTPS_PROXY) would be mounted over the transport
     call = planner.plan(task)
     assert [r.url.host for r in seen] == ["api.example.com"] and call.outcome == "service_failure"
     assert seen[0].headers["authorization"] == f"Bearer {SECRET}"

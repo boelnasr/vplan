@@ -20,7 +20,13 @@ are needed for these steps.
    "publicly visible on YouTube", so not unlisted. Add `captions.srt` from the release as English subtitles, and
    `youtube-thumbnail.png` (1920×1080) as the custom thumbnail.
 2. **Put the link in the README. Done (Oct 23):** "Demo video" links to the YouTube URL.
-3. **Fill in Devpost.**
+3. **Publish the Hugging Face Space (optional, D87).** It needs the Python setup from the README and the release zips:
+   unzip `vplan-runs-lightning-test-d70.zip` and `vplan-runs-a1-test-d85.zip` at the repo root, then run
+   `python scripts/space/build_space.py --out <new folder>` and upload the folder to a Gradio Space (for example
+   `hf upload <user>/vplan <folder> . --repo-type space`). CPU Basic hardware is enough. Check both tabs on the Space:
+   a rule-based run, a run with your own key, and a replay. If it is live, add its link to the Devpost "Try it out"
+   links and the README.
+4. **Fill in Devpost.**
    - Project name: **vplan: LLMs plan, physics verifies**.
    - Elevator pitch (179 of 200 characters): "NVIDIA Nemotron plans robot pick-and-place; physics checks every plan
      before anything moves and sends failures back for repair. 65% success vs 43% unverified, 0 unsafe executions."
@@ -35,7 +41,7 @@ are needed for these steps.
      OpenAI Python SDK, Nebius Token Factory, NVIDIA Nemotron, Nemotron 3.5 Lightning, Nemotron 3 Ultra, NVIDIA Cosmos,
      Cosmos3-Edge, vLLM, CUDA, Docker, Playwright, Node.js, FFmpeg, URDF, HTML, GitHub.
    - Image gallery: the eight images in [`media/`](media/README.md), in order, with the captions listed there.
-4. **Check before submitting** (the [hackathon rules](https://nebiusglobalaihackathon.devpost.com/rules)):
+5. **Check before submitting** (the [hackathon rules](https://nebiusglobalaihackathon.devpost.com/rules)):
    - the repo is public and has `LICENSE` and a README with setup instructions;
    - the video is under 3 minutes (2:57) and over 1 minute shows the modules in action (2:03);
    - Nemotron runs on Nebius Token Factory (D70, D82, D85), and at least one NVIDIA open model is used;

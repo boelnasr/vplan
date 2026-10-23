@@ -2235,3 +2235,20 @@ Both new files use only numbers recorded in this log and in `docs/results/`.
 - Run records, reports and release zips keep their original IDs; they are evaluation records and are not edited. Their `source_digest` still identifies the source.
 - Old commits may stay reachable on GitHub by their full ID until GitHub garbage-collects them; the files were never secret.
 - Local branches (`w4/*`, `codex/*`) and the Codex worktrees still carry the old history; they are not published.
+
+## D87. A public Hugging Face Space with bring-your-own-key planning (2026-10-23)
+
+**Ruling (owner, Oct 23):** publish the Gradio UI as a Hugging Face Space, so judges can try vplan in a browser without setting up Python. The Space must cost the owner nothing per visitor and keep no visitor data.
+
+**What it adds:**
+- `UISettings.byok` (`ui/gradio_app.py`). The Live tab offers *Your model (your API key)* beside the rule-based baseline: a provider preset (Token Factory, OpenRouter, or a custom OpenAI-compatible endpoint), a model ID and a password box. The Replay tab lists bundled runs by label instead of taking a typed path, and `replay_roots` admits only those folders. byok refuses a `record_dir` or a Cosmos URL.
+- `live.key_option`. The key is an event input, never a `State`: it builds the planner for that one run and is dropped when the run ends; it is in no output, recording or log, and error messages never hold it. With `public=True` the endpoint must be `https` with a host name whose every resolved address is globally routable (no loopback, private, link-local or `169.254.169.254`), and redirects are never followed. DNS rebinding between the check and the connection is not caught; that needs a transport pinned to the checked address, which this does not add.
+- `scripts/space/`: the Space's `app.py`, `requirements.txt` (the `pyproject.toml` pins; Gradio comes from `sdk_version`) and `README.md` (the Space card), and `build_space.py`, which assembles the upload folder: `src/vplan` and `config/` in the repository's layout, `LICENSE`, the whole `test` seed set (so its hash checks) and a deterministic selection of attempts from the D70 Lightning and D85 Ultra config 3 runs. The full runs are 280 MB and 368 MB; the selection keeps the video's `3:test:1` and `3:test:3` and one attempt per category (repairs in 2 and 3 rounds, a first-round success, a correct refusal of each impossible type, an exhausted budget, a Judge failure), preferring scenes with obstacles.
+- `app.py` defines one never-called `@spaces.GPU` function, because a ZeroGPU Space will not start without one; the app needs no GPU.
+
+**Consequences:**
+- Visitors pay their own provider. A run makes at most four planner calls with the 60 s deadline (D63); the model must support forced tool calls.
+- One simulation runs at a time (the `SIM` concurrency group); a second visitor is told the simulator is busy.
+- Nothing here changes the evaluation, the planner, the prompt or any check; the Space's source differs from D70's frozen source as `main` does (D84).
+- The local `python -m vplan ui` is unchanged: byok is off unless `app.py` turns it on.
+- One test (`test_the_key_planner_never_follows_a_redirect…`) clears the client's proxy mounts, since an `HTTPS_PROXY` in the environment would otherwise route around its mock transport.

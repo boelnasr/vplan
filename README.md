@@ -132,6 +132,7 @@ cp .env.example .env   # only for Nemotron: LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
 - On Windows, `pip` may build pybullet from source, which needs the MSVC build tools.
 - **Linux container:** `docker/run-local.sh` builds the locked image and runs the test suite and 10 tasks inside it, with no network and no env file (R8).
 - **Demo video:** the recorder (Node, Playwright and ffmpeg; not Python dependencies) has its own setup in [`scripts/video/README.md`](scripts/video/README.md).
+- **Hugging Face Space:** `python scripts/space/build_space.py --out <new folder>` assembles the Space (the UI in bring-your-own-key mode and a selection of the D70 and D85 attempts for keyless replay) from the runs under `runs/` (D87). Its card is [`scripts/space/README.md`](scripts/space/README.md).
 
 ## ManipulaPy updates during the submission period
 
@@ -323,6 +324,7 @@ These are fixed before any final run (spec §14). `metrics.json` reports each of
 | `src/vplan/sim/` | PyBullet scene building and self-collision exclusions |
 | `src/vplan/evaluate/` | Seed sets, the supervised evaluation runner, the feedback pilot, statistics, metrics and the HTML report |
 | `docker/` | The locked Linux image and the R8 local check |
+| `scripts/space/` | The Hugging Face Space: its entry point, card and the build script ([README](scripts/space/README.md), D87) |
 | `scripts/video/` | The scripted demo-video recorder ([README](scripts/video/README.md), [storyboard](scripts/video/storyboard.md)) |
 | `config/` | Verifier, judge and physics thresholds (JSON) |
 | `docs/` | [Spec](docs/spec.md), [decisions](docs/decisions.md), [results](docs/results/report.html), [diagrams](docs/diagrams/), [submission texts](docs/submission/), [related work](docs/related-work.md), [history rewrite map](docs/history-rewrite.md) |
